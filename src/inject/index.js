@@ -103,6 +103,21 @@ function urlOf(input) {
   return input?.url || String(input?.href || '');
 }
 
+/**
+ * URL absoluta de la petición.
+ *
+ * Una aplicación web puede pedir `fetch('/backend-api/conversation')`. El
+ * proceso principal necesita el host para decidir si media y para anotar el
+ * origen en el registro; la página sí lo conoce (`location.href`).
+ */
+function absoluteUrl(url) {
+  try {
+    return new URL(String(url || ''), location.href).href;
+  } catch {
+    return String(url || '');
+  }
+}
+
 function methodOf(input, init) {
   return String(init?.method || input?.method || 'GET');
 }
@@ -120,7 +135,7 @@ function methodOf(input, init) {
  * original, y un fallo de la RED no puede provocar un segundo envío del mensaje.
  */
 async function planRequest(input, init) {
-  const url = urlOf(input);
+  const url = absoluteUrl(urlOf(input));
   if (!shouldMediate(url, methodOf(input, init))) return null;
 
   // El cuerpo viaja como string en `init`, o dentro de un objeto `Request`.

@@ -6,7 +6,7 @@
  */
 
 import { ConversationGuard } from '../core/guard.js';
-import { detectSite, isAuthRequest } from '../core/sites.js';
+import { detectSite, isAuthRequest, isProfileId } from '../core/sites.js';
 import { isAiHost } from '../core/cdp.js';
 import { settingsForHost } from '../core/settings.js';
 import { StreamSentinel } from '../core/streamSentinel.js';
@@ -87,12 +87,18 @@ export class Engine {
    * texto que debe viajar al modelo.
    */
   prepare(webContentsId, { prompt, url, site }) {
-    const host = safeHost(url) || site || 'desconocido';
+    // La URL de una petición puede llegar relativa (`/backend-api/conversation`),
+    // que es lo normal en una aplicación web. En ese caso la procedencia la dice
+    // el identificador de sitio que informa la capa; sin ninguno de los dos, no
+    // se media: adivinar el host es cómo se terminan reescribiendo cuerpos ajenos.
+    const host = safeHost(url) || (isProfileId(site) ? String(site) : 'desconocido');
     if (!this.isEnabledFor(host)) return { text: prompt, skipped: 'disabled' };
     // Defensa en profundidad: aunque una página pida mediación, no se prepara
     // un texto que venga de un host sin perfil ni de una ruta de acceso. Ese
     // texto puede ser una contraseña, y acá se guarda en la memoria del motor.
-    if (!isAiHost(host) || isAuthRequest(url)) return { text: prompt, skipped: 'fuera-de-alcance' };
+    if (!(isAiHost(host) || isProfileId(host)) || isAuthRequest(url)) {
+      return { text: prompt, skipped: 'fuera-de-alcance' };
+    }
 
     const guard = this.#guard(webContentsId, host);
     // Se refrescan los ajustes por si el usuario los cambió en vivo.

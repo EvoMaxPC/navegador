@@ -461,7 +461,24 @@ function registerIpc() {
       event.returnValue = null;
     }
   });
-  ipcMain.handle('nexo:prepare', (event, payload) => engine.prepare(event.sender.id, payload));
+  ipcMain.handle('nexo:prepare', (event, payload) => {
+    const result = engine.prepare(event.sender.id, payload);
+    // La capa de la página sólo pide mediación cuando ya reconoció una petición
+    // de chat. Si el motor la descarta, es un dato: significa que el sitio no se
+    // está mediando. Antes, ese silencio se veía como «0 turnos» y nada más.
+    if (result?.skipped === 'fuera-de-alcance') {
+      const host = hostOf(String(payload?.url || '')) || String(payload?.site || 'sitio');
+      noteDiagnostic({
+        code: 'prepare-skipped',
+        severity: 'info',
+        key: `prepare-skipped|${host}`,
+        title: `Mediación no aplicada en ${host}`,
+        detail: `La petición ${String(payload?.url || '').slice(0, 160)} llegó como chat pero el motor no la medió.`,
+        meta: { host, url: String(payload?.url || '').slice(0, 300), site: payload?.site || null },
+      });
+    }
+    return result;
+  });
   ipcMain.handle('nexo:stream-end', (event, payload) => engine.onStreamEnd(event.sender.id, payload));
   ipcMain.handle('nexo:stream-stop', (event, payload) => engine.onStreamStop(event.sender.id, payload));
 
@@ -862,7 +879,9 @@ function configureSession() {
     const host = hostOf(webContents?.getURL() || '') || hostOf(details?.requestingUrl || '');
     const decision = profile ? profile.permissions.decide(host, permission) : 'deny';
     const granted = decision === 'allow';
-    if (!granted && profile) {
+    // Sin host no hay nada que el usuario pueda habilitar en el panel: avisar
+    // «no concedido a sitio desconocido» sólo llena el registro de ruido.
+    if (!granted && profile && host) {
       const entry = {
         kind: 'system',
         code: 'permission-denied',

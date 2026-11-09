@@ -165,6 +165,18 @@ const GENERIC = {
   accent: '#64748b',
 };
 
+/**
+ * ¿El valor es el identificador de un perfil (`chatgpt`, `claude`…)?
+ *
+ * La capa de la página informa el sitio al pedir la mediación; cuando la URL de
+ * la petición llega relativa —lo habitual en una aplicación web— ese
+ * identificador es el único dato de procedencia que queda.
+ */
+export function isProfileId(value) {
+  const clean = String(value || '');
+  return SITES.some((site) => site.id === clean);
+}
+
 /** Encuentra el perfil del sitio para un host. */
 export function detectSite(host = '') {
   const clean = String(host).toLowerCase().replace(/^www\./, '').split(':')[0];

@@ -422,3 +422,53 @@ test('el motor no prepara texto fuera de un proveedor ni en un flujo de acceso',
   assert.equal(dentro.skipped, undefined, 'un chat de un proveedor sí se media');
   assert.equal(typeof dentro.text, 'string');
 });
+
+test('una conversación mediada cuenta el turno aunque la URL llegue relativa', async () => {
+  const antes = (await callIpc('nexo:stats')).turns;
+
+  // `fetch('/backend-api/conversation')` es lo normal en una aplicación web: el
+  // host no viene en la URL, viene en el identificador de sitio de la capa.
+  const prep = await callIpc(
+    'nexo:prepare',
+    { prompt: 'hola, ¿me ayudás?', url: '/backend-api/conversation', site: 'chatgpt' },
+    77,
+  );
+  assert.equal(prep.skipped, undefined, 'se media igual que con la URL absoluta');
+  assert.ok(prep.text, 'el motor devolvió el texto a enviar');
+
+  const despues = (await callIpc('nexo:stats')).turns;
+  assert.equal(despues, antes + 1, 'el turno se cuenta al preparar el envío');
+});
+
+test('un cierre de turno deja la conversación registrada', async () => {
+  const resultado = await callIpc(
+    'nexo:stream-end',
+    {
+      site: 'chatgpt',
+      host: 'chatgpt.com',
+      text: 'Una respuesta completa del asistente que no se repite en ningún momento.',
+      stopped: false,
+      deliveredChars: 72,
+    },
+    77,
+  );
+  assert.equal(resultado.nextAction, null, 'sin corte no hay continuación automática');
+  const stats = await callIpc('nexo:stats');
+  assert.ok(stats.tabs >= 1, 'la pestaña conserva su conversación');
+});
+
+test('si el motor descarta una petición de chat, queda anotado', async () => {
+  // Una URL de un host sin perfil que la página consideró chat: el motor no la
+  // media y ahora lo dice, en lugar de dejar el contador en cero sin explicación.
+  const result = await callIpc(
+    'nexo:prepare',
+    { prompt: 'hola', url: 'https://ejemplo.com/api/chat', site: 'generic' },
+    88,
+  );
+  assert.equal(result.skipped, 'fuera-de-alcance');
+
+  const log = await callIpc('nexo:log');
+  const entrada = log.find((entry) => entry.code === 'prepare-skipped');
+  assert.ok(entrada, 'el descarte deja rastro en el registro');
+  assert.match(entrada.title, /ejemplo\.com/);
+});
