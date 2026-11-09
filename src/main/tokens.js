@@ -12,5 +12,5 @@ export function countTokensForProvider(text, model = '', provider = '') {
 /** Diagnóstico temporal: mostrar palabras recibidas para comprobar el flujo de captura. */
 export function countOutputTokens(text) {
   if (typeof text !== 'string' || !text.trim()) return 0;
-  return (text.match(/[\\p{L}\\p{N}_]+/gu) || []).length;
+  return (text.match(/[\p{L}\p{N}_]+/gu) || []).length;
 }
