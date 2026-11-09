@@ -928,7 +928,7 @@ export class CdpObserver {
     this.stats.captures += 1;
     if (!this.engine || typeof this.engine.onCdpCapture !== 'function') return;
     try {
-      const result = this.engine.onCdpCapture(state.id, capture);
+      const result = this.engine.onCdpCapture(state.id, { ...capture, documentUrl: state.contents?.getURL?.() || '' });
       if (result?.duplicate) this.stats.duplicates += 1;
       this.onEvent(state.id, {
         type: 'capture',

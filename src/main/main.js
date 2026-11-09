@@ -520,6 +520,7 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle('nexo:stream-end', (event, payload) => {
+    payload = { ...payload, documentUrl: event.sender?.getURL?.() || '' };
     // Texto tardío del mismo turno: reutilizar la absorción/deduplicación que
     // ya atiende CDP, sin volver a finalizar la memoria del guardián.
     const result = payload?.source === 'dom-recovery' && payload?.site === 'chatgpt'

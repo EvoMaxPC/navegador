@@ -9,7 +9,8 @@ import { CdpCapture } from '../src/core/cdp.js';
 import { detectSite } from '../src/core/sites.js';
 import { createStreamFilter } from '../src/core/streamFilter.js';
 import { countGptTokens, countOutputTokens } from '../src/main/tokens.js';
-import { estimateOutputTokens } from '../src/core/text.js';
+import { Engine } from '../src/main/engine.js';
+import { EvoMemory } from '../src/memory/engine.js';
 
 process.env.NEXO_NETRESP_MS = '50';
 register('./harness/loader.mjs', import.meta.url);
@@ -175,14 +176,14 @@ for (const [name, expected, options] of [
   ['logged-out-reply.ndjson', anonymous, { mime: 'application/x-ndjson', chunkSize: 1 }],
   ['logged-out-reply.ndjson', anonymous, { mime: 'text/plain', chunkSize: 1 }],
 ]) {
-  test(`grabación ${name} (${options.mime || 'SSE'}): inyección → preload → estimación → principal → campo de salida`, async () => {
+  test(`grabación ${name} (${options.mime || 'SSE'}): inyección → preload → conteo de palabras → principal → campo de salida`, async () => {
     const view = await openTab();
     const before = await stats();
     const body = fixture(name);
     const wire = await replayPrimary(view, body, options);
     const after = await stats();
     assert.equal(after.responses, before.responses + 1);
-    assert.equal(after.outputTokens, before.outputTokens + estimateOutputTokens(expected));
+    assert.equal(after.outputTokens, before.outputTokens + countOutputTokens(expected));
     assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'), 'sin refresco manual');
     assert.equal(after.inputTokens, before.inputTokens + countGptTokens('Test'));
     if (options.mime) assert.equal(wire, body, 'NDJSON conserva sus bytes, incluidos Unicode y saltos');
@@ -207,7 +208,7 @@ test('CDP recupera NDJSON grabado después del cierre de red y notifica el campo
   const count = journal.windows[0].webContents.sent.filter((event) => event.channel === 'nexo:stats-changed').length;
   await replayCdp(view, fixture('logged-out-reply.ndjson'), 'application/x-ndjson', 'Other');
   const after = await stats();
-  assert.equal(after.outputTokens, before.outputTokens + estimateOutputTokens(anonymous));
+  assert.equal(after.outputTokens, before.outputTokens + countOutputTokens(anonymous));
   assert.equal(after.responses, before.responses);
   assert.equal(after.inputTokens, before.inputTokens);
   assert.equal(after.messages, before.messages);
@@ -229,7 +230,7 @@ for (const name of ['aborted.sse', 'logged-out-stopped.ndjson']) {
     const before = await stats();
     await replayPrimary(view, body, { abort: true, mime: ndjson ? 'application/x-ndjson' : 'text/event-stream' });
     const after = await stats();
-    assert.equal(after.outputTokens, before.outputTokens + estimateOutputTokens(captured.text));
+    assert.equal(after.outputTokens, before.outputTokens + countOutputTokens(captured.text));
     assert.equal(after.responses, before.responses + 1);
     assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
     const log = journal.ipcHandlers.get('nexo:log')({ sender: { id: 1 } });
@@ -247,7 +248,7 @@ test('SSE sin respuesta no convierte tokens de reanudación ni estados en texto'
   assert.equal(after.responses, before.responses + 1);
 });
 
-test('salida estima texto real sin invocar BPE ni alterar la entrada', async () => {
+test('salida estima texto real cuenta palabras sin invocar BPE ni alterar la entrada', async () => {
   const require = createRequire(import.meta.url);
   const Module = require('node:module');
   const load = Module._load;
@@ -263,7 +264,7 @@ test('salida estima texto real sin invocar BPE ni alterar la entrada', async () 
   } finally { Module._load = load; }
   await pause();
   const after = await stats();
-  assert.equal(after.outputTokens, before.outputTokens + estimateOutputTokens(text));
+  assert.equal(after.outputTokens, before.outputTokens + countOutputTokens(text));
   assert.equal(after.responses, before.responses + 1);
   assert.equal(after.inputTokens, before.inputTokens);
   assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
@@ -271,9 +272,9 @@ test('salida estima texto real sin invocar BPE ni alterar la entrada', async () 
   assert.ok(!log.some((entry) => entry.code === 'output-tokenizer-fallback'), 'estimar es la ruta normal, no un fallo');
 });
 
-test('estimación de salida no depende del modelo y no inventa tokens sin texto', () => {
+test('conteo de palabras de salida no depende del modelo y no inventa tokens sin texto', () => {
   for (const model of ['gpt-6', 'gpt-4-turbo', '']) {
-    assert.equal(countOutputTokens(normal, model, 'chatgpt'), estimateOutputTokens(normal));
+    assert.equal(countOutputTokens(normal, model, 'chatgpt'), countOutputTokens(normal));
   }
   for (const text of ['', '  \n', null, undefined, 42]) assert.equal(countOutputTokens(text), 0);
 });
@@ -295,7 +296,7 @@ test('tres respuestas grabadas consecutivas suman tokens separados, aun con el m
     await replayPrimary(view, fixture('normal-reply.sse'));
     const after = await stats();
     assert.equal(after.responses, before.responses + i);
-    assert.equal(after.outputTokens, before.outputTokens + estimateOutputTokens(normal) * i);
+    assert.equal(after.outputTokens, before.outputTokens + countOutputTokens(normal) * i);
     assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
   }
 });
@@ -307,7 +308,7 @@ test('la misma grabación por CDP primero y por inyección después cuenta una s
   await replayPrimary(view, body, { beforeResponse: async () => { await pause(); await replayCdp(view, body); } });
   const after = await stats();
   assert.equal(after.responses, before.responses + 1);
-  assert.equal(after.outputTokens, before.outputTokens + estimateOutputTokens(normal));
+  assert.equal(after.outputTokens, before.outputTokens + countOutputTokens(normal));
   assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
 });
 
@@ -322,7 +323,7 @@ test('texto parcial y completo con el mismo ID corrigen la estimación sin otra 
   await pause();
   const after = await stats();
   assert.equal(after.responses, before.responses + 1);
-  assert.equal(after.outputTokens, before.outputTokens + estimateOutputTokens(text, 'gpt-4-turbo'));
+  assert.equal(after.outputTokens, before.outputTokens + countOutputTokens(text, 'gpt-4-turbo'));
   assert.equal(after.inputTokens, before.inputTokens);
   assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
 });
@@ -331,12 +332,12 @@ test('una extensión corrige la estimación acumulada sin duplicar respuesta', a
   const view = await openTab();
   const before = await stats();
   const end = journal.ipcHandlers.get('nexo:stream-end');
-  assert.ok(estimateOutputTokens('function') >= estimateOutputTokens('functio'));
+  assert.ok(countOutputTokens('function') >= countOutputTokens('functio'));
   end({ sender: { id: view.id } }, { host: 'chatgpt.com', messageId: 'bpe-shrink', text: 'functio' });
   end({ sender: { id: view.id } }, { host: 'chatgpt.com', messageId: 'bpe-shrink', text: 'function' });
   await pause();
   const after = await stats();
-  assert.equal(after.outputTokens, before.outputTokens + estimateOutputTokens('function'));
+  assert.equal(after.outputTokens, before.outputTokens + countOutputTokens('function'));
   assert.equal(after.responses, before.responses + 1);
   assert.equal(after.inputTokens, before.inputTokens);
   assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
@@ -373,7 +374,7 @@ for (const [name, body, mime, expected] of [
         assert.equal(visibleChannelText(wire, visible.c), expected, 'el cliente recibe toda la respuesta antes de EOF');
         if (name === 'SSE DONE') assert.match(wire, /data: \[DONE\]/);
       }
-      assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(expected, 'gpt-6'));
+      assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(expected, 'gpt-6'));
       assert.equal(stats().responses - before.responses, 1);
       assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
     } finally {
@@ -381,10 +382,10 @@ for (const [name, body, mime, expected] of [
       await reading;
       await pause(50);
     }
-    assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(expected, 'gpt-6'), 'EOF no duplica tokens');
+    assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(expected, 'gpt-6'), 'EOF no duplica tokens');
     assert.equal(stats().responses - before.responses, 1, 'EOF no duplica respuestas');
     await replayCdp(view, body, mime);
-    assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(expected, 'gpt-6'), 'CDP tardío no duplica tokens');
+    assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(expected, 'gpt-6'), 'CDP tardío no duplica tokens');
     assert.equal(stats().responses - before.responses, 1, 'CDP tardío no duplica respuestas');
   });
 }
@@ -458,7 +459,7 @@ test('resultados: error de generación en SSE con HTTP 200 no se marca completo'
     'data: {"type":"error","error":{"message":"Generation failed"}}\n\ndata: [DONE]\n\n';
   await replayPrimary(view, body);
   assert.deepEqual(outcomeDelta(before), [0, 1, 0]);
-  assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(normal, 'gpt-6'));
+  assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(normal, 'gpt-6'));
   assertOutcomeUi();
 });
 
@@ -495,7 +496,7 @@ test('resultados: error explícito actualiza el contador sin esperar EOF ni DONE
     assert.equal(closed, false);
     assert.deepEqual(outcomeDelta(before), [0, 1, 0]);
     assertOutcomeUi();
-    assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(normal, 'gpt-6'));
+    assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(normal, 'gpt-6'));
   } finally { release(); await reading; await pause(50); }
   assert.deepEqual(outcomeDelta(before), [0, 1, 0]);
 });
@@ -562,7 +563,7 @@ test('integración remota DPU: conserva captura de texto y clasifica un único t
   assert.equal(await response.text(), '<template>DPU</template>', 'no se altera el transporte DPU');
   await pause(260);
   assert.deepEqual(outcomeDelta(before), [0, 0, 0]);
-  assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(answer));
+  assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(answer));
   assertOutcomeUi();
 });
 
@@ -578,7 +579,7 @@ test('integración remota DPU: espera el renderizado tardío del DOM y suma toke
   assert.equal(await response.text(), '<template>DPU</template>', 'el transporte original permanece intacto');
   await pause(650);
   assert.equal(stats().responses, before.responses + 1);
-  assert.equal(stats().outputTokens, before.outputTokens + estimateOutputTokens(answer));
+  assert.equal(stats().outputTokens, before.outputTokens + countOutputTokens(answer));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
@@ -660,7 +661,7 @@ for (const [mime, name, expected] of [
     await response.text();
     await pause(260);
     assert.equal(page.captures.at(-1)?.text, expected, 'el texto grabado llega íntegro al handler real de salida');
-    assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(expected), 'tokeniza el texto de esta respuesta');
+    assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(expected), 'cuenta las palabras del texto de esta respuesta');
     assert.equal(stats().responses - before.responses, 1);
     assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
   });
@@ -677,7 +678,7 @@ test('DPU: el render llega después de 180 ms y todavía debe aportar tokens', a
   dom += `\nChatGPT said:\n${answer}`;
   await pause(450);
   assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
-  assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(answer));
+  assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(answer));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
@@ -690,7 +691,7 @@ test('DPU: un aborto no debe descartar el texto parcial visible de esta respuest
   await response.text().catch(() => {});
   await pause(300);
   assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
-  assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(answer));
+  assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(answer));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
@@ -707,7 +708,7 @@ test('DPU sin etiquetas traducidas: nodos user/assistant → estimación → tok
   await response.text();
   await pause(260);
   assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
-  assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(answer));
+  assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(answer));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
@@ -733,7 +734,7 @@ test('SSE vacío recupera el texto autenticado tardío por el mismo turno, sin o
   assert.equal(page.captures[0].messageId, page.captures[1].messageId);
   assert.equal(stats().responses - before.responses, 1);
   assert.equal(stats().interventions - before.interventions, 2);
-  assert.equal(stats().outputTokens - before.outputTokens, estimateOutputTokens(answer, 'gpt-6'));
+  assert.equal(stats().outputTokens - before.outputTokens, countOutputTokens(answer, 'gpt-6'));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
@@ -829,4 +830,48 @@ test('el receptor de memoria rechaza snapshots de otro sitio, otra URL o de la s
     { getType: () => 'webview', getURL: () => 'https://chatgpt.com/c/otro' },
     { getType: () => 'webview', getURL: () => 'https://chatgpt.com/?temporary-chat=true' },
   ]) assert.equal(handle({ sender }, data).ok, false);
+});
+
+
+test('captura ChatGPT: la respuesta literal se guarda en EVO MEMORY aunque no haya guardián activo', () => {
+  const memory = new EvoMemory({ projectId: 'capture-test' });
+  const logs = [];
+  const engine = new Engine({
+    store: { settings: {}, pushLog: (entry) => logs.push(entry) },
+    memory,
+  });
+  const answer = 'Esta es la respuesta completa de GPT que Nexo debe poder leer y conservar.';
+  engine.onStreamEnd(9876, {
+    site: 'chatgpt',
+    host: 'chatgpt.com',
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    messageId: 'memory-proof-1',
+    conversationId: 'conversation-memory-proof',
+    model: 'gpt-6',
+    text: answer,
+    chars: answer.length,
+    finished: true,
+  });
+
+  const saved = memory.list().find((item) => item.kind === 'artifact' &&
+    item.text === `Respuesta GPT capturada: ${answer}`);
+  assert.ok(saved, 'la respuesta literal queda guardada y recuperable desde EVO MEMORY');
+  assert.equal(saved.source.role, 'assistant');
+  assert.equal(saved.source.model, 'gpt-6');
+  assert.equal(saved.source.messageId, 'memory-proof-1');
+  assert.equal(saved.conversationId, 'conversation-memory-proof');
+  assert.ok(logs.some((entry) => entry.code === 'gpt-response-memory' &&
+    entry.meta.chars === answer.length), 'el registro confirma cuántos caracteres se leyeron y guardaron');
+});
+
+test('respaldo de respuestas respeta memoria deshabilitada y chats temporales', () => {
+  for (const options of [
+    { settings: { memory: { enabled: false } }, documentUrl: 'https://chatgpt.com/c/test' },
+    { settings: {}, documentUrl: 'https://chatgpt.com/?temporary-chat=true' },
+  ]) {
+    const memory = new EvoMemory();
+    const engine = new Engine({ store: { settings: options.settings, pushLog() {} }, memory });
+    engine.onStreamEnd(777, { site: 'chatgpt', host: 'chatgpt.com', text: 'Texto que no debe archivarse.', documentUrl: options.documentUrl });
+    assert.equal(memory.list().length, 0);
+  }
 });

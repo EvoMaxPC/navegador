@@ -55,7 +55,7 @@ Un fallo de escritura deja diagnóstico visible y el estado pendiente en memoria
 
 ## Verificación
 
-583 pruebas: 582 aprobadas, 1 omitida, 0 fallos en `npm run verify`.
+585 pruebas: 584 aprobadas, 1 omitida, 0 fallos en `npm run verify`.
 Pruebas adicionales cubren lectura sin fetch, DOM → preload → IPC → memoria,
 revisión de mensajes sin duplicación, contadores intactos, emisor/URL incorrectos,
 roles/Markdown, recortes, exclusión de chats temporales, escritura fallida y
@@ -64,3 +64,13 @@ anterior y los mensajes cortos siguen presentes al reabrir ese archivo.
 
 Son pruebas de integración con DOM/Electron simulados y almacenamiento real de
 prueba; no equivalen a una conversación propia en ChatGPT en vivo.
+
+
+## Integración concurrente
+
+Se preservó `faedc58`/`b437a07`: las respuestas nuevas recibidas por stream o CDP
+también se conservan como artifacts literales en EVO MEMORY, incluso sin guardián.
+Esto complementa la transcripción DOM (usuario y asistente). La URL del documento
+se transmite desde el emisor/CDP para respetar chats temporales; se respeta la
+memoria deshabilitada y un fallo de guardado no se presenta como éxito.
+La prueba concurrente se conserva junto a las de historial existente.
