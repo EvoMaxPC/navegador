@@ -186,3 +186,11 @@ test('captura DPU sin encabezados no reutiliza texto previo al prompt actual', (
   const doc = { body: { innerText: 'Pregunta anterior\nRespuesta vieja\nPregunta actual' }, querySelectorAll: () => [] };
   assert.equal(extractChatGptVisibleAnswer(doc, 'Pregunta actual'), '');
 });
+
+test('captura visible: si el último nodo de usuario no coincide, no recupera texto histórico del body', () => {
+  const doc = {
+    body: { innerText: 'Pregunta esperada\\nRespuesta vieja\\nPregunta nueva' },
+    querySelectorAll: () => [{ getAttribute: () => 'user', innerText: 'Pregunta nueva' }],
+  };
+  assert.equal(extractChatGptVisibleAnswer(doc, 'Pregunta esperada'), '');
+});
