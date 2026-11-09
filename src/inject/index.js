@@ -20,7 +20,7 @@
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isMediable, locateUserText, patchUserText } from '../core/sites.js';
-import { countGptTokens, estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
+import { countGptTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
