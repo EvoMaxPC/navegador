@@ -224,7 +224,10 @@ export class MemoryStore {
 
   /** Vector de frecuencias de un item (cacheado en el propio item). */
   frequencies(item) {
-    if (!item.__tf || item.__tfSize !== item.terms.length) {
+    // JSON no conserva Map: un caché __tf persistido vuelve como objeto plano.
+    // Validar el tipo evita que BM25 falle con "tf.get is not a function"
+    // después de reiniciar y cargar EVO MEMORY.
+    if (!(item.__tf instanceof Map) || item.__tfSize !== item.terms.length) {
       item.__tf = termFreq(item.terms);
       item.__tfSize = item.terms.length;
     }
