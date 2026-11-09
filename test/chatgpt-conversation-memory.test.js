@@ -68,7 +68,7 @@ test('respuesta final de ChatGPT se guarda literalmente como artefacto recuperab
   const final = memory.captureConversation({ conversationId: '/c/respuesta', url: 'https://chatgpt.com/c/respuesta',
     streaming: false, turns: [{ id: 'a1', role: 'assistant', content: answer }] });
   assert.deepEqual(final.assistantCaptures, [{ id: 'a1', content: answer }]);
-  assert.ok(memory.list().some((item) => item.kind === 'artifact' && item.text === `Respuesta de ChatGPT capturada: ${answer}`));
+  assert.ok(memory.list().some((item) => item.kind === 'artifact' && item.text === `Respuesta GPT capturada: ${answer}`));
 
   const repeated = memory.captureConversation({ conversationId: '/c/respuesta', url: 'https://chatgpt.com/c/respuesta',
     streaming: false, turns: [{ id: 'a1', role: 'assistant', content: answer }] });
