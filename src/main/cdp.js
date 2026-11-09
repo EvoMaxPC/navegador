@@ -297,8 +297,7 @@ export class CdpObserver {
       host,
       site,
       capture: new CdpCapture({
-        site,
-        host,
+        site,        host,
         url,
         source: 'websocket',
         conversationId: `${site.id}#${state.id}#${params.requestId}`,
@@ -349,13 +348,18 @@ export class CdpObserver {
   /** Recuerda las peticiones de un proveedor: sin la URL, un fallo no se explica. */
   #requestStarted(state, params) {
     const type = String(params.type || '');
-    if (!OBSERVED_RESOURCE_TYPES.has(type)) return;
     const request = params.request || {};
     const url = String(request.url || '');
     const host = hostOf(url);
     if (!isAiHost(host)) return;
     const method = String(request.method || 'GET').toUpperCase();
     const site = detectSite(host);
+    // ChatGPT puede exponer /unauth-mweb/conversation/updates como «Other»
+    // (por ejemplo, si la petición nace en un worker). No descartarla antes
+    // de reconocer la ruta: necesitamos correlacionar su requestId al recibir
+    // la respuesta. El resto de recursos «Other» sigue fuera del observador.
+    const responseRequest = isResponseRequest(site, url, method);
+    if (!OBSERVED_RESOURCE_TYPES.has(type) && !responseRequest) return;
     const entry = {
       url,
       host,
@@ -368,7 +372,8 @@ export class CdpObserver {
        * POST al dominio: el resto de las peticiones del sitio devuelven JSON
        * de cuentas, listas y metadatos, que no son respuestas del modelo.
        */
-      chat: isMediable(site, url, method) || isResponseRequest(site, url, method),
+      chat: isMediable(site, url, method) || responseRequest,
+      responseRequest,
       sendRequest: isMediable(site, url, method),
       /** Cuándo se vio salir la petición: acota qué cierre de la capa cuenta. */
       at: Date.now(),
@@ -512,7 +517,7 @@ export class CdpObserver {
     // nunca se acepta por esta puerta es un JSON: un historial o una lista
     // también llegan como «Other» y no son respuestas.
     const tipoAlternativo = ALTERNATIVE_STREAM_TYPES.has(String(params.type || '')) && isStreamMime(mimePrevio);
-    if (!OBSERVED_RESOURCE_TYPES.has(String(params.type || '')) && !tipoAlternativo) {
+    if (!OBSERVED_RESOURCE_TYPES.has(String(params.type || '')) && !tipoAlternativo && !origenTipo?.responseRequest) {
       // Una respuesta del endpoint de conversación con un tipo que no miramos
       // (por ejemplo «Other», típico de un fetch desde un worker) se perdía sin
       // decir nada. Si es la conversación, se avisa.
@@ -597,8 +602,7 @@ export class CdpObserver {
     // sería sumar el historial como si la IA acabara de contestar.
     if (request && !request.post) {
       this.stats.ignored += 1;
-      return;
-    };
+      return;    };
     if (!this.contentAllowed(pending.host)) {
       this.stats.ignored += 1;
       return;
