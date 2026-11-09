@@ -50,6 +50,21 @@ test('no devuelve una respuesta anterior si el prompt actual todavía no tiene r
   assert.equal(extractChatGptDpuAnswer(body, 'pregunta nueva'), '');
 });
 
+test('no reutiliza la respuesta previa cuando el usuario repite el mismo prompt', () => {
+  const pending = [
+    'You said:',
+    'misma pregunta',
+    'ChatGPT said:',
+    'respuesta anterior',
+    'You said:',
+    'misma pregunta',
+  ].join('\\n');
+  assert.equal(extractChatGptDpuAnswer(pending, 'misma pregunta'), '');
+
+  const completed = `${pending}\\nChatGPT said:\\nrespuesta nueva`;
+  assert.equal(extractChatGptDpuAnswer(completed, 'misma pregunta'), 'respuesta nueva');
+});
+
 test('asocia prompts con saltos de línea y admite el marcador español', () => {
   const body = 'Tú dijiste:\nuna pregunta\ncon dos líneas\nChatGPT dijo:\nrespuesta final';
   assert.equal(extractChatGptDpuAnswer(body, 'una pregunta con dos líneas'), 'respuesta final');
