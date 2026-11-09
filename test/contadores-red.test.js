@@ -297,8 +297,7 @@ test('un envío salido de un worker (sin pestaña identificada) igual cierra su 
 
 test('una respuesta HTTP 2xx cierra el turno aunque la pestaña no venga en el evento', async () => {
   const view = await abrir('https://chatgpt.com/c/red-respuesta-red');
-  const antes = await stats();
-  peticionRed({
+  const antes = await stats();  peticionRed({
     url: 'https://chatgpt.com/backend-api/f/conversation',
     cuerpo: cuerpoChatGPT('respuesta por red'),
     webContentsId: view.id,
@@ -420,7 +419,7 @@ test('CDP conserva unauth-mweb/updates cuando Chromium lo clasifica como Other',
   });
   view.debugger.bodies.set(
     'req-unauth-mweb-other',
-    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta desde recurso Other.'] } } })}\\n\\ndata: [DONE]\\n\\n`,
+    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta desde recurso Other.'] } } })}\n\ndata: [DONE]\n\n`,
   );
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-unauth-mweb-other' });
   await settle(80);
