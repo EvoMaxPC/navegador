@@ -19,7 +19,7 @@ import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locate
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
-import { estimateTokens, fingerprint } from '../core/text.js';
+import { countGptTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
@@ -1033,6 +1033,7 @@ function noteUserMessageFromNetwork(details = {}) {
   }
 
   const text = textoCuerpo;
+  const model = gptModelFromRequest(json);
 
   if (!text) {
     // Petición de conversación sin texto legible: el mensaje se cuenta igual
@@ -1059,7 +1060,8 @@ function noteUserMessageFromNetwork(details = {}) {
     host,
     url,
     chars: text.length,
-    tokens: text ? estimateTokens(text) : 0,
+    tokens: text ? countGptTokens(text, model) : 0,
+    model,
     promptHash: text ? fingerprint(text) : '',
     textFound: Boolean(text),
   });
@@ -1079,7 +1081,7 @@ function noteUserMessageFromNetwork(details = {}) {
       url: shortPath(url),
       source: 'network',
       chars: text.length,
-      tokens: text ? estimateTokens(text) : 0,
+      tokens: text ? countGptTokens(text, model) : 0,
       conversationId: null,
     },
     ts: Date.now(),
