@@ -34,6 +34,7 @@ import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locate
 import { fingerprint, gptModelFromRequest } from '../core/text.js';
 import { countTokensForProvider } from './tokens.js';
 import { parseSSE } from '../core/sse.js';
+import { isChatGptDpuMime } from '../core/chatgptDpu.js';
 
 /** Versión del protocolo que expone Electron/Chromium. */
 const CDP_VERSION = '1.3';
@@ -562,6 +563,13 @@ export class CdpObserver {
       return;
     }
     const mimeType = String(response.mimeType || '');
+    // El transporte DPU se aplica directamente al DOM de ChatGPT. La capa de
+    // página lee el texto visible al terminar; getResponseBody no devuelve SSE
+    // ni JSON y no debe generar un falso diagnóstico de MIME desconocido.
+    if (isChatGptDpuMime(mimeType)) {
+      this.stats.ignored += 1;
+      return;
+    }
     /**
      * Una respuesta de conversación que llega como `text/plain` se lee igual: el
      * cuerpo se interpreta después con el lector tolerante (SSE, JSON por líneas
