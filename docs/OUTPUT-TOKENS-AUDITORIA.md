@@ -170,7 +170,7 @@ reproducciones del código con grabaciones y transportes/DOM controlados.
 - `test/chatgpt-dpu.test.js`: roles sin etiquetas traducidas, prompt repetido,
   bloqueo de respuesta vieja/ajena y espera de una respuesta nueva idéntica.
 
-`npm run verify`: **554 pruebas, 553 aprobadas, 1 omitida, 0 fallos**. Bundle
+`npm run verify`: **556 pruebas, 555 aprobadas, 1 omitida, 0 fallos**. Bundle
 **49.1 kB / 17.4 kB gzip**, 10 módulos; no se rebajaron límites de rendimiento.
 
 Sigue faltando comprobar una respuesta propia en ChatGPT dentro de NEXO real:
@@ -202,7 +202,7 @@ concurrente se unificó con la del helper probado.
 Las pruebas adicionales de la integración comprueban recuperación autenticada
 tardía hasta UI, conservación de un único contador de respuesta y rechazo de
 texto previo; se conservaron los dos tests concurrentes recibidos. La verificación
-completa integrada es la indicada arriba: 554 pruebas, sin fallos. El transporte
+completa integrada es la indicada arriba: 556 pruebas, sin fallos. El transporte
 sigue siendo replay/simulado, no una sesión de ChatGPT en vivo.
 
 
@@ -221,7 +221,7 @@ prefijo recortado conserva el texto real acumulado. La marca de red sin texto se
 mantiene hasta esa reconciliación. Pruebas explícitas cubren BPE entre fragmentos,
 cierre recortado y red antes del streaming; las de Stop ahora comparan contra el
 conteo inmediatamente anterior al clic, que ya incluye el texto recibido en vivo.
-Verificación final: **554 pruebas, 553 aprobadas, 1 omitida, 0 fallos**.
+Verificación final: **556 pruebas, 555 aprobadas, 1 omitida, 0 fallos**.
 
 
 ### DPU incremental concurrente
@@ -234,4 +234,8 @@ nuevo. El texto completo alimenta BPE; sólo el texto del registro final se reco
 La prueba integral nueva simula notificaciones MutationObserver y verifica texto
 anterior ignorado, dos actualizaciones acumuladas, UI inmediata y un único cierre.
 Se corrigieron saltos de línea escapados de una fixture concurrente, sin cambiar
-el parser para aceptar datos de prueba erróneos. Total final: 554/553/1/0.
+el parser para aceptar datos de prueba erróneos. Total final: 556/555/1/0.
+
+Se integraron también las guardas de rol y MIME JSON de `e9d9d40` a `27b8b24`.
+Se corrigió la expresión regular JSON recibida (barra sobreescapada que impedía
+compilar) y se añadió replay integral de updates con `application/json`.

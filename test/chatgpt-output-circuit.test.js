@@ -650,6 +650,7 @@ for (const attributes of [
 for (const [mime, name, expected] of [
   ['application/x-ndjson', 'logged-out-reply.ndjson', anonymous],
   ['text/plain', 'logged-out-reply.ndjson', anonymous],
+  ['application/json', 'logged-out-reply.ndjson', anonymous],
   ['text/event-stream', 'normal-reply.sse', normal],
 ]) {
   test(`updates con ${mime}: texto grabado → BPE → contador, sin depender del DOM`, async () => {

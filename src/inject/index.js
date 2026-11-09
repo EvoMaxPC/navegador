@@ -616,7 +616,7 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
   const filter = createStreamFilter({
-      format: site.id === 'chatgpt' && /ndjson|jsonl|application\\/json/i.test(mime) ? 'ndjson'
+      format: site.id === 'chatgpt' && /ndjson|jsonl|application[/]json/i.test(mime) ? 'ndjson'
         : site.id === 'chatgpt' && /text\/plain/i.test(mime) ? 'auto' : 'sse',
       settings: state.settings,
       adapter: site.streamAdapter || null,
