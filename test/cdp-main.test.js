@@ -303,6 +303,21 @@ test('un turno ya contado por el camino HTTP/SSE no se cuenta otra vez por CDP',
   assert.ok(despues.cdp.duplicates > antes.cdp.duplicates);
 });
 
+test('ChatGPT sigue observado para EVO MEMORY aunque la mediación esté apagada', async () => {
+  await callIpc('nexo:settings:set', { sites: { chatgpt: { enabled: false } }, memory: { enabled: true } });
+  const win = journal.windows[0];
+  const view = win.attachWebview('https://chatgpt.com/c/memory-passive');
+  view.navigateTo('https://chatgpt.com/c/memory-passive', 'ChatGPT');
+  await settle();
+
+  assert.equal(view.debugger.attached, true, 'EVO MEMORY habilitada permite observación pasiva de ChatGPT');
+  const config = await callIpc('nexo:config', { host: 'chatgpt.com' });
+  assert.equal(config.enabled, false, 'la mediación sigue apagada');
+  assert.equal(config.settings.memory.enabled, true, 'la memoria sigue habilitada');
+
+  await callIpc('nexo:settings:set', { sites: { chatgpt: { enabled: true } }, memory: { enabled: true } });
+});
+
 test('un sitio apagado en Ajustes no se observa', async () => {
   await callIpc('nexo:settings:set', { sites: { claude: { enabled: false } } });
   const win = journal.windows[0];
