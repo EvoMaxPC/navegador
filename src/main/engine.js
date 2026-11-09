@@ -542,10 +542,18 @@ export class Engine {
   }
 
   currentSendId(webContentsId, withinMs = VENTANA_RESPUESTA_MS) {
-    const awaiting = this.awaiting.get(webContentsId);
-    if (!awaiting) return null;
-    if (Date.now() - awaiting.at > withinMs) return null;
-    return awaiting.messageId || null;
+    const now = Date.now();
+    const own = this.awaiting.get(webContentsId);
+    if (own) return now - own.at <= withinMs ? own.messageId || null : null;
+
+    // webRequest puede informar webContentsId=-1 (o no informar la pestaña)
+    // aunque el envío haya quedado asociado a una pestaña real, y viceversa.
+    // Reutilizamos la misma regla conservadora del motor: sólo se admite el
+    // turno sin pestaña cuando es el único más reciente; nunca se adivina entre
+    // dos conversaciones pendientes.
+    const pending = this.#pendingTurn(webContentsId, now);
+    if (!pending || now - pending.entry.at > withinMs) return null;
+    return pending.entry.messageId || null;
   }
 
   /**
