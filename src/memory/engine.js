@@ -246,6 +246,7 @@ export class EvoMemory {
     const previous = this.store.conversations.get(id);
     const saved = new Map((previous?.turns || []).map((turn) => [turn.id, turn]));
     let changed = 0;
+    const assistantCaptures = [];
     for (const turn of turns.slice(-200)) {
       if (!turn || !['user', 'assistant'].includes(turn.role) || typeof turn.content !== 'string' || !turn.content.trim()) continue;
       const key = String(turn.id || '').slice(0, 200);
@@ -255,13 +256,34 @@ export class EvoMemory {
       const clipped = Boolean(turn.clipped || turn.content.length > 10000);
       const same = old?.content === content && old?.role === turn.role && old?.clipped === clipped;
       const memorized = same && old.memorized;
+      const artifactMemorized = same && old.artifactMemorized;
       if (!same || (!streaming && !memorized)) changed += 1;
-      const entry = { id: key, role: turn.role, content, clipped, memorized: Boolean(memorized) };
+      const entry = { id: key, role: turn.role, content, clipped,
+        memorized: Boolean(memorized), artifactMemorized: Boolean(artifactMemorized) };
       saved.set(key, entry);
-      // El texto parcial queda en disco; destilar sólo al estabilizarse el turno.
+
+      // El texto parcial queda archivado, pero una respuesta de GPT sólo se
+      // incorpora a EVO MEMORY cuando el DOM confirma que terminó de generarse.
       if (!streaming && !memorized) {
         this.remember({ role: turn.role, content }, { conversationId, url, deferSave: true });
         entry.memorized = true;
+      }
+      // La destilación puede descartar una respuesta conversacional válida.
+      // Guardamos también el texto literal completo como artefacto recuperable.
+      if (!streaming && turn.role === 'assistant' && !artifactMemorized) {
+        const result = this.store.add({
+          kind: 'artifact',
+          text: `Respuesta de ChatGPT capturada: ${content}`,
+          projectId: this.projectId,
+          conversationId,
+          confidence: 0.98,
+          source: { role: 'assistant', url },
+        });
+        if (result.action !== 'ignored') {
+          entry.artifactMemorized = true;
+          assistantCaptures.push({ id: key, content });
+          if (same && memorized) changed += 1;
+        }
       }
     }
     if (!changed) return { ok: true, changed: 0, turns: saved.size };
@@ -279,7 +301,7 @@ export class EvoMemory {
     while (this.store.conversations.size > 50) this.store.conversations.delete(this.store.conversations.keys().next().value);
     this.store.dirty = true;
     const ok = !this.store.storage || this.store.save();
-    return { ok, changed, turns: kept.length, error: ok ? null : 'No se pudo guardar la conversación en disco.' };
+    return { ok, changed, turns: kept.length, assistantCaptures, error: ok ? null : 'No se pudo guardar la conversación en disco.' };
   }
 
   listConversations() {
