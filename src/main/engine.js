@@ -900,8 +900,13 @@ export class Engine {
     const now = Date.now();
 
     const host = capture.host || safeHost(capture.url) || 'desconocido';
-    if (!this.isEnabledFor(host)) {
-      // El usuario apagó el sitio: tampoco se observa.
+    // La memoria puede observar ChatGPT sin habilitar la mediación. Esta vía
+    // sólo se permite en una conversación normal (no chat temporal) y mientras
+    // EVO MEMORY siga habilitada; nunca crea ni ejecuta un guardián.
+    const passiveMemoryObservation = detectSite(host).id === 'chatgpt' &&
+      this.store.settings.memory?.enabled !== false &&
+      isChatGptMemoryUrl(capture.documentUrl || '');
+    if (!this.isEnabledFor(host) && !passiveMemoryObservation) {
       return { ok: false, skipped: 'disabled' };
     }
 
@@ -959,6 +964,22 @@ export class Engine {
         this.awaiting.delete(pendiente.id);
         paired = true;
       }
+    }
+
+    // En observación pasiva la respuesta ya quedó guardada literalmente en
+    // EVO MEMORY. Contamos el turno y sus tokens, pero no creamos un guardián,
+    // no analizamos intervenciones y no modificamos el comportamiento del sitio.
+    if (passiveMemoryObservation && !this.isEnabledFor(host)) {
+      this.cdp.captures += 1;
+      return {
+        ok: true,
+        duplicate: false,
+        passive: true,
+        paired,
+        chars: text.length,
+        tokens: merge.tokens,
+        messageId: awaitId,
+      };
     }
 
     const guard = this.#guard(webContentsId, host);
