@@ -69,7 +69,10 @@ export class Logbook {
 
 export class ConversationGuard {
   /**
-   * @param {{settings?: object, host?: string, language?: string, logbook?: Logbook, onEvent?: Function}} [opts]
+   * @param {{
+   *   settings?: object, host?: string, language?: string, logbook?: Logbook,
+   *   onEvent?: Function, memory?: object, conversationId?: string
+   * }} [opts]
    */
   constructor(opts = {}) {
     this.settings = mergeSettings(DEFAULT_SETTINGS, opts.settings || {});
@@ -77,6 +80,9 @@ export class ConversationGuard {
     this.language = opts.language || 'es';
     this.logbook = opts.logbook || new Logbook({ maxEntries: this.settings.logging.maxEntries });
     this.onEvent = opts.onEvent || null;
+    /** Motor EVO MEMORY compartido entre conversaciones (puede ser null). */
+    this.memory = opts.memory || null;
+    this.conversationId = opts.conversationId || null;
     this.loopSignatures = new Map();
     this.history = [];
     this.turns = 0;
@@ -104,14 +110,36 @@ export class ConversationGuard {
 
   /** Prepara el envío: aplica el motor saliente y registra las intervenciones. */
   preparePrompt(prompt) {
+    // El contexto se compila ANTES de recordar este turno: recuperar lo que el
+    // usuario acaba de escribir sería pagar dos veces por la misma frase.
     const report = enhancePrompt({
       prompt,
       history: this.history,
       host: this.host,
       settings: this.settings,
+      memory: this.memory,
     });
 
-    if (report.context) {
+    if (this.memory) {
+      this.memory.remember(
+        { role: 'user', content: report.userText },
+        { conversationId: this.conversationId, url: this.host },
+      );
+    }
+
+    if (report.context?.engine === 'evo') {
+      this.#emit({
+        kind: 'context',
+        code: 'evo-recall',
+        severity: 'info',
+        title: `EVO recuperó ${report.context.stats.retrieved} memorias`,
+        detail: `${report.context.stats.used} tokens de contexto compilado · presupuesto ${report.context.stats.budget} · ${report.context.stats.savedPct}% menos que pegar el historial.`,
+        meta: {
+          retrieved: report.context.retrieved.slice(0, 6).map((r) => ({ kind: r.kind, text: r.text, score: r.score })),
+          stats: report.context.stats,
+        },
+      });
+    } else if (report.context) {
       this.#emit({
         kind: 'context',
         code: 'fold',
@@ -172,6 +200,13 @@ export class ConversationGuard {
       content: repaired.text,
       tokens: estimateTokens(repaired.text),
     });
+
+    if (this.memory) {
+      this.memory.remember(
+        { role: 'assistant', content: repaired.text },
+        { conversationId: this.conversationId, url: this.host },
+      );
+    }
 
     for (const fix of repaired.fixes) {
       this.#emit({

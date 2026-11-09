@@ -49,6 +49,7 @@
     <aside class="sidebar" id="sidebar" aria-label="Panel de Nexo">
       <div class="sidebar-tabs" role="tablist">
         <button class="stab active" data-panel="activity">Actividad</button>
+        <button class="stab" data-panel="memory">Memoria</button>
         <button class="stab" data-panel="settings">Ajustes</button>
         <button class="stab" data-panel="about">Acerca</button>
       </div>
@@ -64,6 +65,40 @@
           <button class="link" id="clearLog">Limpiar</button>
         </div>
         <ul class="log" id="log"></ul>
+      </section>
+
+      <section class="panel-view" data-panel="memory">
+        <div class="stats">
+          <div class="stat"><b id="memItems">0</b><span>memorias</span></div>
+          <div class="stat"><b id="memTokens">0</b><span>tokens en contexto</span></div>
+          <div class="stat"><b id="memSaved">0 %</b><span>menos que pegar todo</span></div>
+        </div>
+
+        <form class="mem-search" id="memSearchForm">
+          <input id="memSearch" type="text" spellcheck="false" placeholder="Buscar en la memoria del proyecto…" />
+        </form>
+
+        <div class="mem-legend" id="memLegend"></div>
+        <ul class="memory-list" id="memoryList"></ul>
+
+        <div class="panel-head">
+          <h2>Continuidad</h2>
+        </div>
+        <p class="note">
+          El paquete de continuidad es un texto plano con lo esencial del proyecto. Pegalo al
+          empezar una conversación en cualquier IA y seguís donde estabas.
+        </p>
+        <div class="mem-actions">
+          <button class="ghost" id="memHandoff">Generar paquete</button>
+          <button class="ghost" id="memCopy">Copiar</button>
+        </div>
+        <textarea class="mem-packet" id="memPacket" rows="6" spellcheck="false" placeholder="Acá aparece el paquete…"></textarea>
+
+        <div class="mem-actions">
+          <button class="ghost" id="memImport">Importar pegado</button>
+          <button class="ghost danger" id="memClear">Vaciar memoria</button>
+        </div>
+        <p class="note" id="memFile"></p>
       </section>
 
       <section class="panel-view" data-panel="settings">
@@ -128,6 +163,7 @@
             <li><b>Antes de enviar:</b> limpia repeticiones, detecta instrucciones contradictorias, resuelve referencias sueltas y añade un protocolo anti-bucle.</li>
             <li><b>Antes de mostrar:</b> retiene unos caracteres, detecta repeticiones por período y corta la generación en el punto exacto.</li>
             <li><b>Después:</b> repara markdown, cierra bloques de código y ofrece continuar sin repetir.</li>
+            <li><b>Entre conversaciones:</b> EVO MEMORY destila lo que importa —objetivos, decisiones, restricciones, pendientes y problemas— y lo devuelve cuando hace falta, en lugar de arrastrar todo el historial.</li>
           </ul>
           <p class="note">Sala de pruebas: <button class="link" id="openDemo">abrir</button></p>
         </div>

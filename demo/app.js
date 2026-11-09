@@ -6,6 +6,7 @@
  */
 
 import { ConversationGuard, estimateTokens } from '../src/core/index.js';
+import { EvoMemory } from '../src/memory/engine.js';
 import { SCENARIOS, scenarioById, SEED_HISTORY } from './simulator.js';
 
 const $ = (id) => document.getElementById(id);
@@ -35,7 +36,47 @@ const els = {
   mDropped: $('mDropped'),
   mLoop: $('mLoop'),
   mContext: $('mContext'),
+  memPill: $('memPill'),
+  memKinds: $('memKinds'),
+  memList: $('memList'),
+  memEcon: $('memEcon'),
+  memClear: $('memClear'),
 };
+
+const MEM_KIND = {
+  goal: 'objetivo',
+  decision: 'decisión',
+  constraint: 'restricción',
+  preference: 'preferencia',
+  task: 'pendiente',
+  issue: 'problema',
+  fact: 'dato',
+  entity: 'entidad',
+  artifact: 'código',
+  episode: 'episodio',
+  question: 'pregunta',
+};
+
+/**
+ * Memoria real, persistida en este navegador. La sala de pruebas usa el mismo
+ * motor que el navegador: lo que ves acá es lo que haría en producción.
+ */
+const memory = createMemory();
+
+function createMemory() {
+  try {
+    return new EvoMemory({
+      storage: {
+        read: () => window.localStorage.getItem('nexo-evo-memory'),
+        write: (data) => window.localStorage.setItem('nexo-evo-memory', data),
+      },
+      projectId: 'demo-nexo',
+      projectName: 'Sala de pruebas',
+    });
+  } catch {
+    return new EvoMemory({ projectId: 'demo-nexo', projectName: 'Sala de pruebas' });
+  }
+}
 
 const state = {
   scenario: SCENARIOS[0].id,
@@ -45,6 +86,44 @@ const state = {
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ------------------------------------------------------------------ */
+/* panel de memoria                                                     */
+/* ------------------------------------------------------------------ */
+
+function renderMemory() {
+  const stats = memory.stats();
+  els.memPill.textContent = `${stats.active} ${stats.active === 1 ? 'memoria' : 'memorias'}`;
+
+  const kinds = Object.entries(stats.byKind)
+    .filter(([kind, count]) => count > 0 && kind !== 'episode')
+    .sort((a, b) => b[1] - a[1]);
+  els.memKinds.innerHTML = kinds
+    .map(([kind, count]) => `<span class="chip">${escapeHtml(MEM_KIND[kind] || kind)} <b>${count}</b></span>`)
+    .join('');
+
+  const items = memory
+    .list()
+    .filter((item) => item.kind !== 'episode')
+    .slice(0, 8);
+
+  els.memList.innerHTML = items.length
+    ? items
+        .map(
+          (item) => `<li>
+            <span class="mem-kind">${escapeHtml(MEM_KIND[item.kind] || item.kind)}</span>
+            <span class="mem-text">${escapeHtml(item.text)}</span>
+            <span class="mem-uses" title="veces reutilizada">${item.uses}×</span>
+          </li>`,
+        )
+        .join('')
+    : '<li class="log-empty">EVO todavía no destiló nada. Enviá un par de mensajes con decisiones, pendientes o datos.</li>';
+
+  const last = stats.lastCompile;
+  els.memEcon.innerHTML = last
+    ? `Último envío: <b>${last.used}</b> de <b>${last.budget}</b> tokens · <b>${last.retrieved}</b> ${last.retrieved === 1 ? 'memoria recuperada' : 'memorias recuperadas'} · <b>${last.savedPct} %</b> menos que pegar el historial completo.`
+    : 'Todavía no se compiló un contexto. El panel mostrará acá el costo real en tokens de cada envío.';
+}
 
 /* ------------------------------------------------------------------ */
 /* render                                                              */
@@ -259,7 +338,7 @@ async function handleSubmit(event) {
   els.send.disabled = true;
   els.prompt.blur();
 
-  const guard = new ConversationGuard({ settings, language: 'es' });
+  const guard = new ConversationGuard({ settings, language: 'es', memory, conversationId: 'demo' });
   guard.seedHistory(state.history);
 
   let report = null;
@@ -418,6 +497,7 @@ async function handleSubmit(event) {
   state.history = guard.history.map((t) => ({ role: t.role, content: t.content })).slice(-14);
 
   renderLog(guard.logbook.entries);
+  renderMemory();
   renderMetrics();
   scrollTranscript();
 
@@ -467,7 +547,18 @@ els.reset.addEventListener('click', () => {
   if (!state.busy) location.reload();
 });
 
+els.memClear.addEventListener('click', () => {
+  const items = memory.store.all({ includeSuperseded: true });
+  for (const item of items) memory.store.forget(item.id);
+  memory.store.save({ force: true });
+  renderMemory();
+});
+
 loadScenario(state.scenario);
+// El historial previo ya está en la conversación: EVO lo destila al arrancar,
+// igual que haría al abrir un chat que ya venía empezado.
+if (!memory.store.size) memory.ingestConversation(SEED_HISTORY, { conversationId: 'demo-seed' });
+renderMemory();
 renderMetrics();
 renderLog([]);
 renderPromptPanel(undefined, els.prompt.value);

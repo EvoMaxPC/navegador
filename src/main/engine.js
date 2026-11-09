@@ -11,11 +11,17 @@ import { settingsForHost } from '../core/settings.js';
 
 export class Engine {
   /**
-   * @param {{store: import('./store.js').Store, onEvent?: (entry: object) => void}} deps
+   * @param {{
+   *   store: import('./store.js').Store,
+   *   onEvent?: (entry: object) => void,
+   *   memory?: import('../memory/engine.js').EvoMemory
+   * }} deps
    */
-  constructor({ store, onEvent }) {
+  constructor({ store, onEvent, memory }) {
     this.store = store;
     this.onEvent = onEvent || (() => {});
+    /** EVO MEMORY: una sola memoria por perfil, compartida por todas las pestañas. */
+    this.memory = memory || null;
     /** @type {Map<number, ConversationGuard>} */
     this.guards = new Map();
     this.requestCounter = 0;
@@ -28,6 +34,8 @@ export class Engine {
         settings: settingsForHost(this.store.settings, host),
         host,
         language: this.store.settings.uiLocale === 'en' ? 'en' : 'es',
+        memory: this.memory,
+        conversationId: `${host}#${webContentsId}`,
       });
       this.guards.set(webContentsId, guard);
     }
@@ -73,7 +81,14 @@ export class Engine {
       blocks: report.blocks.map((b) => ({ id: b.id, label: b.label })),
       findings: report.findings.map((f) => ({ id: f.id, level: f.level, title: f.title })),
       context: report.context
-        ? { foldedTurns: report.context.foldedTurns, tokensBefore: report.context.tokensBefore, tokensAfter: report.context.tokensAfter }
+        ? {
+            engine: report.context.engine || 'fold',
+            foldedTurns: report.context.foldedTurns,
+            tokensBefore: report.context.tokensBefore,
+            tokensAfter: report.context.tokensAfter,
+            retrieved: report.context.retrieved || [],
+            stats: report.context.stats || null,
+          }
         : null,
     };
   }
@@ -157,6 +172,64 @@ export class Engine {
 
   dropTab(webContentsId) {
     this.guards.delete(webContentsId);
+  }
+
+  /* ---------------- EVO MEMORY ---------------- */
+
+  memoryList() {
+    return this.memory ? this.memory.list() : [];
+  }
+
+  memoryStats() {
+    return this.memory ? this.memory.stats() : { total: 0, active: 0, byKind: {}, tokens: 0, circuits: {} };
+  }
+
+  memoryRecall(query, opts = {}) {
+    if (!this.memory) return [];
+    return this.memory.recall(query, opts).map((entry) => ({
+      id: entry.item.id,
+      kind: entry.item.kind,
+      text: entry.item.text,
+      score: Number(entry.score.toFixed(3)),
+      parts: entry.parts,
+      pinned: Boolean(entry.item.pinned),
+      createdAt: entry.item.createdAt,
+      uses: entry.item.uses,
+    }));
+  }
+
+  memoryPin(id, pinned = true) {
+    if (!this.memory) return { ok: false };
+    this.memory.pin(id, pinned);
+    return { ok: true };
+  }
+
+  memoryForget(id) {
+    if (!this.memory) return { ok: false };
+    return { ok: this.memory.forget(id) };
+  }
+
+  memoryTouch(id) {
+    if (!this.memory) return { ok: false };
+    return { ok: this.memory.touch(id) };
+  }
+
+  memoryHandoff() {
+    if (!this.memory) return null;
+    return this.memory.handoff();
+  }
+
+  memoryImport(packet) {
+    if (!this.memory) return { added: 0, merged: 0, superseded: 0 };
+    return this.memory.importHandoff(packet);
+  }
+
+  memoryClear() {
+    if (!this.memory) return { ok: false };
+    const items = this.memory.store.all({ includeSuperseded: true });
+    for (const item of items) this.memory.store.forget(item.id);
+    this.memory.store.save();
+    return { ok: true, removed: items.length };
   }
 
   #publish(guard) {

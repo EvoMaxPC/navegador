@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, normalize, sep } from 'node:path';
 import { Store } from './store.js';
 import { Engine } from './engine.js';
+import { createMemory } from './memory.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
 
@@ -24,6 +25,7 @@ const isDev = process.argv.includes('--dev');
 let win = null;
 let store = null;
 let engine = null;
+let memory = null;
 
 /**
  * Esquema propio para servir la interfaz y la sala de pruebas desde el disco.
@@ -136,6 +138,25 @@ function registerIpc() {
     return [];
   });
   ipcMain.handle('nexo:stats', () => ({ ...engine.stats(), log: store.log.length }));
+
+  /* ---------------- EVO MEMORY ---------------- */
+  ipcMain.handle('nexo:memory:stats', () => ({ ...engine.memoryStats(), file: memory?.file || null }));
+  ipcMain.handle('nexo:memory:list', () => engine.memoryList());
+  ipcMain.handle('nexo:memory:recall', (_event, payload = {}) =>
+    engine.memoryRecall(String(payload.query || ''), { limit: payload.limit || 12 }));
+  ipcMain.handle('nexo:memory:pin', (_event, payload = {}) => engine.memoryPin(payload.id, payload.pinned !== false));
+  ipcMain.handle('nexo:memory:forget', (_event, payload = {}) => engine.memoryForget(payload.id));
+  ipcMain.handle('nexo:memory:handoff', () => engine.memoryHandoff());
+  ipcMain.handle('nexo:memory:import', (_event, packet) => {
+    const result = engine.memoryImport(packet);
+    broadcast('nexo:memory-changed', engine.memoryStats());
+    return result;
+  });
+  ipcMain.handle('nexo:memory:clear', () => {
+    const result = engine.memoryClear();
+    broadcast('nexo:memory-changed', engine.memoryStats());
+    return result;
+  });
   ipcMain.handle('nexo:shell:config', () => ({
     version: app.getVersion(),
     pagePreload: `file://${PAGE_PRELOAD}`,
@@ -162,8 +183,17 @@ function configureSession() {
 
 app.whenReady().then(async () => {
   store = new Store();
+  const created = createMemory({
+    dir: app.getPath('userData'),
+    projectId: store.settings.memory?.projectId || 'default',
+    projectName: store.settings.memory?.projectName || null,
+    maxItems: store.settings.memory?.maxItems,
+    episodeEvery: store.settings.memory?.episodeEvery,
+  });
+  memory = created;
   engine = new Engine({
     store,
+    memory: created.memory,
     onEvent: (entry) => broadcast('nexo:event', { type: 'intervention', payload: entry }),
   });
   registerProtocol();

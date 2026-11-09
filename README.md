@@ -118,6 +118,30 @@ de código sin cerrar, negritas desbalanceadas, párrafos finales duplicados, pr
 «Assistant:», negativas del modelo (con sugerencia para reformular) y detección de
 respuesta cortada.
 
+## 5. EVO MEMORY: memoria entre conversaciones
+
+Los cuatro pasos anteriores arreglan **una** conversación. EVO MEMORY arregla lo
+que pasa **entre** ellas: cada turno se destila en unidades pequeñas —objetivos,
+decisiones, restricciones, pendientes, problemas, datos con ancla—, se guardan en
+tu máquina y se recuperan cuando el mensaje que estás escribiendo las necesita.
+
+```
+tu mensaje → recuperación (BM25 + TF-IDF + anclas + intención + MMR)
+           → compilador por capas con presupuesto de tokens
+           → bloque [EVO · memoria del proyecto] → modelo
+```
+
+- **Contexto compilado, no historial pegado.** Cada capa tiene un tope y lo que
+  sobra se redistribuye; los últimos turnos viajan literales.
+- **La memoria no crece sola.** Deduplicación por Jaccard, sucesión cuando dos
+  memorias se contradicen y límite duro con protección de lo fijado.
+- **Continuidad portable.** El paquete de continuidad se exporta en markdown y se
+  pega en cualquier IA; reimportarlo no duplica nada.
+- **Medido, no prometido.** El panel *Memoria* muestra tokens usados, presupuesto
+  y porcentaje ahorrado frente a pegar el historial completo.
+
+Detalle, fórmulas y límites honestos: [`docs/EVO-MEMORY.md`](docs/EVO-MEMORY.md).
+
 ---
 
 ## Cómo se engancha a cada sitio
@@ -143,6 +167,8 @@ cómo añadir uno.
 - No romper la interfaz del sitio: los eventos de control viajan intactos.
 - Funcionar sin conexión y sin servicios externos.
 - Mantener el contexto útil cuando la ventana se llena.
+- Recordar lo que ya decidiste, la próxima vez que abras un chat —en cualquier
+  modelo—, sin arrastrar la conversación entera.
 
 **No hace (todavía)**
 
@@ -154,12 +180,17 @@ cómo añadir uno.
   petición, el motor deja pasar el mensaje sin tocar (nunca rompe la petición).
 - No está probado contra todos los sitios: `docs/SITIOS.md` marca el estado de cada
   uno.
+- La memoria no agranda el modelo ni esquiva los límites del proveedor: aprovecha
+  mejor el presupuesto que ya tenés. La recuperación semántica es TF-IDF más 21
+  grupos conceptuales curados, no un modelo denso: un sinónimo fuera de esos
+  grupos no se puentea. Ver [`docs/EVO-MEMORY.md`](docs/EVO-MEMORY.md).
 
 ---
 
 ## Estructura
 
 ```
+src/memory/      EVO MEMORY: destilado, índice, recuperación, contexto, paquete
 src/core/        motor isomorfo, sin dependencias (Node y navegador)
   analysis.js      periodicidad, tartamudeo, truncamiento
   streamSentinel.js búfer + sonda + corte
@@ -173,8 +204,8 @@ src/preload/     puentes (pestañas y shell)
 src/main/        proceso principal: ventana, pestañas, ajustes, motor
 src/ui/shell/    interfaz del navegador
 demo/            sala de pruebas (mismo motor, modelo simulado)
-test/            89 pruebas con node:test
-docs/            arquitectura, adaptadores y privacidad
+test/            146 pruebas con node:test
+docs/            arquitectura, adaptadores, privacidad y memoria
 ```
 
 ## Privacidad

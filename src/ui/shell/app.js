@@ -283,6 +283,7 @@ function pushIntervention(entry) {
   state.logs.unshift(entry);
   if (state.logs.length > 200) state.logs.length = 200;
   renderLog();
+  refreshMemory();
 
   // Marca la pestaña activa cuando hay un corte en vivo.
   if (entry.kind === 'receiving') {
@@ -303,6 +304,163 @@ async function refreshStats() {
   } catch {
     /* la shell sigue funcionando sin estadísticas */
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* panel: memoria (EVO MEMORY)                                         */
+/* ------------------------------------------------------------------ */
+
+const MEM = {
+  items: document.getElementById('memItems'),
+  tokens: document.getElementById('memTokens'),
+  saved: document.getElementById('memSaved'),
+  legend: document.getElementById('memLegend'),
+  list: document.getElementById('memoryList'),
+  searchForm: document.getElementById('memSearchForm'),
+  search: document.getElementById('memSearch'),
+  handoff: document.getElementById('memHandoff'),
+  copy: document.getElementById('memCopy'),
+  packet: document.getElementById('memPacket'),
+  importBtn: document.getElementById('memImport'),
+  clear: document.getElementById('memClear'),
+  file: document.getElementById('memFile'),
+};
+
+const MEM_KIND_LABEL = {
+  goal: 'objetivo',
+  decision: 'decisión',
+  constraint: 'restricción',
+  preference: 'preferencia',
+  task: 'pendiente',
+  issue: 'problema',
+  fact: 'dato',
+  entity: 'entidad',
+  artifact: 'código',
+  episode: 'episodio',
+  question: 'pregunta',
+};
+
+const memState = { items: [], stats: null, lastPacket: null };
+
+function renderMemoryItems(entries) {
+  if (!entries.length) {
+    MEM.list.innerHTML = '<li class="empty">Todavía no hay nada memorable en este proyecto. Conversá y EVO irá destilando lo importante.</li>';
+    return;
+  }
+  MEM.list.innerHTML = entries
+    .map((item) => {
+      const kind = MEM_KIND_LABEL[item.kind] || item.kind;
+      const score = typeof item.score === 'number' ? `<span class="mem-score">${item.score.toFixed(3)}</span>` : '';
+      return `<li class="${item.pinned ? 'pinned' : ''}" data-id="${escapeHtml(item.id)}">
+        <div class="mem-head">
+          <span class="mem-kind">${escapeHtml(kind)}</span>
+          ${item.pinned ? '<span class="mem-kind">fijada</span>' : ''}
+          ${score}
+        </div>
+        <div class="mem-text">${escapeHtml(item.text)}</div>
+        <div class="mem-meta">
+          <button data-action="pin" data-id="${escapeHtml(item.id)}">${item.pinned ? 'soltar' : 'fijar'}</button>
+          <button data-action="forget" data-id="${escapeHtml(item.id)}">olvidar</button>
+          ${typeof item.uses === 'number' ? `<span>${item.uses} usos</span>` : ''}
+        </div>
+      </li>`;
+    })
+    .join('');
+}
+
+async function refreshMemory() {
+  if (!nexo.memory) return;
+  try {
+    memState.stats = await nexo.memory.stats();
+    memState.items = await nexo.memory.list();
+    MEM.items.textContent = String(memState.stats.active ?? 0);
+    MEM.tokens.textContent = String(memState.stats.tokens ?? 0);
+    MEM.saved.textContent = `${memState.stats.savedPct ?? 0} %`;
+    MEM.legend.innerHTML = Object.entries(memState.stats.byKind || {})
+      .filter(([, count]) => count > 0)
+      .map(([kind, count]) => `<span>${escapeHtml(MEM_KIND_LABEL[kind] || kind)}: ${count}</span>`)
+      .join(' · ');
+    MEM.file.textContent = memState.stats.file ? `Archivo: ${memState.stats.file}` : '';
+    renderMemoryItems(memState.items.slice(0, 40));
+  } catch {
+    /* el panel de memoria es opcional frente al navegador */
+  }
+}
+
+MEM.list.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const { id, action } = button.dataset;
+  if (action === 'pin') {
+    const current = memState.items.find((item) => item.id === id);
+    await nexo.memory.pin(id, !current?.pinned);
+  } else if (action === 'forget') {
+    await nexo.memory.forget(id);
+  }
+  await refreshMemory();
+});
+
+MEM.searchForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const query = MEM.search.value.trim();
+  if (!query) return refreshMemory();
+  const results = await nexo.memory.recall(query, 20);
+  renderMemoryItems(results);
+});
+
+MEM.handoff.addEventListener('click', async () => {
+  const packet = await nexo.memory.handoff();
+  if (!packet) return;
+  memState.lastPacket = packet;
+  MEM.packet.value = packet.markdown;
+});
+
+MEM.copy.addEventListener('click', async () => {
+  if (!MEM.packet.value) await MEM.handoff.click();
+  if (!MEM.packet.value) return;
+  try {
+    await navigator.clipboard.writeText(MEM.packet.value);
+    MEM.copy.textContent = 'Copiado';
+    setTimeout(() => { MEM.copy.textContent = 'Copiar'; }, 1600);
+  } catch {
+    MEM.packet.select();
+  }
+});
+
+MEM.importBtn.addEventListener('click', async () => {
+  const raw = MEM.packet.value.trim();
+  if (!raw) return;
+  let packet = memState.lastPacket;
+  if (!packet || JSON.stringify(packet.markdown).slice(1, 80) !== JSON.stringify(raw).slice(1, 80)) {
+    packet = { markdown: raw, items: parsePacketText(raw) };
+  }
+  const result = await nexo.memory.import(packet);
+  MEM.packet.value = `Importadas ${result.added}, fusionadas ${result.merged}.`;
+  await refreshMemory();
+});
+
+MEM.clear.addEventListener('click', async () => {
+  if (!window.confirm('¿Vaciar toda la memoria de este proyecto? Esta acción no se puede deshacer.')) return;
+  await nexo.memory.clear();
+  MEM.packet.value = '';
+  await refreshMemory();
+});
+
+/** Convierte el texto pegado de un paquete en memorias importables. */
+function parsePacketText(raw) {
+  const items = [];
+  let kind = 'fact';
+  const map = { 'Decisiones tomadas': 'decision', 'Restricciones': 'constraint', 'Objetivos': 'goal', 'Pendientes': 'task', 'Problemas abiertos': 'issue', 'Datos y referencias': 'fact' };
+  for (const line of raw.split('\n')) {
+    const heading = line.match(/^##\s+(.+)$/);
+    if (heading) {
+      kind = map[heading[1].trim()] || 'fact';
+      continue;
+    }
+    const bullet = line.match(/^[-*]\s+(.+)$/);
+    if (bullet) items.push({ kind, text: bullet[1].trim() });
+  }
+  return items;
 }
 
 /* ------------------------------------------------------------------ */
@@ -390,7 +548,14 @@ document.querySelectorAll('.stab').forEach((tab) => {
     document.querySelectorAll('.panel-view').forEach((panel) => {
       panel.classList.toggle('active', panel.dataset.panel === tab.dataset.panel);
     });
+    if (tab.dataset.panel === 'memory') refreshMemory();
   });
+});
+
+// El proceso principal avisa cuando la memoria cambia por otra vía (importación,
+// vaciado) para que el panel no muestre datos viejos.
+nexo.on?.('nexo:memory-changed', () => {
+  if (document.querySelector('.stab[data-panel="memory"]')?.classList.contains('active')) refreshMemory();
 });
 
 /* ------------------------------------------------------------------ */
@@ -456,6 +621,7 @@ async function boot() {
   state.logs = await nexo.getLog();
   renderLog();
   refreshStats();
+  refreshMemory();
 
   createTab(DEMO_URL);
   els.browser.classList.add('with-sidebar');

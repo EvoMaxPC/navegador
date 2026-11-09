@@ -239,3 +239,73 @@ button { font: inherit; color: inherit; }
 }
 .welcome h1 { font-size: 26px; margin: 0 0 8px; letter-spacing: -0.02em; }
 .welcome p { color: var(--muted); margin: 0 auto; max-width: 460px; line-height: 1.6; }
+
+/* ---------------- EVO MEMORY ---------------- */
+
+.mem-search { margin: 0 0 10px; }
+.mem-search input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg, #e8ecf4);
+  font: inherit;
+}
+.mem-search input:focus { outline: none; border-color: rgba(120, 160, 255, 0.55); }
+
+.mem-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--muted, #8b93a7);
+}
+
+.memory-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.memory-list li {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.memory-list li.pinned { border-color: rgba(120, 160, 255, 0.45); }
+.memory-list .mem-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.memory-list .mem-kind {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--muted, #8b93a7);
+}
+.memory-list .mem-score { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 11px; color: var(--muted, #8b93a7); }
+.memory-list .mem-text { font-size: 12.5px; line-height: 1.45; }
+.memory-list .mem-meta { display: flex; gap: 8px; margin-top: 6px; }
+.memory-list .mem-meta button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--muted, #8b93a7);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.memory-list .mem-meta button:hover { color: var(--fg, #e8ecf4); }
+.memory-list .empty { color: var(--muted, #8b93a7); font-size: 12px; border: none; background: none; }
+
+.mem-actions { display: flex; gap: 8px; margin: 8px 0; }
+.mem-packet {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--fg, #e8ecf4);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 8px;
+  resize: vertical;
+}

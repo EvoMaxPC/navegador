@@ -31,6 +31,13 @@ export const DEFAULT_SETTINGS = {
     budgetTokens: 6000,
     keepRecentTurns: 6,
   },
+  memory: {
+    // EVO MEMORY: memoria persistente y expansión de contexto.
+    enabled: true,
+    maxItems: 6000,
+    episodeEvery: 8,
+    projectId: 'default',
+  },
   receiving: {
     enabled: true,
     stopOnLoop: true,

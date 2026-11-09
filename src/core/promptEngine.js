@@ -76,6 +76,8 @@ export function stripNexoBlocks(text) {
     .replace(/\[Memoria de la conversación · Nexo\][\s\S]*?(?=\n\n|$)/g, '')
     .replace(/\[Continuación automática · Nexo\][\s\S]*?(?=\n\n|$)/g, '')
     .replace(/\[Aclaración · Nexo\][\s\S]*?(?=\n\n|$)/g, '')
+    .replace(/\[EVO · [\s\S]*?\[\/EVO\]/g, '')
+    .replace(/\[EVO · [^\n]*\n[\s\S]*?(?=\n\n|$)/g, '')
     .trim();
 }
 
@@ -272,7 +274,43 @@ export function enhancePrompt(input) {
 
   // 5) presupuesto de contexto
   let context = null;
-  if (settings.context.enabled && history.length) {
+
+  // 5a) EVO MEMORY: compilador de contexto con recuperación semántica.
+  if (settings.context.enabled && input.memory && settings.memory?.enabled !== false) {
+    const compiled = input.memory.compile({
+      query: userPromptForQuery(rawPrompt),
+      history,
+      budgetTokens: settings.context.budgetTokens,
+    });
+
+    if (compiled.payload) {
+      blocks.push({
+        id: 'memory',
+        label: 'Memoria EVO',
+        text: compiled.payload,
+        reason: `${compiled.stats.retrieved} memorias recuperadas · ${compiled.stats.used} tokens`,
+      });
+      findings.push({
+        id: 'evo-context',
+        level: 'info',
+        title: `EVO recuperó ${compiled.stats.retrieved} memorias (${compiled.stats.used} tokens)`,
+        detail: compiled.stats.savedTokens > 0
+          ? `El historial completo costaría ~${compiled.stats.baselineTokens} tokens; el contexto compilado usa ${compiled.stats.used} (${compiled.stats.savedPct} % menos).`
+          : `Contexto compilado en ${compiled.stats.used} tokens con presupuesto de ${compiled.stats.budget}.`,
+      });
+      context = {
+        engine: 'evo',
+        foldedTurns: compiled.stats.foldedTurns,
+        keptTurns: compiled.stats.workingTurns,
+        tokensBefore: compiled.stats.baselineTokens,
+        tokensAfter: compiled.stats.used,
+        card: compiled.payload,
+        retrieved: compiled.retrieved,
+        stats: compiled.stats,
+        memoryIds: compiled.memoryIds,
+      };
+    }
+  } else if (settings.context.enabled && history.length) {
     const plan = planBudget(history, {
       budgetTokens: settings.context.budgetTokens,
       keepRecent: settings.context.keepRecentTurns,
@@ -342,6 +380,15 @@ export function enhancePrompt(input) {
     protocolLevel: level,
     stats: buildStats(rawPrompt, enhanced, blocks.length),
   };
+}
+
+/**
+ * La consulta para EVO no es el prompt entero: son las primeras frases, que es
+ * donde está la intención. El resto suele ser contexto pegado o formato.
+ */
+function userPromptForQuery(rawPrompt) {
+  const trimmed = String(rawPrompt || '').replace(/\s+/g, ' ').trim();
+  return trimmed.length > 320 ? trimmed.slice(0, 320) : trimmed;
 }
 
 function buildStats(before, after, blockCount) {
