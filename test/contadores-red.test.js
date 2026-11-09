@@ -194,6 +194,7 @@ test('escribir, enviar y recibir respuesta cuenta 1 mensaje, 1 respuesta y 1 tur
     url: 'https://chatgpt.com/backend-api/f/conversation',
     cuerpo,
     webContentsId: view.id,
+    requestId: 'req-completo',
   });
   await settle(20);
 
@@ -216,6 +217,8 @@ test('escribir, enviar y recibir respuesta cuenta 1 mensaje, 1 respuesta y 1 tur
   });
   view.debugger.bodies.set('req-completo', sse);
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-completo' });
+  // El mismo cierre llega por webRequest: no debe sumar otra respuesta.
+  respuestaRed({ requestId: 'req-completo', webContentsId: view.id });
   await settle(80);
 
   const fin = await stats();
