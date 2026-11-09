@@ -19,6 +19,8 @@ register('./harness/loader.mjs', import.meta.url);
 
 const { journal } = await import('./harness/electron-stub.mjs');
 
+// El respaldo de red usa una espera breve para dar prioridad al texto de CDP.
+process.env.NEXO_NETRESP_MS = '1';
 await import('../src/main/main.js');
 
 const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -50,6 +52,15 @@ function peticionRed({ url, method = 'POST', cuerpo = null, webContentsId = 1, s
     resultado = respuesta;
   });
   return resultado;
+}
+
+/** Simula el cierre HTTP de una petición de conversación en Electron. */
+function respuestaRed({ url = 'https://chatgpt.com/backend-api/f/conversation', statusCode = 200, webContentsId = 1, sinPestana = false, method = 'POST' } = {}) {
+  const mano = journal.webRequest.completed.get(PARTITION);
+  assert.ok(mano, 'el observador de respuestas está escuchando');
+  const detalles = { url, method, statusCode, resourceType: 'xhr' };
+  if (!sinPestana) detalles.webContentsId = webContentsId;
+  mano.listener(detalles);
 }
 
 const cuerpoChatGPT = (texto, extra = {}) =>
@@ -274,6 +285,56 @@ test('un envío salido de un worker (sin pestaña identificada) igual cierra su 
   assert.equal(fin.messages, antes.messages + 1, 'el mensaje se cuenta');
   assert.equal(fin.responses, antes.responses + 1, 'la respuesta se cuenta');
   assert.equal(fin.turns, antes.turns + 1, 'y el turno se cierra igual');
+});
+
+/* ------------------------------------------------------------------ */
+/* respaldo de salida HTTP                                             */
+/* ------------------------------------------------------------------ */
+
+test('una respuesta HTTP 2xx cierra el turno aunque la pestaña no venga en el evento', async () => {
+  const view = await abrir('https://chatgpt.com/c/red-respuesta-red');
+  const antes = await stats();
+
+  peticionRed({
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    cuerpo: cuerpoChatGPT('respuesta por red'),
+    webContentsId: view.id,
+  });
+  respuestaRed({ webContentsId: view.id, sinPestana: true });
+  await settle(30);
+
+  const fin = await stats();
+  assert.equal(fin.messages, antes.messages + 1, 'el mensaje de entrada se conserva');
+  assert.equal(fin.responses, antes.responses + 1, 'la respuesta HTTP se cuenta');
+  assert.equal(fin.turns, antes.turns + 1, 'el turno se cierra');
+  assert.equal(fin.outputTokens, antes.outputTokens, 'sin texto no se inventan tokens');
+});
+
+test('una respuesta HTTP fallida no se cuenta como respuesta de GPT', async () => {
+  const view = await abrir('https://chatgpt.com/c/red-respuesta-fallida');
+  const antes = await stats();
+  peticionRed({
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    cuerpo: cuerpoChatGPT('fallo HTTP'),
+    webContentsId: view.id,
+  });
+  respuestaRed({ webContentsId: view.id, statusCode: 500 });
+  await settle(30);
+  const fin = await stats();
+  assert.equal(fin.responses, antes.responses, 'un 500 no cuenta respuesta');
+  assert.equal(fin.turns, antes.turns, 'un 500 no cierra el turno');
+});
+
+test('la telemetría POST no se cuenta como respuesta de GPT', async () => {
+  const antes = await stats();
+  respuestaRed({
+    url: 'https://chatgpt.com/ces/v1/telemetry/intake',
+    statusCode: 200,
+  });
+  await settle(10);
+  const fin = await stats();
+  assert.equal(fin.responses, antes.responses, 'telemetría no suma respuestas');
+  assert.equal(fin.turns, antes.turns, 'telemetría no cierra turnos');
 });
 
 /* ------------------------------------------------------------------ */
