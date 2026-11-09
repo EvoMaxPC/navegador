@@ -170,8 +170,8 @@ reproducciones del código con grabaciones y transportes/DOM controlados.
 - `test/chatgpt-dpu.test.js`: roles sin etiquetas traducidas, prompt repetido,
   bloqueo de respuesta vieja/ajena y espera de una respuesta nueva idéntica.
 
-`npm run verify`: **540 pruebas, 539 aprobadas, 1 omitida, 0 fallos**. Bundle
-**46.7 kB / 16.7 kB gzip**, 10 módulos; no se rebajaron límites de rendimiento.
+`npm run verify`: **545 pruebas, 544 aprobadas, 1 omitida, 0 fallos**. Bundle
+**47.3 kB / 16.9 kB gzip**, 10 módulos; no se rebajaron límites de rendimiento.
 
 Sigue faltando comprobar una respuesta propia en ChatGPT dentro de NEXO real:
 no hay acceso a ChatGPT ni navegador gráfico ejecutable en este sandbox. Si la
@@ -179,3 +179,28 @@ versión 0.1.19 aún no captura en la máquina del usuario, la evidencia necesar
 es el diagnóstico de la misma respuesta (`dpu-capture`, `response-mime`,
 `response-formato`, `incoming`) y su MIME/ruta sanitizados. Un ZIP compilado o
 estas pruebas no bastan para declarar validada esa sesión en vivo.
+
+
+### Integración del respaldo autenticado recibido concurrentemente
+
+Se integraron los commits remotos `24d6e99` a `f8d7e87`, que añadían espera DPU,
+regresiones de prompt repetido y recuperación de la respuesta autenticada desde
+el DOM. Se unificaron los lectores/esperas con el helper anterior; se conserva
+la función pública `extractChatGptAssistantDomText`, sin duplicar capturadores.
+
+Si un SSE autenticado termina sin texto, se informa primero su cierre por el
+canal existente para no retrasar las otras estadísticas. Sólo entonces se intenta
+recuperar un mensaje assistant nuevo, posterior al user actual y diferente de la
+instantánea previa. Si se obtiene texto, el mismo `nexo:stream-end` lleva el mismo
+ID y `source: dom-recovery`. El principal reutiliza `Engine.onCdpCapture` y su
+absorción de tokens de una respuesta ya contada: **no vuelve a sumar respuesta,
+actividad ni a finalizar la memoria del guardián**. BPE y actualización de shell
+son los existentes. Una respuesta previa sin cambios nunca sirve de recuperación,
+aunque el prompt se repita. La normalización de saltos/espacios del lector
+concurrente se unificó con la del helper probado.
+
+Las pruebas adicionales de la integración comprueban recuperación autenticada
+tardía hasta UI, conservación de un único contador de respuesta y rechazo de
+texto previo; se conservaron los dos tests concurrentes recibidos. La verificación
+completa integrada es la indicada arriba: 545 pruebas, sin fallos. El transporte
+sigue siendo replay/simulado, no una sesión de ChatGPT en vivo.
