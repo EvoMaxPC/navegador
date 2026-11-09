@@ -1125,6 +1125,9 @@ function watchProviderNetwork(s) {
    */
   const RETRASO_RED_MS = Number(process.env.NEXO_NETRESP_MS) || 1500;
   s.webRequest.onCompleted({ urls: ['*://*/*'] }, (details = {}) => {
+    const requestId = String(details.id || '');
+    const asociada = requestId ? requestTurns.get(requestId) : null;
+    if (requestId) requestTurns.delete(requestId);
     const url = String(details.url || '');
     const host = hostOf(url);
     if (!isAiHost(host)) return;
@@ -1132,9 +1135,6 @@ function watchProviderNetwork(s) {
     if (method === 'POST' && isMediable(detectSite(host), url, method)) {
       const status = Number(details.statusCode) || 0;
       if (status >= 200 && status < 300 && engine.isEnabledFor(host)) {
-        const requestId = String(details.id || '');
-        const asociada = requestId ? requestTurns.get(requestId) : null;
-        if (requestId) requestTurns.delete(requestId);
         const rawId = Number(details.webContentsId);
         const tabId = asociada?.tabId ?? (Number.isFinite(rawId) ? rawId : -1);
         const esperaba = asociada?.messageId || engine.currentSendId(tabId);
@@ -1182,6 +1182,7 @@ function watchProviderNetwork(s) {
   });
 
   s.webRequest.onErrorOccurred({ urls: ['*://*/*'] }, (details = {}) => {
+    if (details.id) requestTurns.delete(String(details.id));
     const url = String(details.url || '');
     const host = hostOf(url);
     if (!isAiHost(host)) return;
