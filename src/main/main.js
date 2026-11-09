@@ -1439,7 +1439,7 @@ app.whenReady().then(async () => {
               messageId: event.messageId || null,
               paired: Boolean(event.paired),
               chars,
-              tokens: estimateTokens(String(capture.text || '')),
+              tokens: countGptTokens(String(capture.text || ''), capture.model || ''),
               conversationId: capture.conversationId || null,
             },
             ts: Date.now(),
