@@ -423,8 +423,8 @@ test('el motor no prepara texto fuera de un proveedor ni en un flujo de acceso',
   assert.equal(typeof dentro.text, 'string');
 });
 
-test('una conversación mediada cuenta el turno aunque la URL llegue relativa', async () => {
-  const antes = (await callIpc('nexo:stats')).turns;
+test('preparar un envío no cuenta ni un mensaje ni un turno por sí solo', async () => {
+  const antes = await callIpc('nexo:stats');
 
   // `fetch('/backend-api/conversation')` es lo normal en una aplicación web: el
   // host no viene en la URL, viene en el identificador de sitio de la capa.
@@ -436,8 +436,11 @@ test('una conversación mediada cuenta el turno aunque la URL llegue relativa', 
   assert.equal(prep.skipped, undefined, 'se media igual que con la URL absoluta');
   assert.ok(prep.text, 'el motor devolvió el texto a enviar');
 
-  const despues = (await callIpc('nexo:stats')).turns;
-  assert.equal(despues, antes + 1, 'el turno se cuenta al preparar el envío');
+  // Un mensaje existe cuando la página dice que lo envió, y un turno cuando
+  // llega su respuesta: preparar el texto no es ninguna de las dos cosas.
+  const despues = await callIpc('nexo:stats');
+  assert.equal(despues.messages, antes.messages, 'preparar no cuenta mensajes');
+  assert.equal(despues.turns, antes.turns, 'preparar no cuenta turnos');
 });
 
 test('un cierre de turno deja la conversación registrada', async () => {

@@ -174,6 +174,39 @@ los dos caminos, así que un mismo turno no se registra dos veces.
 
 ---
 
+## Contadores de conversación
+
+Ocho métricas independientes, cada una con su hecho, expuestas por
+`nexo:stats` y dibujadas en el panel de actividad:
+
+| Métrica | Qué cuenta | De dónde sale |
+| --- | --- | --- |
+| `messages` | mensajes del usuario | evento `outgoing` de la capa, uno por envío reconocido |
+| `responses` | respuestas de la IA | cierre de stream (`nexo:stream-end`) o captura CDP |
+| `turns` | turnos completos | par mensaje↔respuesta, asociado por `messageId` |
+| `inputTokens` | tokens del mensaje | `estimateTokens` sobre el texto localizado |
+| `outputTokens` | tokens de la respuesta | `estimateTokens` sobre el texto entregado |
+| `interventions` | intervenciones reales | `prepare()` sólo cuando el texto cambió, más los cortes |
+| `loopsSeen` | bucles observados | centinelas de cada guardián + observación CDP |
+| `loopsCut` | bucles cortados | cierre de stream con `stopped: true` |
+
+Reglas que sostienen la cuenta:
+
+- **La captura no depende de la mediación.** La capa envuelve la respuesta de
+  toda petición de conversación, haya o no texto que reescribir.
+- **Un mensaje se cuenta al enviarse**, no al prepararse: `prepare()` no toca los
+  contadores de mensajes ni de turnos.
+- **La identidad no es el texto.** Cada envío lleva un `messageId` propio de la
+  página; la respuesta lo devuelve y así se cierra el turno, incluso con varias
+  pestañas abiertas. El texto sólo se usa como segunda barrera para descartar la
+  misma respuesta vista por SSE y por CDP.
+- **Los avisos del sistema no son intervenciones.** El registro los guarda con
+  `kind: 'system'` y el contador de intervenciones los excluye.
+- **Los tokens son una estimación** (`estimateTokens`: caracteres y alfabeto), no
+  el conteo del tokenizador del proveedor. La interfaz lo dice con un asterisco.
+
+---
+
 ## Costes
 
 | Operación | Coste |

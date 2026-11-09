@@ -72,10 +72,19 @@
 
       <section class="panel-view active" data-panel="activity">
         <div class="stats" id="stats">
-          <div class="stat"><b id="statTurns">0</b><span>turnos mediados</span></div>
+          <div class="stat"><b id="statMessages">0</b><span>mensajes del usuario</span></div>
+          <div class="stat"><b id="statResponses">0</b><span>respuestas de la IA</span></div>
+          <div class="stat"><b id="statTurns">0</b><span>turnos completos</span></div>
+          <div class="stat"><b id="statInTokens">0</b><span>tokens de entrada *</span></div>
+          <div class="stat"><b id="statOutTokens">0</b><span>tokens de salida *</span></div>
+          <div class="stat"><b id="statInterventions">0</b><span>intervenciones</span></div>
+          <div class="stat"><b id="statLoopsSeen">0</b><span>bucles observados</span></div>
           <div class="stat"><b id="statLoops">0</b><span>bucles cortados</span></div>
-          <div class="stat"><b id="statLog">0</b><span>intervenciones</span></div>
         </div>
+        <p class="note" id="statsNote">
+          * Los tokens son una estimación del motor (caracteres y alfabeto), no el
+          conteo de un tokenizador del proveedor.
+        </p>
         <div class="panel-head">
           <h2>Intervenciones</h2>
           <button class="link" id="clearLog">Limpiar</button>

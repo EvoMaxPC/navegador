@@ -20,6 +20,7 @@
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isMediable, locateUserText, patchUserText } from '../core/sites.js';
+import { estimateTokens } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
@@ -30,6 +31,8 @@ const state = {
   language: CONFIG.language || 'es',
   continuations: 0,
   active: 0,
+  /** Identificador de cada envío reconocido: asocia mensaje, respuesta y turno. */
+  messageSeq: 0,
 };
 
 /* ------------------------------------------------------------------ */
@@ -125,13 +128,35 @@ function methodOf(input, init) {
   return String(init?.method || input?.method || 'GET');
 }
 
+/**
+ * Identificador de la conversación abierta, tomado de la URL del sitio
+ * (`/c/<id>` en ChatGPT, `/chat/<id>` en Claude). Es lo que permite asociar
+ * mensaje, respuesta y turno sin mirar el texto.
+ */
+function conversationIdOf() {
+  try {
+    const match = String(location.pathname).match(/\/(?:c|chat|conversation)\/([A-Za-z0-9-]{8,})/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* 1 + 2. petición saliente                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * Decide si la petición se media y, si es así, devuelve los argumentos con los
- * que hay que enviarla. Devuelve `null` cuando NO hay nada que cambiar.
+ * Decide qué hacer con la petición y devuelve un informe.
+ *
+ * Nunca devuelve `null`: hay tres estados y los tres importan.
+ *
+ *   · `chat: false` — no es una petición de conversación; no se toca nada.
+ *   · `chat: true, plan: null` — es una conversación pero no se cambia el texto
+ *     (sin prompt reconocible, o el motor no modificó nada). **La respuesta se
+ *     captura igual**: contar lo que el usuario envió y lo que la IA respondió no
+ *     puede depender de que Nexo intervenga.
+ *   · `plan: { input, init }` — hay que enviar el cuerpo mediado.
  *
  * Esta función sólo PREPARA: nunca envía. Así, un fallo del motor (tiempo de
  * espera, error de IPC, esquema desconocido) se resuelve enviando la petición
@@ -139,7 +164,7 @@ function methodOf(input, init) {
  */
 async function planRequest(input, init) {
   const url = absoluteUrl(urlOf(input));
-  if (!shouldMediate(url, methodOf(input, init))) return null;
+  if (!shouldMediate(url, methodOf(input, init))) return { chat: false };
 
   // El cuerpo viaja como string en `init`, o dentro de un objeto `Request`.
   let text = typeof init?.body === 'string' ? init.body : null;
@@ -148,20 +173,32 @@ async function planRequest(input, init) {
   if (desdeRequest) text = await input.clone().text();
 
   const parsed = safeJson(text);
-  if (!parsed) return null;
+  if (!parsed) return { chat: true };
 
   const located = locateUserText(parsed, site);
-  if (!located || !located.value) return null;
+  if (!located || !located.value) return { chat: true };
 
-  const report = await bridge.request('prepare', { prompt: located.value, url, site: site.id });
-  if (!report?.text) return null;
+  const prompt = located.value;
+  const report = await bridge.request('prepare', { prompt, url, site: site.id });
+  const base = {
+    chat: true,
+    promptChars: prompt.length,
+    promptTokens: estimateTokens(prompt),
+    url,
+  };
+  if (!report?.text) return { ...base, plan: null };
 
-  // El registro de la respuesta no depende de que el prompt cambie.
-  if (report.text === located.value) return { input, init, captureOnly: true };
+  // El texto no cambió: no hay nada que reescribir, pero el envío se registra y
+  // la respuesta se captura. Antes se descartaba todo y el turno no existía.
+  if (report.text === prompt) return { ...base, plan: { input, init }, mediated: false };
 
-  if (!patchUserText(parsed, site, report.text)) return null;
+  if (!patchUserText(parsed, site, report.text)) return { ...base, plan: null };
   const body = JSON.stringify(parsed);
-  return desdeRequest ? { input: new Request(input, { body }), init } : { input, init: { ...init, body } };
+  return {
+    ...base,
+    plan: desdeRequest ? { input: new Request(input, { body }), init } : { input, init: { ...init, body } },
+    mediated: true,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,7 +209,16 @@ async function planRequest(input, init) {
 // la petición se rompería para la página.
 const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
 
-function wrapResponse(response) {
+/**
+ * Tope del texto que viaja al proceso principal.
+ *
+ * No es un recorte de la captura: es el límite de lo que se guarda en el
+ * historial y en la memoria. Antes eran 8 000 caracteres fijos, que cortaban
+ * respuestas largas de verdad; ahora entra una conversación entera.
+ */
+const MAX_CAPTURE_CHARS = 200_000;
+
+function wrapResponse(response, capture = {}) {
   if (!response || !response.body || !looksLikeStream(response.headers)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
@@ -184,7 +230,7 @@ function wrapResponse(response) {
       language: state.language,
       host: CONFIG.host,
       onStop: (info) => {
-        bridge.event('stream-stop', { site: site.id, host: CONFIG.host, ...info });
+        bridge.event('stream-stop', { ...capture, site: site.id, host: CONFIG.host, ...info });
       },
       onError: (info) => {
         // El adaptador no supo leer un evento. Se reenvió tal cual y la
@@ -192,16 +238,23 @@ function wrapResponse(response) {
         bridge.event('error', { stage: `filtro:${info.stage}`, message: info.message });
       },
       onEnd: (info) => {
+        const text = String(info.text || '');
+        const recortado = text.length > MAX_CAPTURE_CHARS;
         bridge.event('stream-end', {
+          ...capture,
           site: site.id,
           host: CONFIG.host,
+          finished: true,
           stopped: info.stopped,
           code: info.code,
           truncated: info.truncated,
           truncationReason: info.truncationReason,
           deliveredChars: info.deliveredChars,
           droppedChars: info.droppedChars,
-          text: info.text.slice(-8000),
+          chars: text.length,
+          tokens: estimateTokens(text),
+          clipped: recortado,
+          text: recortado ? text.slice(0, MAX_CAPTURE_CHARS) : text,
           dropped: info.dropped.slice(0, 600),
         });
       },
@@ -243,28 +296,32 @@ if (!window.__NEXO_HOOKED__) {
   window.fetch = async function nexoFetch(input, init) {
     const url = absoluteUrl(urlOf(input));
     const method = methodOf(input, init);
-    // ¿La capa reconoce esta petición como un envío de chat? Se evalúa acá para
-    // poder informarlo salga o no la mediación: si el envío no se registra, el
-    // panel no puede decir si el mensaje salió.
-    const chat = shouldMediate(url, method);
+    const messageId = `m${Date.now().toString(36)}-${(state.messageSeq += 1)}`;
 
     // 1) Preparar: no envía nada. Cualquier fallo → petición original.
-    let plan = null;
+    let prepared = { chat: false };
     try {
-      plan = await planRequest(input, init);
+      prepared = await planRequest(input, init);
     } catch (error) {
       bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
     }
-    if (chat) {
+
+    // Un envío reconocido se anota siempre: con o sin intervención. De acá sale
+    // el contador de mensajes del usuario y la asociación con su respuesta.
+    if (prepared.chat && prepared.promptChars > 0) {
       bridge.event('outgoing', {
+        messageId,
         site: site.id,
         host: CONFIG.host,
+        conversationId: conversationIdOf(),
         url: url.slice(0, 200),
-        mediated: Boolean(plan),
-        reason: plan ? null : 'sin-cambio',
+        mediated: Boolean(prepared.mediated),
+        chars: prepared.promptChars,
+        tokens: prepared.promptTokens || 0,
       });
     }
-    if (!plan) return nativeFetch(input, init);
+
+    const target = prepared.plan || { input, init };
 
     // 2) Enviar, UNA sola vez. Un error de red o un AbortError (el usuario pulsó
     //    «Detener») se propaga a la página, que ya sabe qué hacer: reenviar desde
@@ -272,7 +329,7 @@ if (!window.__NEXO_HOOKED__) {
     state.active += 1;
     let response;
     try {
-      response = await nativeFetch(plan.input, plan.init);
+      response = await nativeFetch(target.input, target.init);
     } finally {
       state.active -= 1;
     }
@@ -286,10 +343,17 @@ if (!window.__NEXO_HOOKED__) {
       });
     }
 
-    // 3) Envolver la respuesta. Si el filtro fallara, se entrega la original sin
-    //    reenviar nada (el cuerpo todavía no se consumió).
+    // 3) Envolver la respuesta. Sólo se captura lo que es una conversación: una
+    //    página cualquiera no se toca. Si el filtro fallara, se entrega la
+    //    original sin reenviar nada (el cuerpo todavía no se consumió).
+    if (!prepared.chat) return response;
     try {
-      return wrapResponse(response);
+      return wrapResponse(response, {
+        messageId,
+        conversationId: conversationIdOf(),
+        mediated: Boolean(prepared.mediated),
+        promptChars: prepared.promptChars || 0,
+      });
     } catch (error) {
       bridge.event('error', { stage: 'stream', message: String(error?.message || error) });
       return response;

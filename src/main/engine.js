@@ -11,7 +11,7 @@ import { isAiHost } from '../core/cdp.js';
 import { settingsForHost } from '../core/settings.js';
 import { StreamSentinel } from '../core/streamSentinel.js';
 import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
-import { fingerprint } from '../core/text.js';
+import { estimateTokens, fingerprint } from '../core/text.js';
 
 /** Cómo se llama cada canal en los textos que ve el usuario. */
 const CHANNEL_LABEL = {
@@ -42,6 +42,35 @@ export class Engine {
      */
     this.cdpSeen = new Map();
     this.cdp = { captures: 0, duplicates: 0, loops: 0, truncated: 0, failures: 0 };
+
+    /**
+     * Contadores de conversación.
+     *
+     * Cuentan hechos, no actividad: un mensaje es un envío que la capa reconoció
+     * como texto del usuario, una respuesta es un stream que se cerró, y un turno
+     * es el par de los dos. **Ninguno depende de que el motor intervenga**: un
+     * mensaje sin mediación cuenta igual.
+     *
+     * Los tokens son una estimación (`estimateTokens`), no un tokenizador real:
+     * `tokensEstimated` lo dice y la interfaz lo marca.
+     */
+    this.counters = {
+      messages: 0,
+      responses: 0,
+      turns: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      interventions: 0,
+      loopsSeen: 0,
+      loopsCut: 0,
+    };
+    this.tokensEstimated = true;
+    /** Envíos vistos, por pestaña: `${pestaña}|${messageId}`. */
+    this.seenMessages = new Map();
+    /** Respuestas contadas, por pestaña: `${pestaña}|${messageId}`. */
+    this.seenResponses = new Map();
+    /** Último envío de cada pestaña esperando respuesta. */
+    this.awaiting = new Map();
     /** Fallos de red ya informados, para no repetirlos en cada reintento. */
     this.cdpFailures = new Map();
   }
@@ -105,6 +134,9 @@ export class Engine {
     guard.setSettings(settingsForHost(this.store.settings, host));
 
     const report = guard.preparePrompt(prompt);
+    // Intervención real: el texto que viaja al modelo no es el que escribió el
+    // usuario. Sin cambio, no hay intervención que contar.
+    if (report.changed) this.counters.interventions += 1;
     this.#publish(guard);
     return {
       text: report.enhanced,
@@ -124,6 +156,77 @@ export class Engine {
           }
         : null,
     };
+  }
+
+  /**
+   * Mensaje del usuario reconocido por la capa de la página.
+   *
+   * Se cuenta **aquí y no en `prepare()`**: un mensaje existe aunque el motor no
+   * intervenga, aunque el texto no cambie y aunque no haya guardián todavía.
+   * La clave es el identificador que genera la página, no el texto: dos mensajes
+   * iguales en la misma conversación son dos mensajes.
+   */
+  onUserMessage(webContentsId, payload = {}) {
+    const messageId = String(payload.messageId || '');
+    if (!messageId) return { ok: false, skipped: 'sin-id' };
+    const key = `${webContentsId}|${messageId}`;
+    if (this.seenMessages.has(key)) return { ok: true, duplicate: true };
+
+    const now = Date.now();
+    this.seenMessages.set(key, now);
+    this.#prune(this.seenMessages, now);
+
+    const chars = Math.max(0, Number(payload.chars) || 0);
+    const tokens = Number.isFinite(Number(payload.tokens)) ? Math.max(0, Number(payload.tokens)) : estimateTokens(' ');
+    this.counters.messages += 1;
+    this.counters.inputTokens += tokens;
+
+    // Queda esperando su respuesta para poder cerrar el turno.
+    this.awaiting.set(webContentsId, {
+      messageId,
+      at: now,
+      host: payload.host || null,
+      conversationId: payload.conversationId || null,
+    });
+
+    return { ok: true, duplicate: false, messageId, chars, tokens };
+  }
+
+  /**
+   * Respuesta cerrada. Cuenta una sola vez, asocia el turno y distingue una
+   * respuesta completa de una cortada.
+   */
+  #countResponse(webContentsId, payload = {}) {
+    const messageId = String(payload.messageId || '');
+    const now = Date.now();
+    // La clave es el identificador del envío; si el sitio no lo diera (camino
+    // viejo), se usa pestaña + longitud + huella, que sigue distinguiendo dos
+    // respuestas distintas de una repetida.
+    const key = messageId
+      ? `${webContentsId}|${messageId}`
+      : `${webContentsId}|sse|${String(payload.text || '').length}|${fingerprint(String(payload.text || ''))}`;
+    if (this.seenResponses.has(key)) return { ok: true, duplicate: true };
+
+    this.seenResponses.set(key, now);
+    this.#prune(this.seenResponses, now);
+
+    this.counters.responses += 1;
+    this.counters.outputTokens += Math.max(0, Number(payload.tokens) || 0);
+    if (payload.stopped) this.counters.loopsCut += 1;
+
+    const awaiting = this.awaiting.get(webContentsId);
+    if (awaiting && (!awaiting.messageId || !messageId || awaiting.messageId === messageId)) {
+      this.counters.turns += 1;
+      this.awaiting.delete(webContentsId);
+    }
+
+    return { ok: true, duplicate: false };
+  }
+
+  /** Descarta claves viejas de un mapa de deduplicación. */
+  #prune(map, now = Date.now(), ttl = 30 * 60_000) {
+    if (map.size < 500) return;
+    for (const [key, ts] of map) if (now - ts > ttl) map.delete(key);
   }
 
   /**
@@ -155,8 +258,12 @@ export class Engine {
     const host = payload?.host || this.guards.get(webContentsId)?.host || safeHost(payload?.url) || 'desconocido';
     if (payload?.text) this.#markSeen(webContentsId, [`h:${host}|${fingerprint(String(payload.text))}`]);
 
+    // La respuesta se cuenta antes de exigir guardián: una respuesta existe
+    // aunque no se haya preparado ningún envío (mediación apagada o en pausa).
+    const counted = this.#countResponse(webContentsId, payload);
+
     const guard = this.guards.get(webContentsId);
-    if (!guard) return { nextAction: null };
+    if (!guard) return { nextAction: null, counted };
 
     const verdict = {
       stopped: Boolean(payload.stopped),
@@ -177,6 +284,7 @@ export class Engine {
     this.#publish(guard);
 
     return {
+      counted,
       nextAction: result.nextAction
         ? { type: result.nextAction.type, label: result.nextAction.label, prompt: result.nextAction.prompt }
         : null,
@@ -223,6 +331,16 @@ export class Engine {
       return { ok: true, duplicate: true };
     }
     this.#markSeen(webContentsId, keys);
+
+    // Una respuesta que sólo vio CDP también es una respuesta: se cuenta igual.
+    // Si ya la había contado el camino SSE, la huella de arriba la descartó.
+    this.counters.responses += 1;
+    this.counters.outputTokens += estimateTokens(text);
+    const awaiting = this.awaiting.get(webContentsId);
+    if (awaiting) {
+      this.counters.turns += 1;
+      this.awaiting.delete(webContentsId);
+    }
 
     const guard = this.#guard(webContentsId, host);
     const settings = settingsForHost(this.store.settings, host);
@@ -322,20 +440,49 @@ export class Engine {
     }
   }
 
+  /**
+   * Contadores para la interfaz.
+   *
+   * `turns` son turnos **completos** (mensaje y respuesta emparejados), no
+   * envíos preparados: `guardTurns` conserva la cuenta interna de los guardianes
+   * para quien la necesite, pero no se muestra como «turnos».
+   */
   stats() {
-    let turns = 0;
-    let loops = 0;
+    let guardTurns = 0;
+    let loopsSeen = 0;
     for (const guard of this.guards.values()) {
       const s = guard.stats();
-      turns += s.turns;
-      loops += s.loopsSeen;
+      guardTurns += s.turns;
+      loopsSeen += s.loopsSeen;
     }
-    return { tabs: this.guards.size, turns, loops: loops + this.cdp.loops, cdp: { ...this.cdp } };
+    const c = this.counters;
+    const observed = loopsSeen + this.cdp.loops;
+    return {
+      tabs: this.guards.size,
+      // Ocho métricas independientes.
+      messages: c.messages,
+      responses: c.responses,
+      turns: c.turns,
+      inputTokens: c.inputTokens,
+      outputTokens: c.outputTokens,
+      interventions: c.interventions,
+      loopsSeen: observed,
+      loopsCut: c.loopsCut,
+      // Compatibilidad con lo anterior.
+      loops: observed,
+      guardTurns,
+      tokensEstimated: this.tokensEstimated,
+      cdp: { ...this.cdp },
+    };
   }
 
   dropTab(webContentsId) {
     this.guards.delete(webContentsId);
     this.cdpSeen.delete(webContentsId);
+    this.awaiting.delete(webContentsId);
+    for (const map of [this.seenMessages, this.seenResponses]) {
+      for (const key of [...map.keys()]) if (key.startsWith(`${webContentsId}|`)) map.delete(key);
+    }
     for (const key of [...this.cdpFailures.keys()]) {
       if (key.startsWith(`${webContentsId}|`)) this.cdpFailures.delete(key);
     }

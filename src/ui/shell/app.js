@@ -27,7 +27,16 @@ const els = {
   enginePill: document.getElementById('enginePill'),
   enginePillText: document.getElementById('enginePillText'),
   log: document.getElementById('log'),
-  stats: { turns: document.getElementById('statTurns'), loops: document.getElementById('statLoops'), log: document.getElementById('statLog') },
+  stats: {
+    messages: document.getElementById('statMessages'),
+    responses: document.getElementById('statResponses'),
+    turns: document.getElementById('statTurns'),
+    inTokens: document.getElementById('statInTokens'),
+    outTokens: document.getElementById('statOutTokens'),
+    interventions: document.getElementById('statInterventions'),
+    loopsSeen: document.getElementById('statLoopsSeen'),
+    loops: document.getElementById('statLoops'),
+  },
   sidebar: document.getElementById('sidebar'),
   suggestions: document.getElementById('suggestions'),
   bookmarkBtn: document.getElementById('bookmarkBtn'),
@@ -657,7 +666,6 @@ function interventionCount(entries) {
 }
 
 function renderLog() {
-  els.stats.log.textContent = String(interventionCount(state.logs));
   if (!state.logs.length) {
     els.log.innerHTML = '<li class="log-empty">Todavía no hubo intervenciones. Abrí un chat y escribí algo.</li>';
     return;
@@ -703,12 +711,25 @@ function pushIntervention(entry) {
   }
 }
 
+/** Formatea un número con separador de miles local (1.204, no 1204). */
+function num(value) {
+  return Number(value || 0).toLocaleString('es-AR');
+}
+
 async function refreshStats() {
   try {
     const stats = await nexo.getStats();
-    els.stats.turns.textContent = String(stats.turns ?? 0);
-    els.stats.loops.textContent = String(stats.loops ?? 0);
-    els.stats.log.textContent = String(state.logs.length);
+    // Ocho métricas separadas, cada una con su hecho: mensajes enviados,
+    // respuestas recibidas, turnos completos, tokens estimados y lo que hizo
+    // Nexo. Ninguna se deriva de otra para «que dé bien».
+    els.stats.messages.textContent = num(stats.messages);
+    els.stats.responses.textContent = num(stats.responses);
+    els.stats.turns.textContent = num(stats.turns);
+    els.stats.inTokens.textContent = num(stats.inputTokens);
+    els.stats.outTokens.textContent = num(stats.outputTokens);
+    els.stats.interventions.textContent = num(stats.interventions);
+    els.stats.loopsSeen.textContent = num(stats.loopsSeen ?? stats.loops);
+    els.stats.loops.textContent = num(stats.loopsCut);
   } catch {
     /* la shell sigue funcionando sin estadísticas */
   }

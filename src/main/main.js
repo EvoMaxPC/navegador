@@ -482,18 +482,30 @@ function registerIpc() {
   });
   ipcMain.handle('nexo:stream-end', (event, payload) => {
     const result = engine.onStreamEnd(event.sender.id, payload);
-    const chars = Number(payload?.deliveredChars) || 0;
-    if (chars > 0) {
+    const chars = Number(payload?.chars) || Number(payload?.deliveredChars) || 0;
+    if (chars > 0 && !result?.counted?.duplicate) {
       const host = String(payload?.host || payload?.site || 'el sitio');
+      const cortada = Boolean(payload?.stopped || payload?.truncated);
       const entry = {
         kind: 'receiving',
         code: 'incoming',
-        severity: 'info',
-        title: `Respuesta recibida en ${host}`,
+        severity: cortada ? 'warn' : 'info',
+        title: `Respuesta ${cortada ? 'interrumpida' : 'recibida'} en ${host}`,
         detail: payload?.stopped
           ? `Se cortó un bucle antes de mostrarlo (${payload?.droppedChars || 0} caracteres descartados).`
-          : `${chars} caracteres llegaron a la pantalla.`,
-        meta: { host, site: payload?.site || null, deliveredChars: chars, stopped: Boolean(payload?.stopped) },
+          : payload?.truncated
+            ? `Terminó a mitad de frase (${chars} caracteres).`
+            : `${chars} caracteres llegaron a la pantalla.`,
+        meta: {
+          host,
+          site: payload?.site || null,
+          messageId: payload?.messageId || null,
+          conversationId: payload?.conversationId || null,
+          chars,
+          tokens: Number(payload?.tokens) || 0,
+          stopped: Boolean(payload?.stopped),
+          truncated: Boolean(payload?.truncated),
+        },
         ts: Date.now(),
       };
       if (store) store.pushLog(entry);
@@ -612,6 +624,8 @@ function registerIpc() {
     // que el motor inyectaba algo.
     if (clean.type === 'outgoing') {
       const host = String(clean.payload.host || clean.payload.site || 'el sitio');
+      // Contador de mensajes del usuario: se cuenta acá, no en `prepare()`.
+      const counted = engine.onUserMessage(event.sender.id, clean.payload);
       const entry = {
         kind: 'sending',
         code: 'outgoing',
@@ -620,11 +634,22 @@ function registerIpc() {
         detail: clean.payload.mediated
           ? 'El texto salió mediado por el motor.'
           : 'El texto salió sin cambios: el motor no modificó este mensaje.',
-        meta: { host, site: clean.payload.site || null, url: clean.payload.url || '', mediated: Boolean(clean.payload.mediated) },
+        meta: {
+          host,
+          site: clean.payload.site || null,
+          url: clean.payload.url || '',
+          messageId: clean.payload.messageId || null,
+          conversationId: clean.payload.conversationId || null,
+          mediated: Boolean(clean.payload.mediated),
+          chars: Number(clean.payload.chars) || 0,
+          tokens: Number(clean.payload.tokens) || 0,
+          duplicate: Boolean(counted?.duplicate),
+        },
         ts: Date.now(),
       };
       if (store) store.pushLog(entry);
       broadcast('nexo:event', { type: 'intervention', payload: entry });
+      broadcast('nexo:stats-changed', engine.stats());
       return;
     }
 
