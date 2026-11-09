@@ -664,23 +664,22 @@ app.whenReady().then(async () => {
       checks: [{ name: 'prueba de humo', ok: false, detail: error?.message || String(error) }],
     }));
     smokeDone = true;
+    const code = reportSmoke(smoke);
     // El estado de la aceleración por hardware explica buena parte de los
     // tiempos de pintado: en un servidor sin GPU, Chromium rasteriza por
     // software y el primer cuadro tarda cientos de milisegundos.
+    let gpu = 'sin datos';
     try {
-      const gpu = app.getGPUFeatureStatus?.() || {};
-      absorbPerf({
-        gpu: `composición ${gpu.gpu_compositing || 'n/d'}, webgl ${gpu.webgl || 'n/d'}, rasterizado ${gpu.rasterization || 'n/d'}`,
-      });
+      const estado = app.getGPUFeatureStatus?.() || {};
+      gpu = `composición ${estado.gpu_compositing || 'n/d'}, webgl ${estado.webgl || 'n/d'}, rasterizado ${estado.rasterization || 'n/d'}`;
     } catch {
       // Sin información de GPU se informa igual.
     }
-    const code = reportSmoke(smoke);
     if (smokeOut) {
       // `reportSmoke` ya escribió en consola; el archivo es la vía confiable.
       // Incluye las medidas de arranque y memoria: son los números que se
       // comparan entre compilaciones de Windows.
-      const informe = smokeReport({ informe: renderSmoke(smoke), app, code });
+      const informe = smokeReport({ informe: renderSmoke(smoke), app, code, extra: { gpu } });
       await writeFile(smokeOut, informe, 'utf8').catch(() => {});
     }
     app.exit(code);

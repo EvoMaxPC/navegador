@@ -157,6 +157,7 @@ test('el informe de humo lleva las medidas y el publicador las encuentra', async
     informe: '── prueba de humo ──\n✔ ventana\n✔ arrancó y funciona\n',
     app: { getAppMetrics: () => [{ type: 'browser', memory: { workingSetSize: 98_611 } }] },
     code: 0,
+    extra: { gpu: 'composición software, webgl deshabilitado' },
   });
 
   // El archivo que lee `scripts/humo.mjs` sigue diciendo que arrancó.
@@ -164,6 +165,7 @@ test('el informe de humo lleva las medidas y el publicador las encuentra', async
   assert.match(informe, /^tiempos: /m);
   assert.match(informe, /^principal: /m);
   assert.match(informe, /^procesos: 1 · 96,3 MB$/m);
+  assert.match(informe, /^gpu: composición software/m);
   assert.equal(informe.endsWith('código previsto: 0\n'), true);
   assert.ok(marks().ventana >= marks().ready);
 
@@ -172,4 +174,5 @@ test('el informe de humo lleva las medidas y el publicador las encuentra', async
   assert.match(cuerpo, /ready \d/);
   assert.match(cuerpo, /96,3 MB/);
   assert.doesNotMatch(cuerpo, /no trajo medidas/);
+  assert.match(cuerpo, /\| GPU \| composición software/);
 });

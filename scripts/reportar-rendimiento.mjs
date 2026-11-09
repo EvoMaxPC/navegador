@@ -79,6 +79,7 @@ export function formatMarkdown({ smoke = '', bench = null, meta = {} } = {}) {
   const procesos = linea(smoke, /^procesos:.*$/m);
   const tipos = linea(smoke, /^por tipo:.*$/m);
   const notas = linea(smoke, /^notas:.*$/m);
+  const gpu = linea(smoke, /^gpu:.*$/m);
 
   if (tiempos || principal || procesos) {
     salida.push('**Arranque y memoria (Windows, `nexo.exe --smoke`)**');
@@ -89,6 +90,7 @@ export function formatMarkdown({ smoke = '', bench = null, meta = {} } = {}) {
     if (principal) salida.push(`| proceso principal | ${principal.replace(/^principal:\s*/, '')} |`);
     if (procesos) salida.push(`| todos los procesos | ${procesos.replace(/^procesos:\s*/, '')} |`);
     if (tipos) salida.push(`| por tipo | ${tipos.replace(/^por tipo:\s*/, '')} |`);
+    if (gpu) salida.push(`| GPU | ${gpu.replace(/^gpu:\s*/, '')} |`);
     if (notas) salida.push(`| notas | ${notas.replace(/^notas:\s*/, '')} |`);
     salida.push('');
   } else {
