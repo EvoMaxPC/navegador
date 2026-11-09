@@ -16,6 +16,8 @@ const num = (valor, decimales = 1) => valor.toFixed(decimales).replace('.', ',')
 
 /** @type {Record<string, number>} */
 const marcas = {};
+/** Texto que acompañan las medidas (qué recurso fue el lento, por ejemplo). */
+const notas = {};
 
 /** Deja una marca con el tiempo transcurrido desde que cargó el proceso principal. */
 export function mark(name) {
@@ -35,6 +37,11 @@ export function mark(name) {
 export function absorb(datos) {
   if (!datos || typeof datos !== 'object') return marcas;
   for (const [nombre, valor] of Object.entries(datos)) {
+    if (typeof valor === 'string') {
+      // Las notas son texto: sirven para saber *qué* se llevó el tiempo.
+      if (Object.keys(notas).length < 8) notas[`ui-${nombre}`] = valor.slice(0, 200);
+      continue;
+    }
     const numero = Number(valor);
     if (!Number.isFinite(numero)) continue;
     // Prefijo para no confundir una marca del renderer con una del proceso
@@ -42,6 +49,18 @@ export function absorb(datos) {
     const clave = nombre.startsWith('ui-') ? nombre : `ui-${nombre}`;
     marcas[clave] = Number(numero.toFixed(1));
   }
+  return marcas;
+}
+
+/**
+ * Guarda una medida del proceso principal que no es un tiempo de arranque
+ * (un contador, un tamaño).
+ * @param {string} nombre
+ * @param {number} valor
+ */
+export function set(nombre, valor) {
+  const numero = Number(valor);
+  if (Number.isFinite(numero)) marcas[nombre] = Number(numero.toFixed(1));
   return marcas;
 }
 
@@ -114,6 +133,10 @@ export function summary({ app = null, extra = {} } = {}) {
       .join(', ');
     if (detalle) partes.push(`por tipo: ${detalle}`);
   }
+  const textoNotas = Object.entries(notas)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(' · ');
+  if (textoNotas) partes.push(`notas: ${textoNotas}`);
   for (const [key, value] of Object.entries(extra)) partes.push(`${key}: ${value}`);
   return partes.join('\n');
 }

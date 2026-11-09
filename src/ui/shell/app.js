@@ -1275,6 +1275,16 @@ function reportarMedidas(marcas) {
     }
     const pintado = performance.getEntriesByName('first-contentful-paint')[0];
     if (pintado) datos['nav-pintado'] = Math.round(pintado.startTime);
+    // Los tres recursos más lentos, con nombre: si el arranque se va en cargar
+    // un archivo, hay que ver cuál.
+    const recursos = performance
+      .getEntriesByType('resource')
+      .map((item) => ({ nombre: item.name.split('/').slice(-2).join('/'), ms: item.duration }))
+      .sort((a, b) => b.ms - a.ms)
+      .slice(0, 3)
+      .map((item) => `${item.nombre} ${item.ms.toFixed(0)} ms`);
+    if (recursos.length) datos.recursos = recursos.join(', ');
+    datos['nav-recursos'] = performance.getEntriesByType('resource').length;
     nexo.perf?.(datos);
   } catch {
     // Sin medidas se arranca igual.

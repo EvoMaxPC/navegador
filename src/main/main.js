@@ -22,7 +22,7 @@ import { sanitizeFilename } from '../nav/downloads.js';
 import { runSmoke, report as reportSmoke, render as renderSmoke } from './smoke.js';
 import { eventMessage, permissionName, safeExternalUrl, sessionPayload } from './validate.js';
 import { PERMISSION_CATALOG } from '../nav/permissions.js';
-import { absorb as absorbPerf, mark, smokeReport } from './perf.js';
+import { absorb as absorbPerf, mark, set as setPerf, smokeReport } from './perf.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -126,7 +126,28 @@ const MIME = {
  * decir «no encontrado» sin que Chromium lo interprete como un fallo de red.
  */
 function registerProtocol() {
+  // Cuánto cuesta servir los archivos de la interfaz: si el arranque se va en
+  // esto, el problema es el protocolo y no la página.
+  let pedidos = 0;
+  let total = 0;
   protocol.handle('nexo', async (request) => {
+    const t0 = performance.now();
+    try {
+      return await servirArchivo(request);
+    } finally {
+      pedidos += 1;
+      total += performance.now() - t0;
+      setPerf('proto-pedidos', pedidos);
+      setPerf('proto-ms', total);
+    }
+  });
+}
+
+/**
+ * Responde un pedido `nexo://` con el archivo del proyecto.
+ * @param {Request} request
+ */
+async function servirArchivo(request) {
     let pathname;
     try {
       pathname = decodeURIComponent(new URL(request.url).pathname);
@@ -154,7 +175,6 @@ function registerProtocol() {
     } catch {
       return new Response('No encontrado', { status: 404 });
     }
-  });
 }
 
 function broadcast(channel, payload) {
