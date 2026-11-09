@@ -92,7 +92,9 @@ export function createStreamFilter(opts = {}) {
       if (!json) continue;
       observeOutcome(json);
       const plan = adapter.read(json);
-      lineText += (plan.segments || []).map((segment) => segment.newText).join('');
+      const delta = (plan.segments || []).map((segment) => segment.newText).join('');
+      lineText += delta;
+      reportText(delta);
       if (chatgpt && json.type === 'end') protocolEnded = true;
     }
   };
