@@ -288,3 +288,15 @@ test('las medidas de arranque de la interfaz se registran y las pestañas no pue
   listener({ sender: { getType: () => 'window' } }, null);
   assert.equal(marks()['ui-config'], 12.3);
 });
+
+test('la ventana aparece de inmediato en lugar de esperar al primer cuadro', async () => {
+  await settle();
+  const win = journal.windows[0];
+  // Mostrarla desde el principio evita que el usuario mire el escritorio
+  // mientras Chromium rasteriza el primer cuadro (que en una máquina sin GPU
+  // puede tardar casi un segundo).
+  assert.equal(win.options.show, true);
+  assert.equal(win.options.backgroundColor, '#07080c', 'sin fondo oscuro habría destello blanco');
+  const { marks } = await import('../src/main/perf.js');
+  assert.equal(typeof marks().visible, 'number', 'falta la marca de ventana visible');
+});

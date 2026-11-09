@@ -203,17 +203,23 @@ ahora:  config → sesión → marco pintado → primera pestaña navegando
 ```
 
 Con 4 000 visitas guardadas, la primera pestaña ya no espera a que se
-serialicen el historial completo, el registro y la lista de memoria. Y la
-pestaña se crea **después del primer cuadro**: montar un `<webview>` obliga a
-Chromium a levantar un proceso invitado y su canal de composición, y mientras
-tanto la ventana no pinta nada.
+serialicen el historial completo, el registro y la lista de memoria. Además:
+
+- la **ventana se muestra desde el principio** (`show: true`) con el fondo
+  oscuro ya puesto. Antes se esperaba a `ready-to-show`, un evento que llega
+  *después* del primer cuadro: en una máquina sin GPU el usuario miraba el
+  escritorio durante casi un segundo con el navegador ya arrancado. El fondo
+  oscuro evita el destello blanco típico de este atajo;
+- la pestaña se crea **después del primer cuadro**: montar un `<webview>` obliga
+  a Chromium a levantar un proceso invitado y su canal de composición, y mientras
+  tanto la ventana no pinta nada.
 
 Medido en el runner de Windows, con estas marcas (todas en milisegundos desde el
 inicio del proceso):
 
 | Etapa | Tiempo |
 | --- | --- |
-| ventana creada | 81–115 |
+| ventana creada y visible | 81–126 |
 | interfaz cargada, ajustes leídos | +1,5 |
 | sesión restaurada | +2,2 |
 | primer cuadro con el marco pintado | +9 |

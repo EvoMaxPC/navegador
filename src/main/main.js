@@ -189,7 +189,13 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#07080c',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    show: false,
+    // La ventana se muestra desde el principio. Esperar a «ready-to-show»
+    // significa esperar al primer cuadro, y en una máquina sin aceleración por
+    // hardware ese cuadro puede tardar casi un segundo: el usuario mira el
+    // escritorio mientras el navegador ya está arrancado. Con el fondo oscuro
+    // puesto desde la creación, el marco aparece de inmediato y el contenido se
+    // dibuja encima, sin destello blanco.
+    show: true,
     webPreferences: {
       preload: SHELL_PRELOAD,
       contextIsolation: true,
@@ -200,12 +206,12 @@ function createWindow() {
     },
   });
 
-  if (!isSmoke) win.once('ready-to-show', () => win.show());
-  else {
-    // En modo humo la ventana no se muestra con `ready-to-show`, pero tampoco
-    // puede quedarse oculta: Chromium pospone el trabajo de una ventana oculta
-    // y entonces lo que se mide no es el arranque que ve el usuario. Se muestra
-    // sin tomar el foco; si el runner no tiene escritorio, se sigue igual.
+  mark('visible');
+  if (isSmoke) {
+    // En modo humo la ventana no puede quedar oculta más allá de esto: Chromium
+    // pospone el trabajo de una ventana oculta y entonces lo que se mide no es
+    // el arranque que ve el usuario. Se evita tomar el foco para no interferir
+    // con el resto del runner.
     try {
       win.showInactive();
     } catch {
