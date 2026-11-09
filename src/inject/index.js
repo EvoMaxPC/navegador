@@ -20,7 +20,7 @@
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isMediable, locateUserText, patchUserText } from '../core/sites.js';
-import { countGptTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
+import { countTokensForProvider, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
@@ -278,7 +278,7 @@ function gestoDeEnvio(razon) {
     id: nuevoMessageId(),
     at: ahora,
     chars: texto.length,
-    tokens: countGptTokens(texto),
+    tokens: countTokensForProvider(texto, '', site.id),
     promptHash: fingerprint(texto),
     razon,
     timer: null,
@@ -370,7 +370,7 @@ async function planRequest(input, init) {
     chat: true,
     send: true,
     promptChars: prompt.length,
-    promptTokens: countGptTokens(prompt, gptModelFromRequest(parsed)),
+    promptTokens: countTokensForProvider(prompt, gptModelFromRequest(parsed), site.id),
     model: gptModelFromRequest(parsed),
     promptHash: fingerprint(prompt),
     url,
@@ -441,7 +441,7 @@ function wrapResponse(response, capture = {}) {
           deliveredChars: info.deliveredChars,
           droppedChars: info.droppedChars,
           chars: text.length,
-          tokens: countGptTokens(text, capture.model),
+          tokens: countTokensForProvider(text, capture.model, capture.host || site.id),
           clipped: recortado,
           text: recortado ? text.slice(0, MAX_CAPTURE_CHARS) : text,
           dropped: info.dropped.slice(0, 600),
