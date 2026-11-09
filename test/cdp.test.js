@@ -14,7 +14,6 @@ import assert from 'node:assert/strict';
 import {
   CdpCapture,
   MAX_CAPTURE_CHARS,
-  commonPrefix,
   hostOf,
   isAiHost,
   isJsonMime,
@@ -99,12 +98,6 @@ test('promptOf sólo acepta mensajes de usuario inequívocos', () => {
   assert.equal(promptOf({ messages: [{ role: 'assistant', content: 'hola' }] }), null);
   assert.equal(promptOf({ model: 'gpt-4o' }), null);
   assert.equal(promptOf(null), null);
-});
-
-test('commonPrefix mide la parte ya vista', () => {
-  assert.equal(commonPrefix('hola mundo', 'hola mundo cruel'), 'hola mundo');
-  assert.equal(commonPrefix('abc', 'xyz'), '');
-  assert.equal(commonPrefix('', 'algo'), '');
 });
 
 /* ------------------------------------------------------------------ */

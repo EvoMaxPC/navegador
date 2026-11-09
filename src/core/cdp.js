@@ -129,14 +129,6 @@ function isPatchShaped(json) {
   return typeof json?.p === 'string' || json?.o === 'patch';
 }
 
-/** Mitad común de dos textos: sirve para pasar de acumulado a lo nuevo. */
-export function commonPrefix(a, b) {
-  const max = Math.min(a.length, b.length);
-  let i = 0;
-  while (i < max && a.charCodeAt(i) === b.charCodeAt(i)) i += 1;
-  return a.slice(0, i);
-}
-
 /**
  * Acumulador de una respuesta observada.
  *

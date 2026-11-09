@@ -132,8 +132,7 @@ test('sync adjunta y suelta según la URL de la pestaña', () => {
 });
 
 test('un sitio que el usuario apagó no se observa', () => {
-  const logs = [];
-  const observer = new CdpObserver({ log: (m) => logs.push(m), isAllowed: (host) => host !== 'claude.ai' });
+  const observer = new CdpObserver({ isAllowed: (host) => host !== 'claude.ai' });
   const claude = fakeTab(30, 'https://claude.ai/');
   assert.equal(observer.attach(claude), false);
   assert.equal(claude.debugger.attached, false);
