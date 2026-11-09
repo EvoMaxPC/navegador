@@ -20,6 +20,8 @@ import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
 import { runSmoke, report as reportSmoke } from './smoke.js';
+import { eventMessage, permissionName, safeExternalUrl, sessionPayload } from './validate.js';
+import { PERMISSION_CATALOG } from '../nav/permissions.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -250,11 +252,25 @@ function registerIpc() {
     platform: process.platform,
   }));
 
-  ipcMain.on('nexo:event', (_event, message) => {
-    broadcast('nexo:event', message);
+  // Sólo las pestañas pueden anunciar eventos, y sólo con la forma esperada:
+  // sin esto, cualquier página podría inventar «intervenciones» en el panel.
+  ipcMain.on('nexo:event', (event, message) => {
+    if (event.sender?.getType?.() !== 'webview') return;
+    const href = event.sender.getURL?.() || '';
+    const clean = eventMessage(message, { href });
+    if (clean) broadcast('nexo:event', clean);
   });
 
-  ipcMain.handle('nexo:open-external', (_event, url) => shell.openExternal(url));
+  ipcMain.handle('nexo:open-external', async (_event, url) => {
+    const safe = safeExternalUrl(url);
+    if (!safe) return { ok: false, error: 'esquema no permitido' };
+    try {
+      await shell.openExternal(safe);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error?.message || 'no se pudo abrir' };
+    }
+  });
 
   /* ---------------- navegador: perfil ---------------- */
   ipcMain.handle('nexo:profile:stats', () => profile?.stats() || null);
@@ -347,7 +363,9 @@ function registerIpc() {
   /* ---------------- permisos y zoom ---------------- */
   ipcMain.handle('nexo:permissions:for', (_event, host) => profile?.permissions.rulesFor(host) || []);
   ipcMain.handle('nexo:permissions:set', (_event, payload = {}) => {
-    const ok = Boolean(profile?.permissions.set(payload.host, payload.permission, payload.value));
+    const permission = permissionName(payload.permission, PERMISSION_CATALOG);
+    if (!permission) return { ok: false, error: 'permiso desconocido' };
+    const ok = Boolean(profile?.permissions.set(payload.host, permission, payload.value));
     profile?.permissions.save({ force: true });
     return { ok };
   });
@@ -389,13 +407,13 @@ function registerIpc() {
 
   /* ---------------- sesión ---------------- */
   ipcMain.handle('nexo:session:capture', (_event, payload = {}) => {
-    profile?.session.capture(payload.windows || []);
+    profile?.session.capture(sessionPayload(payload).windows);
     return { ok: true };
   });
   ipcMain.handle('nexo:session:restore', () => profile?.session.restore() || null);
   ipcMain.on('nexo:session:save-now', (_event, payload = {}) => {
     try {
-      profile?.session.capture(payload.windows || []);
+      profile?.session.capture(sessionPayload(payload).windows);
     } catch (error) {
       console.error('[nexo] no se pudo guardar la sesión:', error.message);
     }
