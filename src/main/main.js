@@ -129,6 +129,27 @@ const capture = {
   lastRequestAt: 0,
 };
 let memory = null;
+/** Registro local de diagnóstico de captura: sólo metadatos, nunca texto de conversación. */
+let captureDiagnosticFile = null;
+function writeCaptureTrace(stage, data = {}) {
+  if (!captureDiagnosticFile) return;
+  const safe = {
+    ts: new Date().toISOString(), stage,
+    host: data.host || data.capture?.host || null,
+    site: data.site || data.capture?.site || null,
+    source: data.source || data.capture?.source || null,
+    urlPath: (() => { try { return new URL(data.url || data.capture?.url || '').pathname; } catch { return null; } })(),
+    chars: Number(data.chars ?? data.capture?.text?.length) || 0,
+    messageId: data.messageId || data.capture?.messageId || null,
+    paired: data.paired ?? null,
+    duplicate: data.duplicate ?? null,
+    memory: data.memory || null,
+    code: data.code || null,
+    detail: data.detail || null,
+  };
+  appendFile(captureDiagnosticFile, JSON.stringify(safe) + '\\n', 'utf8').catch((error) =>
+    console.warn('[nexo] no se pudo escribir diagnóstico de captura:', error?.message || error));
+}
 let profile = null;
 /** Guardado diferido: navegar no debe escribir en disco en cada clic. */
 let saveTimer = null;
@@ -250,6 +271,9 @@ function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key
   }
   const entry = { kind: 'system', code, severity, title, detail, meta, ts: now };
   store.pushLog(entry);
+  if (/^(cdp-|response-|chatgpt-|gpt-response|conversation-memory)/.test(String(code || ''))) {
+    writeCaptureTrace('diagnostic', { code, detail: String(detail || '').slice(0, 240), host: meta?.host, url: meta?.url, chars: meta?.chars });
+  }
   broadcast('nexo:event', { type: 'intervention', payload: entry });
   return entry;
 }
@@ -586,6 +610,7 @@ function registerIpc() {
     ...engine.stats(),
     log: store.log.length,
     cdpObserver: cdp?.status() || null,
+    captureDiagnosticFile,
     // Estado de la captura, para la línea de diagnóstico del panel. No son
     // contadores de la conversación: son hechos del propio vigilante.
     capture: { ...capture },
@@ -596,6 +621,7 @@ function registerIpc() {
   ipcMain.handle('nexo:cdp:stats', () => ({
     observer: cdp?.status() || { enabled: false, tabs: 0 },
     engine: engine ? engine.stats().cdp : null,
+    diagnosticFile: captureDiagnosticFile,
   }));
 
   /* ---------------- EVO MEMORY ---------------- */
@@ -1451,6 +1477,8 @@ app.whenReady().then(async () => {
     episodeEvery: store.settings.memory?.episodeEvery,
   });
   memory = created;
+  captureDiagnosticFile = join(app.getPath('documents'), 'NEXO-CAPTURE-DIAGNOSTIC.jsonl');
+  writeCaptureTrace('app-start', { detail: 'NEXO ' + app.getVersion() + ' · diagnóstico sin contenido de conversaciones' });
   mark('memoria');
   profile = createProfile({ dir: app.getPath('userData') });
   mark('perfil');
@@ -1474,7 +1502,16 @@ app.whenReady().then(async () => {
     // depurador ni se lee el tráfico de un sitio que el usuario dejó en paz.
     // Se vuelve a consultar al leer cuerpos, por si el interruptor cambia con la
     // pestaña ya abierta.
-    contentAllowed: (host) => engine.isEnabledFor(host),
+    // La memoria habilitada autoriza observación pasiva de ChatGPT aunque la
+    // mediación esté apagada. No se altera el prompt; sólo se lee la respuesta
+    // para guardarla en EVO MEMORY. Para otros proveedores sigue mandando el
+    // interruptor de mediación del sitio.
+    contentAllowed: (host) => {
+      const normalized = String(host || '').toLowerCase();
+      const isChatGpt = normalized === 'chatgpt.com' || normalized.endsWith('.chatgpt.com') ||
+        normalized === 'chat.openai.com' || normalized.endsWith('.chat.openai.com');
+      return engine.isEnabledFor(host) || (isChatGpt && store.settings.memory?.enabled !== false);
+    }, 
     // Lo que el depurador no pudo leer se ve en el registro: un cero sin causa
     // es lo que nos tuvo dando vueltas cuatro versiones.
     onDiagnostic: (diagnostico) => noteDiagnostic(diagnostico),
@@ -1484,6 +1521,8 @@ app.whenReady().then(async () => {
       try {
         if (event?.type === 'send') {
           if (event.duplicate) return;
+          writeCaptureTrace('request-detected', { host: event.host, site: event.site, url: event.url,
+            source: 'cdp', chars: event.chars, messageId: event.messageId });
           const entry = {
             kind: 'sending',
             code: 'outgoing-cdp',
@@ -1503,6 +1542,16 @@ app.whenReady().then(async () => {
           if (store) store.pushLog(entry);
           broadcast('nexo:event', { type: 'intervention', payload: entry });
         } else if (event?.type === 'capture') {
+          const captureData = event.capture || {};
+          const saved = (store?.log || []).slice(-30).find((item) =>
+            item?.code === 'gpt-response-memory' &&
+            (!captureData.messageId || item?.meta?.messageId === captureData.messageId));
+          writeCaptureTrace('response-delivered', {
+            capture: captureData, duplicate: Boolean(event.duplicate), paired: Boolean(event.paired),
+            messageId: event.messageId || captureData.messageId,
+            memory: saved ? { saved: saved.severity === 'info', chars: saved.meta?.chars || 0,
+              persisted: saved.meta?.persisted ?? null, action: saved.meta?.memoryAction || null } : null,
+          });
           if (event.duplicate) {
             // La respuesta no es nueva, pero CDP pudo recuperar texto/tokens.
             broadcast('nexo:stats-changed', engine.stats());
