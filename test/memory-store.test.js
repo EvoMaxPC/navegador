@@ -100,6 +100,19 @@ test('persiste y reconstruye el índice al cargar', () => {
   assert.ok(b.get(b.all()[0].id).terms.length > 0);
 });
 
+test('reconstruye el caché TF como Map después de una carga JSON', () => {
+  const store = new MemoryStore({ now: clock });
+  const { item } = store.add({ kind: 'fact', text: 'El puerto de la base de datos es 5432.' });
+
+  // Simula el caché Map serializado por JSON y recuperado como objeto plano.
+  item.__tf = Object.fromEntries([...store.frequencies(item)]);
+  item.__tfSize = item.terms.length;
+
+  const frequencies = store.frequencies(item);
+  assert.ok(frequencies instanceof Map);
+  assert.ok(frequencies.get(item.terms[0]) > 0);
+});
+
 test('un archivo corrupto no rompe la carga', () => {
   const storage = memoryStorage('{ esto no es json');
   const store = new MemoryStore({ storage, now: clock });
