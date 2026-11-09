@@ -15,12 +15,12 @@ los dos sentidos**:
 - **Después** repara la respuesta (markdown roto, bloques de código sin cerrar,
   tokens internos filtrados) y ofrece continuar exactamente donde se cortó.
 
-Todo el análisis es **local y determinista**: sin modelos auxiliares ni nube. El conteo GPT usa el tokenizador BPE local
-`gpt-tokenizer`, incluido en la distribución.
+Todo el análisis es **local y determinista**: sin modelos auxiliares ni nube. La entrada GPT conserva el tokenizador BPE local
+`gpt-tokenizer`. **La salida IA usa directamente una estimación del texto capturado, sin tokenizador.**
 
 **Corrección de tokens de salida 0.1.19:** captura SSE/NDJSON según el MIME real
 (incluido `/conversation/updates`), lectura del texto DPU tras el render y captura
-parcial al detener la respuesta. BPE en el proceso principal y actualización automática.
+parcial al detener la respuesta. Estimación directa en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
 **Contadores 0.1.18:** turnos cancelados, fallidos y realizados,

@@ -174,14 +174,14 @@ for (const [name, expected, options] of [
   ['logged-out-reply.ndjson', anonymous, { mime: 'application/x-ndjson', chunkSize: 1 }],
   ['logged-out-reply.ndjson', anonymous, { mime: 'text/plain', chunkSize: 1 }],
 ]) {
-  test(`grabación ${name} (${options.mime || 'SSE'}): inyección → preload → BPE → principal → campo de salida`, async () => {
+  test(`grabación ${name} (${options.mime || 'SSE'}): inyección → preload → estimación → principal → campo de salida`, async () => {
     const view = await openTab();
     const before = await stats();
     const body = fixture(name);
     const wire = await replayPrimary(view, body, options);
     const after = await stats();
     assert.equal(after.responses, before.responses + 1);
-    assert.equal(after.outputTokens, before.outputTokens + countGptTokens(expected));
+    assert.equal(after.outputTokens, before.outputTokens + estimateTokens(expected));
     assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'), 'sin refresco manual');
     assert.equal(after.inputTokens, before.inputTokens + countGptTokens('Test'));
     if (options.mime) assert.equal(wire, body, 'NDJSON conserva sus bytes, incluidos Unicode y saltos');
@@ -206,7 +206,7 @@ test('CDP recupera NDJSON grabado después del cierre de red y notifica el campo
   const count = journal.windows[0].webContents.sent.filter((event) => event.channel === 'nexo:stats-changed').length;
   await replayCdp(view, fixture('logged-out-reply.ndjson'), 'application/x-ndjson', 'Other');
   const after = await stats();
-  assert.equal(after.outputTokens, before.outputTokens + countGptTokens(anonymous));
+  assert.equal(after.outputTokens, before.outputTokens + estimateTokens(anonymous));
   assert.equal(after.responses, before.responses);
   assert.equal(after.inputTokens, before.inputTokens);
   assert.equal(after.messages, before.messages);
@@ -228,7 +228,7 @@ for (const name of ['aborted.sse', 'logged-out-stopped.ndjson']) {
     const before = await stats();
     await replayPrimary(view, body, { abort: true, mime: ndjson ? 'application/x-ndjson' : 'text/event-stream' });
     const after = await stats();
-    assert.equal(after.outputTokens, before.outputTokens + countGptTokens(captured.text));
+    assert.equal(after.outputTokens, before.outputTokens + estimateTokens(captured.text));
     assert.equal(after.responses, before.responses + 1);
     assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
     const log = journal.ipcHandlers.get('nexo:log')({ sender: { id: 1 } });
@@ -246,7 +246,7 @@ test('SSE sin respuesta no convierte tokens de reanudación ni estados en texto'
   assert.equal(after.responses, before.responses + 1);
 });
 
-test('fallo BPE en salida: estima texto real, registra el fallo y no altera la entrada', async () => {
+test('salida estima texto real sin invocar BPE ni alterar la entrada', async () => {
   const require = createRequire(import.meta.url);
   const Module = require('node:module');
   const load = Module._load;
@@ -254,7 +254,7 @@ test('fallo BPE en salida: estima texto real, registra el fallo y no altera la e
   const before = await stats();
   const text = 'Respuesta real con Markdown.\n\n**Conservá el texto aunque falle el BPE.**';
   Module._load = function (id, ...args) {
-    if (id === 'gpt-tokenizer') return { countTokens() { throw new Error('fallo BPE inducido'); } };
+    if (id.startsWith('gpt-tokenizer')) throw new Error('la salida no debe cargar BPE');
     return load.call(this, id, ...args);
   };
   try {
@@ -267,18 +267,14 @@ test('fallo BPE en salida: estima texto real, registra el fallo y no altera la e
   assert.equal(after.inputTokens, before.inputTokens);
   assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
   const log = journal.ipcHandlers.get('nexo:log')({ sender: { id: 1 } });
-  assert.ok(log.some((entry) => entry.code === 'output-tokenizer-fallback' && entry.meta.method === 'estimateTokens'));
+  assert.ok(!log.some((entry) => entry.code === 'output-tokenizer-fallback'), 'estimar es la ruta normal, no un fallo');
 });
 
-test('cero inválido del tokenizador no anula el texto; un cuerpo vacío sí da cero', () => {
-  const require = createRequire(import.meta.url), Module = require('node:module'), load = Module._load;
-  const reports = [];
-  Module._load = function (id, ...args) { if (id === 'gpt-tokenizer') return { countTokens: () => 0 }; return load.call(this, id, ...args); };
-  try {
-    assert.equal(countOutputTokens(normal, 'gpt-6', 'chatgpt', (detail) => reports.push(detail)), estimateTokens(normal));
-    assert.equal(countOutputTokens('', 'gpt-6', 'chatgpt', (detail) => reports.push(detail)), 0);
-  } finally { Module._load = load; }
-  assert.equal(reports.length, 1);
+test('estimación de salida no depende del modelo y no inventa tokens sin texto', () => {
+  for (const model of ['gpt-6', 'gpt-4-turbo', '']) {
+    assert.equal(countOutputTokens(normal, model, 'chatgpt'), estimateTokens(normal));
+  }
+  for (const text of ['', '  \n', null, undefined, 42]) assert.equal(countOutputTokens(text), 0);
 });
 
 test('revisiones NDJSON repetidas y replace final no duplican ni pierden contenido', async () => {
@@ -298,7 +294,7 @@ test('tres respuestas grabadas consecutivas suman tokens separados, aun con el m
     await replayPrimary(view, fixture('normal-reply.sse'));
     const after = await stats();
     assert.equal(after.responses, before.responses + i);
-    assert.equal(after.outputTokens, before.outputTokens + countGptTokens(normal) * i);
+    assert.equal(after.outputTokens, before.outputTokens + estimateTokens(normal) * i);
     assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
   }
 });
@@ -310,11 +306,11 @@ test('la misma grabación por CDP primero y por inyección después cuenta una s
   await replayPrimary(view, body, { beforeResponse: async () => { await pause(); await replayCdp(view, body); } });
   const after = await stats();
   assert.equal(after.responses, before.responses + 1);
-  assert.equal(after.outputTokens, before.outputTokens + countGptTokens(normal));
+  assert.equal(after.outputTokens, before.outputTokens + estimateTokens(normal));
   assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
 });
 
-test('texto parcial y completo con el mismo ID corrigen BPE sin otra respuesta y conservan modelo', async () => {
+test('texto parcial y completo con el mismo ID corrigen la estimación sin otra respuesta y conservan modelo', async () => {
   const view = await openTab();
   const before = await stats();
   const end = journal.ipcHandlers.get('nexo:stream-end');
@@ -325,21 +321,21 @@ test('texto parcial y completo con el mismo ID corrigen BPE sin otra respuesta y
   await pause();
   const after = await stats();
   assert.equal(after.responses, before.responses + 1);
-  assert.equal(after.outputTokens, before.outputTokens + countGptTokens(text, 'gpt-4-turbo'));
+  assert.equal(after.outputTokens, before.outputTokens + estimateTokens(text, 'gpt-4-turbo'));
   assert.equal(after.inputTokens, before.inputTokens);
   assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
 });
 
-test('una extensión puede reducir el BPE: ajustar el total exacto, no sólo sumar diferencias positivas', async () => {
+test('una extensión corrige la estimación acumulada sin duplicar respuesta', async () => {
   const view = await openTab();
   const before = await stats();
   const end = journal.ipcHandlers.get('nexo:stream-end');
-  assert.ok(countGptTokens('functio') > countGptTokens('function'));
+  assert.ok(estimateTokens('function') >= estimateTokens('functio'));
   end({ sender: { id: view.id } }, { host: 'chatgpt.com', messageId: 'bpe-shrink', text: 'functio' });
   end({ sender: { id: view.id } }, { host: 'chatgpt.com', messageId: 'bpe-shrink', text: 'function' });
   await pause();
   const after = await stats();
-  assert.equal(after.outputTokens, before.outputTokens + countGptTokens('function'));
+  assert.equal(after.outputTokens, before.outputTokens + estimateTokens('function'));
   assert.equal(after.responses, before.responses + 1);
   assert.equal(after.inputTokens, before.inputTokens);
   assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
@@ -376,7 +372,7 @@ for (const [name, body, mime, expected] of [
         assert.equal(visibleChannelText(wire, visible.c), expected, 'el cliente recibe toda la respuesta antes de EOF');
         if (name === 'SSE DONE') assert.match(wire, /data: \[DONE\]/);
       }
-      assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(expected, 'gpt-6'));
+      assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(expected, 'gpt-6'));
       assert.equal(stats().responses - before.responses, 1);
       assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
     } finally {
@@ -384,10 +380,10 @@ for (const [name, body, mime, expected] of [
       await reading;
       await pause(50);
     }
-    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(expected, 'gpt-6'), 'EOF no duplica tokens');
+    assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(expected, 'gpt-6'), 'EOF no duplica tokens');
     assert.equal(stats().responses - before.responses, 1, 'EOF no duplica respuestas');
     await replayCdp(view, body, mime);
-    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(expected, 'gpt-6'), 'CDP tardío no duplica tokens');
+    assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(expected, 'gpt-6'), 'CDP tardío no duplica tokens');
     assert.equal(stats().responses - before.responses, 1, 'CDP tardío no duplica respuestas');
   });
 }
@@ -461,7 +457,7 @@ test('resultados: error de generación en SSE con HTTP 200 no se marca completo'
     'data: {"type":"error","error":{"message":"Generation failed"}}\n\ndata: [DONE]\n\n';
   await replayPrimary(view, body);
   assert.deepEqual(outcomeDelta(before), [0, 1, 0]);
-  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(normal, 'gpt-6'));
+  assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(normal, 'gpt-6'));
   assertOutcomeUi();
 });
 
@@ -498,7 +494,7 @@ test('resultados: error explícito actualiza el contador sin esperar EOF ni DONE
     assert.equal(closed, false);
     assert.deepEqual(outcomeDelta(before), [0, 1, 0]);
     assertOutcomeUi();
-    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(normal, 'gpt-6'));
+    assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(normal, 'gpt-6'));
   } finally { release(); await reading; await pause(50); }
   assert.deepEqual(outcomeDelta(before), [0, 1, 0]);
 });
@@ -565,7 +561,7 @@ test('integración remota DPU: conserva captura de texto y clasifica un único t
   assert.equal(await response.text(), '<template>DPU</template>', 'no se altera el transporte DPU');
   await pause(260);
   assert.deepEqual(outcomeDelta(before), [0, 0, 0]);
-  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
+  assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(answer));
   assertOutcomeUi();
 });
 
@@ -581,7 +577,7 @@ test('integración remota DPU: espera el renderizado tardío del DOM y suma toke
   assert.equal(await response.text(), '<template>DPU</template>', 'el transporte original permanece intacto');
   await pause(650);
   assert.equal(stats().responses, before.responses + 1);
-  assert.equal(stats().outputTokens, before.outputTokens + countGptTokens(answer));
+  assert.equal(stats().outputTokens, before.outputTokens + estimateTokens(answer));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
@@ -653,7 +649,7 @@ for (const [mime, name, expected] of [
   ['application/json', 'logged-out-reply.ndjson', anonymous],
   ['text/event-stream', 'normal-reply.sse', normal],
 ]) {
-  test(`updates con ${mime}: texto grabado → BPE → contador, sin depender del DOM`, async () => {
+  test(`updates con ${mime}: texto grabado → estimación → contador, sin depender del DOM`, async () => {
     const view = await openTab(), before = stats();
     const body = fixture(name);
     const page = pageFor(view, body, { mime });
@@ -663,7 +659,7 @@ for (const [mime, name, expected] of [
     await response.text();
     await pause(260);
     assert.equal(page.captures.at(-1)?.text, expected, 'el texto grabado llega íntegro al handler real de salida');
-    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(expected), 'tokeniza el texto de esta respuesta');
+    assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(expected), 'tokeniza el texto de esta respuesta');
     assert.equal(stats().responses - before.responses, 1);
     assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
   });
@@ -680,7 +676,7 @@ test('DPU: el render llega después de 180 ms y todavía debe aportar tokens', a
   dom += `\nChatGPT said:\n${answer}`;
   await pause(450);
   assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
-  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
+  assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(answer));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
@@ -693,11 +689,11 @@ test('DPU: un aborto no debe descartar el texto parcial visible de esta respuest
   await response.text().catch(() => {});
   await pause(300);
   assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
-  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
+  assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(answer));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
-test('DPU sin etiquetas traducidas: nodos user/assistant → BPE → tokens de salida visibles', async () => {
+test('DPU sin etiquetas traducidas: nodos user/assistant → estimación → tokens de salida visibles', async () => {
   const view = await openTab(), before = stats();
   const answer = 'Respuesta visible de GPT, sin etiquetas de accesibilidad en el body.';
   const user = { innerText: 'Pregunta DPU', getAttribute: () => 'user' };
@@ -710,7 +706,7 @@ test('DPU sin etiquetas traducidas: nodos user/assistant → BPE → tokens de s
   await response.text();
   await pause(260);
   assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
-  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
+  assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(answer));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
@@ -736,7 +732,7 @@ test('SSE vacío recupera el texto autenticado tardío por el mismo turno, sin o
   assert.equal(page.captures[0].messageId, page.captures[1].messageId);
   assert.equal(stats().responses - before.responses, 1);
   assert.equal(stats().interventions - before.interventions, 2);
-  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer, 'gpt-6'));
+  assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(answer, 'gpt-6'));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
 });
 
@@ -755,7 +751,7 @@ test('fallback autenticado no tokeniza una respuesta previa al repetir el prompt
   assert.equal(page.captures.length, 1, 'no hay recuperación ficticia');
 });
 
-test('DPU en vivo: ignora DOM anterior, actualiza BPE con nodos nuevos y cierra sin duplicar', async () => {
+test('DPU en vivo: ignora DOM anterior, actualiza estimación con nodos nuevos y cierra sin duplicar', async () => {
   const view = await openTab(), before = stats();
   const node = (role, text) => ({ innerText: text, getAttribute: () => role, querySelector: () => null });
   const old = [node('user', 'Test'), node('assistant', 'Respuesta vieja.')];
@@ -774,13 +770,13 @@ test('DPU en vivo: ignora DOM anterior, actualiza BPE con nodos nuevos y cierra 
     nodes = [...old, node('user', 'Test'), assistant];
     page.mutate();
     await pause(30);
-    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(assistant.innerText, 'gpt-6'));
+    assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(assistant.innerText, 'gpt-6'));
     assistant.innerText += ' completa.';
     page.mutate();
     await pause(30);
-    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(assistant.innerText, 'gpt-6'));
+    assert.equal(stats().outputTokens - before.outputTokens, estimateTokens(assistant.innerText, 'gpt-6'));
     assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
   } finally { release(); await reading; await pause(300); }
   assert.equal(stats().responses - before.responses, 1);
-  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens('Nueva respuesta completa.', 'gpt-6'));
+  assert.equal(stats().outputTokens - before.outputTokens, estimateTokens('Nueva respuesta completa.', 'gpt-6'));
 });

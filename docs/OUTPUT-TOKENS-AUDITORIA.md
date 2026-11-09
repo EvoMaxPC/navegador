@@ -1,3 +1,15 @@
+> **Cambio vigente solicitado por el usuario:** el contador de salida IA ya no usa
+> BPE. `countOutputTokens` devuelve directamente `estimateTokens` sobre el texto
+> capturado (0 si no hay texto). Las referencias a BPE de salida que siguen son
+> el historial de la corrección anterior, no el comportamiento actual.
+>
+> Se conserva la captura SSE/NDJSON/DPU, actualización incremental y deduplicación.
+> Se estima el texto acumulado, no la suma de estimaciones de cada fragmento.
+> La UI identifica el resultado como «tokens de salida IA (estimados)».
+> La entrada y los demás contadores no cambian. `gpt-tokenizer` permanece sólo
+> para la entrada GPT. Pruebas: 556 total, 555 aprobadas, 1 omitida, 0 fallos.
+> La prueba integral bloquea la carga del tokenizador y verifica salida y UI.
+
 # Tokens de salida GPT — auditoría y corrección 0.1.14
 
 **Estado: corrección implementada y validada con grabaciones externas y pruebas automatizadas. No cerrada según el criterio de conversación real del usuario.**

@@ -63,7 +63,7 @@ export class Engine {
      * clasifica el resultado de ChatGPT. Ninguno depende de que el motor
      * intervenga: un mensaje sin mediación cuenta igual.
      *
-     * Los tokens visibles de texto se cuentan con BPE GPT según el modelo detectado.
+     * La salida se estima directamente sobre el texto; la entrada conserva su conteo.
      * No incluyen contenido multimodal ni tokens internos no expuestos por el proveedor.
      */
     this.counters = {
@@ -372,8 +372,7 @@ export class Engine {
     current.messageId ||= messageId;
     current.model ||= payload.model || '';
     current.host ||= payload.host || '';
-    // La tokenización BPE puede fusionar tokens al llegar el siguiente fragmento;
-    // aplicar también deltas negativos mantiene el total exacto en tiempo real.
+    // Reestimar el texto acumulado evita redondear y sumar cada fragmento por separado.
     const totalTokens = this.#outputTokens(current.text, current.model, current.host);
     const increment = totalTokens - current.tokens;
     if (increment) this.counters.outputTokens = Math.max(0, this.counters.outputTokens + increment);
@@ -573,15 +572,7 @@ export class Engine {
   }
 
   #outputTokens(text, model = '', provider = '') {
-    return countOutputTokens(text, model, provider, (detail) => {
-      const entry = {
-        kind: 'receiving', code: 'output-tokenizer-fallback', severity: 'warn',
-        title: 'Tokens de salida estimados: falló el tokenizador',
-        detail: `${detail.error}. Se estimaron ${detail.tokens} tokens sobre ${detail.chars} caracteres reales.`,
-        meta: { ...detail, method: 'estimateTokens' }, ts: Date.now(),
-      };
-      try { this.store?.pushLog?.(entry); } catch { console.warn('[nexo]', entry); }
-    });
+    return countOutputTokens(text);
   }
 
   /**

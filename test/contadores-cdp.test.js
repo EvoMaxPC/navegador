@@ -1,3 +1,4 @@
+import { estimateTokens } from '../src/core/text.js';
 /**
  * Contadores con la observación CDP, que es el camino que funciona aunque la
  * capa de la página no esté activa.
@@ -13,7 +14,6 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
-import { countGptTokens } from '../src/main/tokens.js';
 
 register('./harness/loader.mjs', import.meta.url);
 
@@ -113,7 +113,7 @@ test('la conversación real «hola» cuenta 1 mensaje, 1 respuesta y 1 turno', a
   assert.equal(fin.messages, antes.messages + 1, 'un mensaje, no dos');
   assert.equal(fin.responses, antes.responses + 1, 'una respuesta, no cuatro');
   assert.equal(Object.hasOwn(fin, 'turnsCompleted'), false, 'el contador eliminado no se expone');
-  assert.equal(fin.outputTokens, antes.outputTokens + countGptTokens(RESPUESTA), 'los tokens de la respuesta visible');
+  assert.equal(fin.outputTokens, antes.outputTokens + estimateTokens(RESPUESTA), 'los tokens de la respuesta visible');
   assert.equal(
     fin.interventions,
     antes.interventions + 2,
