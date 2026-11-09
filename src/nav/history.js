@@ -28,6 +28,14 @@ export class HistoryStore {
     this.maxAgeDays = opts.maxAgeDays ?? 90;
     /** @type {Array<{id:string,url:string,host:string,site:string,title:string,ts:number,transition:string}>} */
     this.entries = [];
+    /**
+     * Texto ya normalizado para buscar (minúsculas, sin acentos). Se arma una
+     * vez por cambio del historial: la barra de direcciones consulta en cada
+     * tecla y normalizar 8 000 cadenas por pulsación era el trabajo más caro de
+     * toda la interfaz.
+     * @type {{title: string[], url: string[], host: string[], length: number}|null}
+     */
+    this.index = null;
     this.dirty = false;
     this.lastSavedAt = null;
     this.load();
@@ -55,6 +63,7 @@ export class HistoryStore {
       // Archivo ilegible: se arranca vacío antes que romper el navegador.
       this.entries = [];
     }
+    this.index = null;
     return this;
   }
 
@@ -107,6 +116,7 @@ export class HistoryStore {
 
     this.entries.unshift(entry);
     this.dirty = true;
+    this.#pushIndex(entry);
     this.#enforceLimit();
     return entry;
   }
@@ -121,6 +131,7 @@ export class HistoryStore {
     if (!clean || clean === entry.title) return false;
     entry.title = clean;
     this.dirty = true;
+    this.index = null;
     return true;
   }
 
@@ -134,29 +145,73 @@ export class HistoryStore {
    */
   search(query, { limit = 50, host = null } = {}) {
     const term = normalizeText(query);
-    const pool = host ? this.entries.filter((entry) => entry.host === host) : this.entries;
-    if (!term) return pool.slice(0, limit);
+    if (!term) {
+      const pool = host ? this.entries.filter((entry) => entry.host === host) : this.entries;
+      return pool.slice(0, limit);
+    }
 
+    const index = this.#searchIndex();
+    const entries = this.entries;
     const words = term.split(' ').filter(Boolean);
+    const now = this.now();
     const scored = [];
-    for (const entry of pool) {
-      const title = normalizeText(entry.title);
-      const url = normalizeText(entry.url);
+    const window = 24 * 30 * 3_600_000;
+
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i];
+      if (host && index.host[i] !== host) continue;
+      const title = index.title[i];
+      const url = index.url[i];
       let score = 0;
-      for (const word of words) {
+      for (let w = 0; w < words.length; w += 1) {
+        const word = words[w];
         if (title.includes(word)) score += 3;
         if (url.includes(word)) score += 1;
       }
       if (!score) continue;
       // Desempate por cercanía temporal: hasta 1 punto por lo más reciente.
-      const hoursAgo = Math.max(0, (this.now() - entry.ts) / 3_600_000);
-      score += Math.max(0, 1 - hoursAgo / (24 * 30));
+      const age = now - entry.ts;
+      if (age < window) score += 1 - Math.max(0, age) / window;
       scored.push({ entry, score });
     }
-    return scored
-      .sort((a, b) => b.score - a.score || b.entry.ts - a.entry.ts)
-      .slice(0, limit)
-      .map((item) => item.entry);
+
+    if (scored.length > limit) {
+      scored.sort((a, b) => b.score - a.score || b.entry.ts - a.entry.ts);
+      scored.length = limit;
+    } else {
+      scored.sort((a, b) => b.score - a.score || b.entry.ts - a.entry.ts);
+    }
+    return scored.map((item) => item.entry);
+  }
+
+  /** Vista normalizada del historial, reconstruida sólo cuando cambió. */
+  #searchIndex() {
+    const stale = !this.index || this.index.length !== this.entries.length;
+    if (stale) {
+      const title = new Array(this.entries.length);
+      const url = new Array(this.entries.length);
+      const host = new Array(this.entries.length);
+      for (let i = 0; i < this.entries.length; i += 1) {
+        const entry = this.entries[i];
+        title[i] = normalizeText(entry.title);
+        url[i] = normalizeText(entry.url);
+        host[i] = entry.host || '';
+      }
+      this.index = { title, url, host, length: this.entries.length };
+    }
+    return this.index;
+  }
+
+  /**
+   * Mantiene el índice sincronizado al agregar una visita, sin reconstruirlo:
+   * navegar no puede costar lo mismo que releer todo el historial.
+   */
+  #pushIndex(entry) {
+    if (!this.index) return;
+    this.index.title.unshift(normalizeText(entry.title));
+    this.index.url.unshift(normalizeText(entry.url));
+    this.index.host.unshift(entry.host || '');
+    this.index.length = this.entries.length;
   }
 
   /** Sitios más visitados de los últimos días (para la página de inicio). */
@@ -219,7 +274,10 @@ export class HistoryStore {
   remove(id) {
     const before = this.entries.length;
     this.entries = this.entries.filter((entry) => entry.id !== id);
-    if (this.entries.length !== before) this.dirty = true;
+    if (this.entries.length !== before) {
+      this.dirty = true;
+      this.index = null;
+    }
     return this.entries.length !== before;
   }
 
@@ -228,14 +286,18 @@ export class HistoryStore {
     const cutoff = this.now() - this.maxAgeDays * 86_400_000;
     const before = this.entries.length;
     this.entries = this.entries.filter((entry) => entry.ts >= cutoff);
+    if (this.entries.length !== before) {
+      this.dirty = true;
+      this.index = null;
+    }
     this.#enforceLimit();
-    if (this.entries.length !== before) this.dirty = true;
     return { removed: before - this.entries.length };
   }
 
   #enforceLimit() {
     if (this.entries.length > this.maxEntries) {
       this.entries.length = this.maxEntries;
+      this.index = null;
     }
   }
 

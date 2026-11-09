@@ -39,6 +39,31 @@ export const ignore = [
   /^\/\.DS_Store$/,
 ];
 
+/**
+ * Idiomas que se conservan de Chromium.
+ *
+ * Electron trae 60 archivos `.pak` de traducción de su interfaz (~9 MB). Este
+ * navegador sólo muestra su propia interfaz, así que se queda con el español y
+ * el inglés: `en-US` es obligatorio como respaldo interno de Chromium.
+ */
+export const KEEP_LOCALES = ['es', 'es-419', 'es-AR', 'en-US', 'en-GB'];
+
+/**
+ * Dado el contenido de `locales/`, devuelve qué archivos sacar.
+ * Separado del empaquetado para poder probarlo sin Electron.
+ *
+ * @param {string[]} existing nombres de archivo, p. ej. `en-US.pak`
+ * @param {string[]} [keep]
+ * @returns {string[]}
+ */
+export function localesToPrune(existing, keep = KEEP_LOCALES) {
+  const wanted = new Set(keep);
+  return existing.filter((file) => {
+    const name = String(file).replace(/\.pak$/i, '');
+    return !wanted.has(name);
+  });
+}
+
 /** Archivos que tienen que estar sí o sí dentro del asar. */
 export const requiredAsarEntries = [
   'package.json',
@@ -49,6 +74,7 @@ export const requiredAsarEntries = [
   'src/main/memory.js',
   'src/main/profile.js',
   'src/main/files.js',
+  'src/main/perf.js',
   'src/preload/shell.cjs',
   'src/preload/bridge.cjs',
   'src/ui/shell/index.html',

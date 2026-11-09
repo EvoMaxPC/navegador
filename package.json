@@ -15,6 +15,7 @@
     "demo": "node dev/serve.mjs",
     "test": "node --test",
     "test:watch": "node --test --watch",
+    "bench": "node scripts/bench.mjs",
     "verify": "node scripts/verificar.mjs",
     "make:icon": "node scripts/make-icon.mjs",
     "smoke": "node scripts/humo.mjs",

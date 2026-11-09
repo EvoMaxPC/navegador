@@ -22,6 +22,7 @@ import { sanitizeFilename } from '../nav/downloads.js';
 import { runSmoke, report as reportSmoke, render as renderSmoke } from './smoke.js';
 import { eventMessage, permissionName, safeExternalUrl, sessionPayload } from './validate.js';
 import { PERMISSION_CATALOG } from '../nav/permissions.js';
+import { mark, summary as perfSummary } from './perf.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -29,6 +30,23 @@ const SHELL_PRELOAD = join(ROOT, 'src', 'preload', 'shell.cjs');
 const PAGE_PRELOAD = join(ROOT, 'src', 'preload', 'bridge.cjs');
 
 const isDev = process.argv.includes('--dev');
+
+// Antes de crear la ventana: se apagan los servicios de Chromium que este
+// navegador no usa (traducción, enrutado de medios, sugerencias de
+// optimización). Cada uno cuesta un proceso o trabajo de red en segundo plano.
+app.commandLine.appendSwitch(
+  'disable-features',
+  [
+    'Translate', // no hay traducción en la interfaz
+    'MediaRouter', // no hay Chromecast ni dispositivos de salida remotos
+    'DialMediaRouteProvider',
+    'OptimizationHints', // descarga de modelos de navegación que no se usan
+    'InterestFeedContentSuggestions',
+    'HeavyAdPrivacyMitigations',
+  ].join(','),
+);
+
+mark('proceso');
 /** `--smoke`: arranca, revisa la interfaz y sale. Lo usa el flujo de Windows. */
 const isSmoke = process.argv.includes('--smoke') || process.env.NEXO_SMOKE === '1';
 /**
@@ -158,7 +176,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
       webviewTag: true,
-      spellcheck: true,
+      spellcheck: false,
     },
   });
 
@@ -178,6 +196,7 @@ function createWindow() {
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = false;
     webPreferences.webSecurity = true;
+    webPreferences.spellcheck = false;
     if (!/^https?:/i.test(params.src || '') && !String(params.src || '').startsWith('nexo:')) {
       event.preventDefault();
     }
@@ -228,6 +247,7 @@ function createWindow() {
     if (isDev) contents.on('console-message', (_e, level, message) => console.log('[pestaña]', message));
   });
 
+  win.webContents.once('did-finish-load', () => mark('shell'));
   win.loadURL('nexo://app/src/ui/shell/index.html');
   if (isDev) win.webContents.openDevTools({ mode: 'detach' });
   return win;
@@ -501,6 +521,11 @@ function applyZoom(contents) {
 function configureSession() {
   const s = session.fromPartition('persist:nexo');
 
+  // Sin corrector ortográfico: Chromium levanta un proceso aparte y descarga
+  // diccionarios por idioma. En un navegador de chat el texto que se escribe
+  // son mensajes cortos en un campo que ya declara `spellcheck="false"`.
+  s.setSpellCheckerEnabled(false);
+
   // Permisos por sitio: la política del perfil decide, y todo lo denegado queda
   // registrado para que el usuario sepa por qué un sitio no funciona como espera.
   s.setPermissionRequestHandler((webContents, permission, callback, details) => {
@@ -566,7 +591,9 @@ function configureSession() {
 }
 
 app.whenReady().then(async () => {
+  mark('ready');
   store = new Store();
+  mark('ajustes');
   const created = createMemory({
     dir: app.getPath('userData'),
     projectId: store.settings.memory?.projectId || 'default',
@@ -575,18 +602,22 @@ app.whenReady().then(async () => {
     episodeEvery: store.settings.memory?.episodeEvery,
   });
   memory = created;
+  mark('memoria');
   profile = createProfile({ dir: app.getPath('userData') });
+  mark('perfil');
   profile.history.prune();
   engine = new Engine({
     store,
     memory: created.memory,
     onEvent: (entry) => broadcast('nexo:event', { type: 'intervention', payload: entry }),
   });
+  mark('motor');
   registerProtocol();
   registerIpc();
   configureSession();
   buildMenu({ send: (channel, payload) => broadcast(channel, payload) });
   createWindow();
+  mark('ventana');
 
   if (isSmoke) {
     // Sin ventana visible ni interacción: sólo comprobar que el paquete vivo

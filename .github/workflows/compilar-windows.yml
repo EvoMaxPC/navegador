@@ -55,6 +55,9 @@ jobs:
       - name: Verificación automática
         run: npm run verify
 
+      - name: Referencia de rendimiento
+        run: npm run bench
+
       - name: Empaquetar
         run: npm run dist:win
 
@@ -68,6 +71,13 @@ jobs:
           $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower()
           $mb = [math]::Round($zip.Length / 1MB, 1)
           "ZIP: $($zip.Name) · $mb MB · sha256 $hash" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY
+          if (Test-Path ci-humo.txt) {
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "### Arranque y consumo en Windows" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            Get-Content ci-humo.txt | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
 
       - name: Dejar el ZIP como artefacto
         uses: actions/upload-artifact@v4

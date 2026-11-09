@@ -21,6 +21,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { crc32, inflateRawSync } from 'node:zlib';
 import {
+  KEEP_LOCALES,
+  localesToPrune,
   APP_NAME,
   EXE_NAME,
   COPYRIGHT,
@@ -261,3 +263,16 @@ test(
     }
   },
 );
+
+test('los idiomas de Chromium se recortan a español e inglés', () => {
+  const existentes = ['en-US.pak', 'en-GB.pak', 'es.pak', 'es-419.pak', 'de.pak', 'ja.pak', 'zh-CN.pak'];
+  const fuera = localesToPrune(existentes);
+  assert.deepEqual(fuera.sort(), ['de.pak', 'ja.pak', 'zh-CN.pak']);
+  // en-US es obligatorio: es el respaldo interno de Chromium.
+  assert.ok(KEEP_LOCALES.includes('en-US'));
+  for (const file of existentes) {
+    assert.equal(fuera.includes(file), !KEEP_LOCALES.includes(file.replace(/\.pak$/, '')));
+  }
+  // Un idioma que no está no rompe nada.
+  assert.deepEqual(localesToPrune(['en-US.pak']), []);
+});

@@ -23,6 +23,8 @@ export class BookmarkStore {
     this.now = opts.now || Date.now;
     /** @type {Array<{id:string,url:string,key:string,title:string,host:string,folder:string,createdAt:number}>} */
     this.items = [];
+    /** Caché de texto normalizado para la búsqueda de la barra. */
+    this.index = null;
     this.dirty = false;
     this.load();
   }
@@ -48,6 +50,7 @@ export class BookmarkStore {
     } catch {
       this.items = [];
     }
+    this.index = null;
     return this;
   }
 
@@ -72,6 +75,7 @@ export class BookmarkStore {
     if (existing) {
       if (title) existing.title = String(title).trim();
       this.dirty = true;
+      this.index = null;
       return { bookmark: existing, created: false };
     }
     const bookmark = {
@@ -85,6 +89,7 @@ export class BookmarkStore {
     };
     this.items.unshift(bookmark);
     this.dirty = true;
+    this.index = null;
     return { bookmark, created: true };
   }
 
@@ -105,7 +110,10 @@ export class BookmarkStore {
   remove(id) {
     const before = this.items.length;
     this.items = this.items.filter((item) => item.id !== id && item.key !== id);
-    if (this.items.length !== before) this.dirty = true;
+    if (this.items.length !== before) {
+      this.dirty = true;
+      this.index = null;
+    }
     return this.items.length !== before;
   }
 
@@ -128,12 +136,35 @@ export class BookmarkStore {
     if (folder) items = items.filter((item) => item.folder === folder);
     const term = normalizeText(query);
     if (term) {
-      items = items.filter(
-        (item) => normalizeText(item.title).includes(term) || normalizeText(item.url).includes(term),
-      );
+      // Texto normalizado una sola vez por marcador: esto se ejecuta en cada
+      // tecla de la barra de direcciones.
+      const search = this.#searchIndex();
+      items = items.filter((item) => {
+        const cached = search.get(item.key);
+        return cached
+          ? cached.title.includes(term) || cached.url.includes(term)
+          : normalizeText(item.title).includes(term) || normalizeText(item.url).includes(term);
+      });
     }
-    return items.slice().sort((a, b) => a.folder.localeCompare(b.folder, 'es') || a.title.localeCompare(b.title, 'es'));
+    return items
+      .slice()
+      .sort((a, b) => a.folder.localeCompare(b.folder, 'es') || a.title.localeCompare(b.title, 'es'));
   }
+
+  /**
+   * Texto normalizado por marcador, reconstruido sólo cuando cambia la lista.
+   * @returns {Map<string, {title: string, url: string}>}
+   */
+  #searchIndex() {
+    if (this.index && this.index.length === this.items.length) return this.index.map;
+    const map = new Map();
+    for (const item of this.items) {
+      map.set(item.key, { title: normalizeText(item.title), url: normalizeText(item.url) });
+    }
+    this.index = { map, length: this.items.length };
+    return map;
+  }
+
 
   folders() {
     const counts = new Map();
@@ -149,7 +180,10 @@ export class BookmarkStore {
       item.folder = to;
       moved += 1;
     }
-    if (moved) this.dirty = true;
+    if (moved) {
+      this.dirty = true;
+      this.index = null;
+    }
     return moved;
   }
 
@@ -157,6 +191,7 @@ export class BookmarkStore {
     const removed = this.items.length;
     this.items = [];
     this.dirty = true;
+    this.index = null;
     return { removed };
   }
 

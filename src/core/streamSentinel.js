@@ -52,18 +52,27 @@ export class StreamSentinel {
     const need = this.policy.minUnit * this.policy.minRepeats + 32;
     this.holdback = Math.max(0, opts.holdbackChars ?? receiving.holdbackChars ?? need);
     this.probeLength = 32;
-    this.deepCheckEvery = 512;
     this.host = opts.host || null;
     this.language = opts.language || 'es';
     this.onEvent = opts.onEvent || null;
 
     this.raw = '';
+    /**
+     * Copia en minúsculas del texto acumulado, mantenida al día por delta.
+     * Antes cada sonda recortaba e pasaba a minúsculas 6 000 caracteres: cada 24
+     * caracteres del modelo se generaba basura equivalente a 250 veces la
+     * respuesta. Con la copia incremental el costo pasa a ser una vez por delta.
+     */
+    this.low = '';
     this.delivered = '';
     this.stopped = false;
     this.stopReason = null;
     this.interventions = [];
     this.warned = new Set();
     this.lastCheck = 0;
+    this.lastDeepCheck = 0;
+    /** Cada cuántos caracteres se hace el análisis completo aunque la sonda no dispare. */
+    this.deepCheckEvery = opts.deepCheckEvery ?? 1200;
     this.lastCut = null;
     this.cutIndex = null;
   }
@@ -81,6 +90,14 @@ export class StreamSentinel {
   push(delta) {
     if (!delta) return { emit: '', stopped: this.stopped, events: [] };
     this.raw += delta;
+    const lowDelta = delta.toLowerCase();
+    if (lowDelta.length === delta.length) {
+      this.low += lowDelta;
+    } else {
+      // Casos raros (İ, ligaduras): la conversión cambia longitudes y las
+      // posiciones dejarían de coincidir. Se recalcula entera, una vez.
+      this.low = this.raw.toLowerCase();
+    }
     const events = [];
 
     if (!this.stopped) {
@@ -132,33 +149,70 @@ export class StreamSentinel {
    * análisis completo cuando la sonda dispara o cada 512 caracteres.
    */
   #inspectIfDue() {
-    const since = this.raw.length - this.lastCheck;
-    if (since < 24) return { loop: false };
-    this.lastCheck = this.raw.length;
+    const length = this.raw.length;
+    if (length - this.lastCheck < 24) return { loop: false };
+    this.lastCheck = length;
 
     const probe = this.#probeMatches() || this.#stutterProbe();
-    if (!probe && since < this.deepCheckEvery) return { loop: false };
+    // El análisis completo corre cuando la sonda dispara o cada
+    // `deepCheckEvery` caracteres. Antes el contador se reiniciaba en cada
+    // sonda de 24 caracteres, así que esa segunda condición no se cumplía nunca.
+    if (!probe && length - this.lastDeepCheck < this.deepCheckEvery) return { loop: false };
+    this.lastDeepCheck = length;
     return this.#inspect();
   }
 
   /** ¿El final del texto ya apareció antes? Condición necesaria de repetición. */
   #probeMatches() {
     const k = this.probeLength;
-    if (this.raw.length < k * 2) return false;
-    const tail = this.raw.slice(-k).toLowerCase();
+    const n = this.low.length;
+    if (n < k * 2) return false;
+    const tailStart = n - k;
+    const from = Math.max(0, n - 6000);
+    if (tailStart <= from) return false;
+    const tail = this.low.slice(tailStart);
+    // Menos de 12 caracteres de contenido: no hay nada que comparar.
     if (tail.trim().length < 12) return false;
-    const from = Math.max(0, this.raw.length - 6000);
-    const window = this.raw.slice(from, this.raw.length - k).toLowerCase();
-    return window.indexOf(tail) !== -1;
+    // `lastIndexOf` recorre hacia atrás sin recortar el texto en minúsculas:
+    // antes cada sonda copiaba 6 000 caracteres sólo para buscar 32.
+    return this.low.lastIndexOf(tail, tailStart - 1) >= from;
   }
 
   /**
    * Sonda de tartamudeo: cinco o más repeticiones seguidas de la misma palabra.
-   * Es O(1) sobre los últimos 160 caracteres y no depende del final del texto.
+   *
+   * Se recorre a mano la ventana de 160 caracteres en lugar de usar una
+   * expresión regular con retrorreferencia: la versión con regex era una de las
+   * partes más caras del camino por token.
    */
   #stutterProbe() {
-    const win = this.raw.slice(-160).toLowerCase();
-    return /(\b[\p{L}\p{N}]+\b)(?:[ \t]+\1){4,}/u.test(win);
+    const n = this.low.length;
+    if (n < 32) return false;
+    const win = this.low.slice(Math.max(0, n - 160));
+    let run = 0;
+    let prevStart = -1;
+    let prevEnd = -1;
+    let i = 0;
+    while (i < win.length) {
+      // Salto de separadores: cualquier espacio o salto de línea.
+      while (i < win.length && win.charCodeAt(i) <= 32) i += 1;
+      const start = i;
+      while (i < win.length && win.charCodeAt(i) > 32) i += 1;
+      if (i === start) break;
+      const same =
+        prevStart >= 0 &&
+        i - start === prevEnd - prevStart &&
+        win.startsWith(win.slice(prevStart, prevEnd), start);
+      if (same) {
+        run += 1;
+        if (run >= 4) return true; // el primero + 4 repeticiones = 5 seguidas
+      } else {
+        run = 0;
+      }
+      prevStart = start;
+      prevEnd = i;
+    }
+    return false;
   }
 
   /** Análisis real del texto acumulado. */

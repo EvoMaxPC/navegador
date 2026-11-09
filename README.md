@@ -40,6 +40,11 @@ en [`docs/EMPAQUETADO.md`](docs/EMPAQUETADO.md).
   [`docs/EMPAQUETADO.md`](docs/EMPAQUETADO.md).
 - **Interceptación de red por CDP (etapa 4):** aprobada, todavía no implementada.
 
+- **Rendimiento (medido, no prometido):** las sugerencias de la barra de
+  direcciones bajaron de 9,3 ms a 0,25 ms por tecla, el análisis del stream a la
+  mitad y el código inyectado en cada página de 47 kB a 25,6 kB. Cómo se mide y
+  qué se cambió: [`docs/RENDIMIENTO.md`](docs/RENDIMIENTO.md).
+
 Auditoría completa del código, con lo que se rompía y lo que se corrigió:
 [`docs/AUDITORIA.md`](docs/AUDITORIA.md).
 
@@ -64,7 +69,8 @@ entregó. El modelo está simulado; la mediación es la de verdad — es el mism
 código que corre dentro del navegador.
 
 ```bash
-npm test                # 248 pruebas, sin dependencias
+npm test                # 255 pruebas, sin dependencias
+npm run bench           # rendimiento medido: tabla antes/después
 npm run verify          # pruebas + bundle + checklist manual
 npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
 ```
@@ -234,7 +240,7 @@ src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
 scripts/         verificación, icono, empaquetado para Windows y prueba de humo
-test/            248 pruebas con node:test (incluye un Electron falso para el arranque)
+test/            255 pruebas con node:test (incluye un Electron falso para el arranque)
 docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
 .github/         flujo que compila la aplicación de Windows
 ```

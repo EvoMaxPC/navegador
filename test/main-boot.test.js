@@ -233,3 +233,38 @@ test('una pestaña que se cae se recarga, pero no en bucle', async () => {
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(otro.reloads, 1, 'tras cargar bien, se vuelve a intentar');
 });
+
+test('el arranque apaga lo que no se usa y no arranca el corrector', async () => {
+  await settle();
+
+  // Servicios de Chromium que este navegador no usa: cada uno cuesta un proceso
+  // o trabajo de red en segundo plano desde el arranque.
+  const features = journal.switches.find((item) => item.name === 'disable-features');
+  assert.ok(features, 'debe configurar disable-features');
+  for (const feature of ['Translate', 'MediaRouter', 'OptimizationHints']) {
+    assert.match(features.value, new RegExp(feature), `falta apagar ${feature}`);
+  }
+
+  assert.equal(journal.spellcheck, false, 'el corrector ortográfico no debe arrancar');
+
+  const win = journal.windows[0];
+  assert.equal(win.options.webPreferences.spellcheck, false);
+  const view = win.attachWebview('https://claude.ai/');
+  assert.equal(view.preferences?.spellcheck ?? false, false, 'las pestañas tampoco lo usan');
+});
+
+test('el arranque deja marcas de tiempo para medirse', async () => {
+  await settle();
+  const { marks } = await import('../src/main/perf.js');
+  const marcas = marks();
+  for (const nombre of ['proceso', 'ready', 'ajustes', 'perfil', 'motor', 'ventana']) {
+    assert.equal(typeof marcas[nombre], 'number', `falta la marca ${nombre}`);
+    assert.ok(marcas[nombre] >= 0);
+  }
+  // Las marcas tienen que ser monótonas: si una etapa "tarda menos" que la
+  // anterior, lo que se está midiendo no es el arranque.
+  const orden = ['ready', 'ajustes', 'perfil', 'motor', 'ventana'].map((n) => marcas[n]);
+  for (let i = 1; i < orden.length; i += 1) {
+    assert.ok(orden[i] >= orden[i - 1], `el orden de las marcas se rompió en ${i}`);
+  }
+});

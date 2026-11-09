@@ -7,6 +7,8 @@
  */
 
 const ZERO_WIDTH = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
+/** Reutilizable: crear una expresión por llamada era parte del coste. */
+const TOKEN_RE = /[\p{L}\p{N}_]+/gu;
 const SMART_QUOTES = /[\u2018\u2019\u201A\u201B]/g;
 
 /** Normaliza unicode sin cambiar (casi nunca) la longitud del texto. */
@@ -34,14 +36,23 @@ export function canonical(text) {
 
 /**
  * Minúsculas preservando la longitud del string.
- * `String.prototype.toLowerCase` puede cambiar la longitud (p. ej. 'İ'), y los
- * índices deben seguir apuntando al texto original para poder recortarlo.
+ *
+ * `String.prototype.toLowerCase` puede cambiar la longitud (p. ej. 'İ' pasa a
+ * ser dos unidades de código), y los índices tienen que seguir apuntando al
+ * texto original para poder recortarlo.
+ *
+ * Camino rápido: en la enorme mayoría de los textos la conversión nativa no
+ * cambia la longitud, así que se usa tal cual. Antes se recorría carácter por
+ * carácter —6 000 llamadas a `toLowerCase` y otras tantas concatenaciones por
+ * análisis— y esta función sola costaba más que todo el resto junto.
  */
 export function lowerPreservingLength(text) {
+  const low = text.toLowerCase();
+  if (low.length === text.length) return low;
   let out = '';
   for (const ch of text) {
-    const low = ch.toLowerCase();
-    out += low.length === ch.length ? low : ch;
+    const lower = ch.toLowerCase();
+    out += lower.length === ch.length ? lower : ch;
   }
   return out;
 }
@@ -55,6 +66,31 @@ export function tokenize(text) {
 }
 
 /**
+ * Tokens y sus posiciones de inicio, en dos arrays paralelos.
+ *
+ * Es la forma barata de lo mismo que `tokenizeWithSpans`: sin un objeto por
+ * palabra. El análisis corre cada pocos cientos de caracteres mientras el
+ * modelo escribe, y ahí Mil objetos por llamada se notan.
+ *
+ * @param {string} text
+ * @returns {{tokens: string[], starts: number[], ends: number[]}}
+ */
+export function tokenizeWithStarts(text) {
+  const tokens = [];
+  const starts = [];
+  const ends = [];
+  const re = TOKEN_RE;
+  re.lastIndex = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    tokens.push(m[0].toLowerCase());
+    starts.push(m.index);
+    ends.push(m.index + m[0].length);
+  }
+  return { tokens, starts, ends };
+}
+
+/**
  * Tokens con sus posiciones en el texto original.
  * Necesario para traducir «repetición de tokens» a un índice de corte exacto.
  * @param {string} text
@@ -62,7 +98,8 @@ export function tokenize(text) {
  */
 export function tokenizeWithSpans(text) {
   const out = [];
-  const re = /[\p{L}\p{N}_]+/gu;
+  const re = TOKEN_RE;
+  re.lastIndex = 0;
   let m;
   while ((m = re.exec(text)) !== null) {
     out.push({ token: m[0].toLowerCase(), start: m.index, end: m.index + m[0].length });

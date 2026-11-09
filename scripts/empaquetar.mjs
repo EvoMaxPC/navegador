@@ -20,8 +20,9 @@
 
 import { packager } from '@electron/packager';
 import { listPackage } from '@electron/asar';
+import { localesToPrune } from './packaging-config.mjs';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,6 +141,28 @@ step(`Electron ${electronVersion} win32-${config.arch} empaquetado`);
 
 const appDir = resolve(String(outputPaths[0]));
 const exePath = join(appDir, `${EXE_NAME}.exe`);
+
+/* ---------------- idiomas ---------------- */
+// Chromium se lleva un .pak por idioma: ~9 MB de traducciones que esta interfaz
+// no muestra. Se conservan español e inglés.
+const localesDir = join(appDir, 'locales');
+if (existsSync(localesDir)) {
+  const before = readdirSync(localesDir);
+  const drop = localesToPrune(before);
+  let freed = 0;
+  for (const file of drop) {
+    const full = join(localesDir, file);
+    try {
+      freed += statSync(full).size;
+      rmSync(full, { force: true });
+    } catch {
+      // Si no se puede borrar, no es motivo para abortar la compilación.
+    }
+  }
+  if (drop.length) {
+    step(`idiomas: ${before.length} → ${before.length - drop.length} (se liberan ${(freed / 1024 / 1024).toFixed(1)} MB)`);
+  }
+}
 const asarPath = join(appDir, 'resources', 'app.asar');
 
 /* ---------------- verificación del resultado ---------------- */

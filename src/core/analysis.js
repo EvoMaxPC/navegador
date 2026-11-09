@@ -13,7 +13,7 @@ import {
   entropy,
   lowerPreservingLength,
   tokenize,
-  tokenizeWithSpans,
+  tokenizeWithStarts,
   tokensToSignature,
 } from './text.js';
 
@@ -28,6 +28,33 @@ export function prefixFunction(s) {
     pi[i] = k;
   }
   return pi;
+}
+
+/**
+ * Igual que `zFunction` pero sobre una secuencia de códigos de carácter.
+ *
+ * Comparar números es bastante más rápido que comparar strings de un carácter,
+ * y evita materializar la cadena invertida. Es el camino que usa el análisis
+ * en vivo; `zFunction` queda para los tests y para texto suelto.
+ *
+ * @param {Uint16Array|number[]} codes
+ */
+export function zFunctionCodes(codes) {
+  const n = codes.length;
+  const z = new Int32Array(n);
+  if (n === 0) return z;
+  z[0] = n;
+  let l = 0;
+  let r = 0;
+  for (let i = 1; i < n; i += 1) {
+    if (i <= r) z[i] = Math.min(r - i + 1, z[i - l]);
+    while (i + z[i] < n && codes[z[i]] === codes[i + z[i]]) z[i] += 1;
+    if (i + z[i] - 1 > r) {
+      l = i;
+      r = i + z[i] - 1;
+    }
+  }
+  return z;
 }
 
 /**
@@ -71,9 +98,12 @@ export function repeatingSuffix(str, opts = {}) {
   const n = s.length;
   if (n < minUnit * minRepeats) return null;
 
-  // Invertido por unidades de código para conservar la correspondencia 1:1 de índices.
-  const rev = s.split('').reverse().join('');
-  const z = zFunction(rev);
+  // Invertido por unidades de código, en un array numérico: la correspondencia
+  // 1:1 de índices se conserva y no se crea un string por carácter (que era,
+  // literalmente, un arreglo de 20 000 strings por análisis).
+  const rev = new Uint16Array(n);
+  for (let i = 0; i < n; i += 1) rev[n - 1 - i] = s.charCodeAt(i);
+  const z = zFunctionCodes(rev);
 
   let best = null;
   const limit = Math.floor(n / minRepeats);
@@ -246,8 +276,8 @@ export function analyzeTail(text, opts = {}) {
   const tail = text.length > tailChars ? text.slice(-tailChars) : text;
   const offset = text.length - tail.length;
   const low = lowerPreservingLength(tail);
-  const spans = tokenizeWithSpans(tail);
-  const tokens = spans.length ? spans.map((s) => s.token) : tokenize(tail);
+  // Tokens y posiciones en dos arrays paralelos: sin un objeto por palabra.
+  const { tokens, starts } = tokenizeWithStarts(tail);
   const signals = {
     charRepeat: null,
     tokenRepeat: null,
@@ -322,8 +352,8 @@ export function analyzeTail(text, opts = {}) {
           tokens: tokenLag.lag,
           repeats: Math.max(2, Math.round(tokenLag.repeats)),
           words: tokens.slice(tokenLag.start, tokenLag.start + tokenLag.lag).join(' '),
-          start: offset + (spans[tokenLag.start]?.start ?? 0),
-          cutAt: offset + (spans[tokenLag.start]?.start ?? 0),
+          start: offset + (starts[tokenLag.start] ?? 0),
+          cutAt: offset + (starts[tokenLag.start] ?? 0),
         },
         signals,
       };

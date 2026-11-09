@@ -24,6 +24,7 @@ export const journal = {
   permissions: { request: null, check: null },
   downloads: [],
   external: [],
+  switches: [],
   quit: false,
   userData: mkdtempSync(join(tmpdir(), 'nexo-audit-')),
 };
@@ -103,6 +104,11 @@ class FakeSession extends EventEmitter {
     this.cleared = [];
   }
 
+  setSpellCheckerEnabled(enabled) {
+    this.spellcheck = enabled;
+    journal.spellcheck = enabled;
+  }
+
   setPermissionRequestHandler(fn) {
     journal.permissions.request = fn;
   }
@@ -163,6 +169,13 @@ export class FakeBrowserWindow extends EventEmitter {
 
 export const app = Object.assign(new EventEmitter(), {
   name: 'Nexo',
+  commandLine: {
+    appendSwitch(name, value) {
+      journal.switches.push({ name, value });
+    },
+    hasSwitch: (name) => journal.switches.some((item) => item.name === name),
+    getSwitchValue: (name) => journal.switches.find((item) => item.name === name)?.value || '',
+  },
   whenReady: () => Promise.resolve(),
   getPath: () => journal.userData,
   getVersion: () => '0.1.0',

@@ -13,6 +13,10 @@ import { dirname, resolve } from 'node:path';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outfile = resolve(root, 'build/inject.js');
+// `--dev` deja el bundle legible: se evalúa en cada página, así que en
+// producción conviene minificado (menos bytes que parsear antes de que la
+// página responda a la primera tecla).
+const dev = process.argv.includes('--dev') || process.env.NEXO_INJECT_DEV === '1';
 
 await mkdir(dirname(outfile), { recursive: true });
 
@@ -23,12 +27,20 @@ const result = await build({
   format: 'iife',
   target: ['chrome120'],
   platform: 'browser',
-  minify: false,
+  minify: !dev,
+  // Sin escapar los acentos: en UTF-8 ocupan menos y el texto es español.
+  charset: 'utf8',
   legalComments: 'none',
+  keepNames: dev,
   logLevel: 'warning',
   metafile: true,
 });
 
 const { size } = await stat(outfile);
 const inputs = Object.keys(result.metafile.inputs).length;
-console.log(`inject.js listo · ${(size / 1024).toFixed(1)} kB · ${inputs} módulos`);
+const { gzipSync } = await import('node:zlib');
+const { readFile } = await import('node:fs/promises');
+const gzip = gzipSync(await readFile(outfile)).length;
+console.log(
+  `inject.js listo · ${(size / 1024).toFixed(1)} kB (${(gzip / 1024).toFixed(1)} kB gzip) · ${inputs} módulos${dev ? ' · modo dev' : ''}`,
+);
