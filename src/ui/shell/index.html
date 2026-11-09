@@ -83,8 +83,9 @@
         </div>
         <p class="note capture" id="captureLine">Captura: sin datos todavía.</p>
         <p class="note" id="statsNote">
-          * Los tokens son una estimación del motor (caracteres y alfabeto), no el
-          conteo de un tokenizador del proveedor. «Intervenciones» cuenta la
+          * Tokens del texto capturado: BPE local para GPT; si falla, se estima
+          sobre el texto real y se avisa en el registro. No incluye contenido no
+          recibido. «Intervenciones» cuenta la
           actividad: +1 al enviar un mensaje y +1 al recibir una respuesta.
         </p>
         <div class="panel-head">
@@ -243,7 +244,7 @@
       <section class="panel-view" data-panel="about">
         <div class="about">
           <h2>Nexo</h2>
-          <p class="version" id="version">v0.1.12</p>
+          <p class="version" id="version">v0.1.14</p>
           <p>
             Navegador basado en Chromium que se sienta entre vos y los chatbots: reescribe el
             mensaje antes de enviarlo y filtra la respuesta antes de mostrarla.

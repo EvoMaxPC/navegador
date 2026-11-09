@@ -111,17 +111,51 @@ const CHATGPT_TERMINAL_STATUS = new Set([
 ]);
 
 /**
- * ChatGPT usa dos protocolos según la época y el tipo de cuenta:
+ * ChatGPT usa tres protocolos según la época y el tipo de cuenta:
  *
  *  1. **parches** (el actual): eventos `{"p": ruta, "o": "append"|"replace", "v": valor}`
  *     y `{"v": "…"}` como continuación de la ruta anterior. Las rutas son JSON
  *     Pointer y el texto vive en `/message/content/parts/N`.
- *  2. **acumulado** (legacy/anon): `{"message": {author, content: {parts: [texto completo]}}}`.
+ *  2. **acumulado** (legacy): `{"message": {author, content: {parts: [texto completo]}}}`.
+ *  3. **NDJSON** sin cuenta: content/markdown con mode/revision y controles.
+ * Los registros SSE multiplexados usan `c` para seleccionar el mensaje: sus
+ * fragmentos ocultos y el mensaje fusionado visible no se suman dos veces.
  *
  * Además manda el eco del mensaje del usuario (`author.role === "user"`), estados
  * y eventos sin texto (`"v1"`, `title_generation`): nada de eso se toca.
  */
 function chatgptAdapter() {
+  const channels = new Map();
+  let channel = 'legacy';
+  let active;
+  let lastTextChannel;
+  let model = '';
+  return {
+    name: 'chatgpt',
+    read(json) {
+      if (json && json.c !== undefined) channel = json.c;
+      if (!channels.has(channel)) channels.set(channel, chatgptChannelAdapter());
+      active = channels.get(channel);
+      const plan = active.read(json);
+      if (plan.model) model = plan.model;
+      if (plan.segments.length) lastTextChannel = channel;
+      return plan;
+    },
+    write(...args) { return active.write(...args); },
+    pending(info) {
+      const synth = channels.get(lastTextChannel)?.pending(info);
+      if (synth && lastTextChannel !== 'legacy') synth.json.c = lastTextChannel;
+      return synth;
+    },
+    snapshot() {
+      const parts = [...channels.values()].map((item) => item.snapshot()).filter((text) => text !== null);
+      return parts.length ? parts.join('') : null;
+    },
+    model: () => model,
+  };
+}
+
+function chatgptChannelAdapter() {
   const state = {
     /** `null` = todavía no se vio de quién es el mensaje abierto. */
     assistantText: null,
@@ -129,8 +163,6 @@ function chatgptAdapter() {
     pathIsText: false,
     lastTextPath: '/message/content/parts/0',
     lastEvent: null,
-    /** Longitud ya recibida por ruta acumulada (`o: replace` / legacy). */
-    received: new Map(),
     /** Mensaje acumulado vigente, para fabricar el evento de cierre. */
     lastMessage: null,
     /** Ruta acumulada vigente. */
@@ -139,111 +171,118 @@ function chatgptAdapter() {
 
   const segment = (path, text, cumulative = false) => ({ path, newText: text, cumulative });
 
-  /**
-   * Texto nuevo de un tramo acumulado: el evento trae el texto completo.
-   *
-   * `clave` identifica el tramo para recordar cuánto se recibió (un puntero o
-   * una ruta); `destino` es dónde se escribe en el evento (`v` en el protocolo
-   * de parches, la ruta del mensaje en el acumulado).
-   */
-  function cumulativeSegment(clave, destino, full) {
-    const prev = state.received.get(clave) || 0;
-    const base = typeof full === 'string' ? full : '';
-    const nuevo = base.length >= prev ? base.slice(prev) : base;
-    state.received.set(clave, base.length);
-    return nuevo ? segment(destino, nuevo, true) : null;
+  // Snapshot por mensaje/parte: permite reconstruir replace/append sin sumar
+  // dos veces revisiones ni fragmentos ocultos de la misma respuesta.
+  const texts = new Map();
+  const revisions = new Map();
+  let messageId = '';
+  let pointer = '';
+  let operation = 'append';
+  let model = '';
+  let captured = false;
+
+  function remember(key, full, path, cumulative = true) {
+    const previous = texts.get(key) || '';
+    texts.set(key, full);
+    captured = true;
+    const added = full.startsWith(previous) ? full.slice(previous.length) : full;
+    return added ? segment(path, added, cumulative) : null;
   }
 
   function read(json) {
     const segments = [];
     let terminal = null;
-    if (!isPlainObject(json)) return { segments, terminal };
+    const handled = isPlainObject(json) && Boolean(json.type || json.message || 'v' in json || 'p' in json || 'o' in json);
+    const result = () => ({ segments, terminal, handled, model });
+    if (!isPlainObject(json)) return result();
 
-    // --- protocolo acumulado ------------------------------------------------
-    const message = json.message;
-    if (isPlainObject(message) && isPlainObject(message.content)) {
+    // Canal sin cuenta: no lleva message.content, sino markdown con revisiones.
+    if (json.type === 'content' && typeof json.markdown === 'string') {
+      const id = String(json.messageId || 'ndjson');
+      const revision = Number(json.revision);
+      if (Number.isFinite(revision) && revision <= (revisions.get(id) ?? -1)) return result();
+      if (Number.isFinite(revision)) revisions.set(id, revision);
+      const key = `${id}:markdown`;
+      const full = json.mode === 'append' ? (texts.get(key) || '') + json.markdown : json.markdown;
+      const added = remember(key, full, 'markdown');
+      if (added) segments.push(added);
+      if (json.status === 'complete') terminal = 'message';
+      return result();
+    }
+    if (json.type === 'end' || json.type === 'message_stream_complete' ||
+        (json.type === 'control' && json.detail?.kind === 'terminal-received')) terminal = 'message';
+
+    function readMessage(message, prefix) {
+      if (!isPlainObject(message)) return;
       const role = message.author?.role;
-      if (role === 'user') {
-        // Eco del mensaje del usuario: pasa sin tocarse y cierra el turno del asistente.
-        state.assistantText = false;
-        state.lastMessage = null;
-        return { segments, terminal };
-      }
-      if (role === 'assistant') state.assistantText = true;
-      const type = message.content.content_type;
-      const parts = message.content.parts;
-      if (Array.isArray(parts) && state.assistantText !== false && (!type || TEXT_CONTENT_TYPES.has(type))) {
-        parts.forEach((part, i) => {
-          if (typeof part !== 'string' || !part) return;
-          const path = `message.content.parts.${i}`;
-          const added = cumulativeSegment(path, path, part);
-          if (added) segments.push(added);
-          state.lastTextPath = `/message/content/parts/${i}`;
-          state.cumulativePath = path;
-        });
-        state.lastMessage = message;
-        state.lastEvent = state.lastEvent || 'message';
-      }
-      return { segments, terminal };
+      const type = message.content?.content_type;
+      messageId = String(message.id || messageId || 'message');
+      const meta = message.metadata || {};
+      model = meta.model_slug || meta.resolved_model_slug || model;
+      state.assistantText = (role ? role === 'assistant' : state.assistantText !== false) &&
+        (!type || TEXT_CONTENT_TYPES.has(type)) &&
+        (!message.recipient || message.recipient === 'all') &&
+        (!message.channel || message.channel === 'final') &&
+        !meta.is_message_fragment && !meta.is_visually_hidden_from_conversation;
+      state.pathIsText = false;
+      if (!state.assistantText) return;
+      const parts = message.content?.parts;
+      if (Array.isArray(parts)) parts.forEach((part, i) => {
+        if (typeof part !== 'string') return;
+        const path = `${prefix}.content.parts.${i}`;
+        const added = remember(`${messageId}:${i}`, part, path);
+        if (added) segments.push(added);
+        state.lastTextPath = `/message/content/parts/${i}`;
+        state.cumulativePath = `message.content.parts.${i}`;
+      });
+      state.lastMessage = prefix === 'message' ? message : null;
+      if (CHATGPT_TERMINAL_STATUS.has(message.status)) terminal = 'message';
     }
 
-    // --- protocolo de parches ----------------------------------------------
-    const ops = [];
-    if (json.o === 'patch' && Array.isArray(json.v)) {
-      for (const item of json.v) if (isPlainObject(item)) ops.push(item);
-    } else if (typeof json.p === 'string') {
-      ops.push(json);
-    } else if (typeof json.v === 'string' && state.pathIsText) {
-      // Continuación de la ruta anterior.
-      ops.push({ p: state.lastTextPath, o: 'append', v: json.v, viaContinuation: true });
+    if (isPlainObject(json.message)) {
+      readMessage(json.message, 'message');
+      return result();
     }
 
-    for (const op of ops) {
-      const pointer = typeof op.p === 'string' ? op.p : null;
+    function readOperation(op, valuePath, inheritedPointer, inheritedOperation) {
+      if (!isPlainObject(op)) return;
+      const target = typeof op.p === 'string' ? op.p : inheritedPointer;
+      const action = typeof op.o === 'string' ? op.o : inheritedOperation;
+      if (Array.isArray(op.v) && (action === 'patch' || op.v.every((item) => isPlainObject(item) && typeof item.p === 'string'))) {
+        op.v.forEach((child, i) => readOperation(child, `${valuePath}.${i}.v`, target, 'append'));
+        return;
+      }
       const value = op.v;
-
-      if (pointer === '/message' && isPlainObject(value)) {
-        state.assistantText = value.author?.role === 'assistant' ? true : value.author?.role === 'user' ? false : null;
-        continue;
+      // El protocolo delta_encoding usa raíces {p:'',o:'add',v:{message}}
+      // y objetos {v:{message}} que heredan la operación anterior.
+      if (target === '' && isPlainObject(value?.message)) {
+        readMessage(value.message, `${valuePath}.message`);
+        return;
       }
-      if (pointer === '/message/author/role' && typeof value === 'string') {
+      if (target === '/message' && isPlainObject(value)) {
+        readMessage(value, valuePath);
+        return;
+      }
+      state.pathIsText = PARTS_PATH.test(target) && state.assistantText !== false;
+      if (target === '/message/author/role') {
         state.assistantText = value === 'assistant';
-        continue;
+        return;
       }
-      if (pointer === '/message/content/content_type' && typeof value === 'string') {
-        continue;
-      }
-      if (pointer === '/message/status' && typeof value === 'string') {
-        if (CHATGPT_TERMINAL_STATUS.has(value)) terminal = 'message';
-        continue;
-      }
-
-      if (pointer && PARTS_PATH.test(pointer)) {
-        state.pathIsText = state.assistantText !== false;
-        if (state.pathIsText) state.lastTextPath = pointer;
-        if (typeof value !== 'string' || !value) continue;
-        // En el protocolo de parches el texto viaja en `v`, no en la ruta: la
-        // ruta dice dónde lo aplica el cliente. Se reescribe `v` y nada más.
-        if (op.o === 'replace') {
-          const path = `message.content.parts.${PARTS_PATH.exec(pointer)[1]}`;
-          const added = cumulativeSegment(pointer, 'v', value);
-          state.cumulativePath = path;
-          if (added) segments.push(added);
-        } else if (op.o === 'append' || op.viaContinuation) {
-          segments.push(segment('v', value));
-        }
-        continue;
-      }
-
-      if (pointer && pointer.startsWith('/message/content/parts')) {
-        // Escritura en la lista de parts que no es un texto concreto: no se toca.
-        state.pathIsText = false;
-        continue;
-      }
+      if (target === '/message/status' && CHATGPT_TERMINAL_STATUS.has(value)) terminal = 'message';
+      if (!state.pathIsText || typeof value !== 'string') return;
+      const index = PARTS_PATH.exec(target)[1];
+      const key = `${messageId || 'message'}:${index}`;
+      const full = action === 'append' ? (texts.get(key) || '') + value : value;
+      const added = remember(key, full, valuePath, action !== 'append');
+      state.lastTextPath = target;
+      // El cierre sintético de los parches es append, no el mensaje legacy.
+      state.lastMessage = null;
+      if (added) segments.push(added);
     }
-
-    if (json.type === 'message_stream_complete' || json.type === 'title_generation') terminal = 'message';
-    return { segments, terminal };
+    if (typeof json.p === 'string') pointer = json.p;
+    if (typeof json.o === 'string') operation = json.o;
+    if ('v' in json) readOperation(json, 'v', pointer, operation);
+    return result();
   }
 
   function write(json, segments, values, eventName) {
@@ -273,7 +312,10 @@ function chatgptAdapter() {
     };
   }
 
-  return { name: 'chatgpt', state, read, write, pending };
+  return { name: 'chatgpt', state, read, write, pending,
+    snapshot: () => captured ? [...texts.values()].join('') : null,
+    model: () => model,
+  };
 }
 
 /* ------------------------------------------------------------------ */

@@ -527,7 +527,7 @@ test('un motor que falla no tumba la observación', () => {
   tab.debugger.emitEvent('Network.webSocketCreated', { requestId: 'ws-9', url: 'wss://chatgpt.com/ws' });
   tab.debugger.emitEvent('Network.webSocketFrameReceived', {
     requestId: 'ws-9',
-    response: { opcode: 1, payloadData: JSON.stringify({ type: 'delta', content: 'hola' }) },
+    response: { opcode: 1, payloadData: JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['hola'] } } }) },
   });
   tab.debugger.emitEvent('Network.webSocketClosed', { requestId: 'ws-9' });
   assert.match(logs.join(' '), /al entregar al motor/i);

@@ -185,7 +185,7 @@ Ocho métricas independientes, cada una con su hecho, expuestas por
 | `responses` | respuestas de la IA | cierre de stream (`nexo:stream-end`) o captura CDP |
 | `turns` | turnos completos | par mensaje↔respuesta, asociado por `messageId` |
 | `inputTokens` | tokens del mensaje | `countTokensForProvider` sobre el texto localizado (BPE local para GPT) |
-| `outputTokens` | tokens de la respuesta | `countTokensForProvider` sobre el texto **real** leído (BPE local para GPT): lo entrega la capa al cerrar el stream o CDP al leer el cuerpo. Si la respuesta se contó por la red —sin texto— y el texto aparece después, sus tokens se suman a **esa** respuesta (no se cuenta otra). |
+| `outputTokens` | tokens de la respuesta | `countOutputTokens` sobre el texto **real** leído (BPE local para GPT): lo entrega la capa al cerrar el stream o CDP al leer el cuerpo. Si la respuesta se contó por la red —sin texto— y el texto aparece después, sus tokens se suman a **esa** respuesta (no se cuenta otra). |
 | `interventions` | actividad de la conversación | +1 al contar un mensaje y +1 al contar una respuesta |
 | `mediatedInterventions` | intervenciones del motor | `prepare()` sólo cuando el texto cambió, más los cortes |
 | `loopsSeen` | bucles observados | centinelas de cada guardián + observación CDP |
@@ -282,7 +282,7 @@ acumulados repiten el texto completo en cada evento, y sumarlo otra vez serían
 tokens contados dos veces.
 
 **Tokens sin texto no existen.** Los tokens de salida salen siempre de
-`countTokensForProvider` sobre el texto real; nunca de una cifra fija por respuesta. Si
+`countOutputTokens` sobre el texto real; nunca de una cifra fija por respuesta. Si
 ningún camino logra leer el cuerpo, la respuesta se cuenta igual (camino de red)
 y los tokens quedan donde estaban. Cuando el texto aparece un instante después
 —CDP termina de leer el cuerpo cuando la petición ya cerró—, el motor lo suma a
@@ -383,3 +383,20 @@ Las utilidades puras de `src/core/text.js` no importan diccionarios BPE.
 el preload convierte el metadato del envío a BPE y elimina `tokenText` antes de
 reenviarlo por IPC. El Engine calcula la salida sobre el texto recibido.
 Así el bundle de captura conserva el límite de 60 kB sin quitar el conteo BPE.
+
+
+### Tokens de salida 0.1.14
+
+El mismo adaptador ChatGPT atiende SSE delta-encoded con canales `c`, raíces
+`v.message` y parches heredados, y NDJSON `content/markdown` con `mode/revision`.
+Los fragmentos ocultos del mensaje fusionado no se cuentan otra vez. Las rutas
+`v.<índice>.v` de un patch se reescriben sin destruir su array de operaciones.
+El filtro conserva el wire NDJSON y anuncia una captura parcial si el origen
+falla o se cancela. La recuperación BPE de **salida** sólo usa estimación sobre
+texto real si hay excepción o un resultado inválido, con diagnóstico visible
+`output-tokenizer-fallback`; el cálculo de entrada sigue separado y sin cambios.
+
+Una captura CDP puede ser duplicada como **respuesta** pero aportar nuevos tokens.
+En ese caso el principal también emite `nexo:stats-changed`; el listener existente
+de la shell obtiene las estadísticas y actualiza `statOutTokens` sin intervención
+manual. Ver `OUTPUT-TOKENS-AUDITORIA.md` para evidencia y límites de validación.

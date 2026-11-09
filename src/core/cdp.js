@@ -154,13 +154,16 @@ export class CdpCapture {
     this.url = opts.url || '';
     this.source = opts.source || 'websocket';
     /** Un adaptador por captura: guarda el estado de los protocolos acumulados. */
-    this.adapter = this.site.streamAdapter ? createAdapter(this.site.streamAdapter) : null;
     this.seq = 0;
     this.reset();
   }
 
   /** Vacía el texto acumulado, conservando la identidad de la conversación. */
   reset() {
+    if (!this.adapter || this.site.id === 'chatgpt') {
+      this.adapter = this.site.streamAdapter ? createAdapter(this.site.streamAdapter) : null;
+    }
+    this.model = '';
     this.parts = [];
     this.length = 0;
     this.frames = 0;
@@ -172,7 +175,7 @@ export class CdpCapture {
   }
 
   get text() {
-    return this.parts.join('');
+    return this.adapter?.snapshot?.() ?? this.parts.join('');
   }
 
   get empty() {
@@ -201,11 +204,12 @@ export class CdpCapture {
       const plan = this.adapter.read(json);
       pieces = (plan.segments || []).map((segment) => segment.newText).filter(Boolean);
       terminal = plan.terminal ? String(plan.terminal) : null;
+      if (plan.model) this.model = plan.model;
       // Un JSON que el adaptador del sitio no reconoce —cuerpo de otra forma,
       // respuesta no-streaming de otro proveedor— se lee con la extracción
       // genérica. Se exceptúa el protocolo de parches propio (`p`/`o`), donde un
       // `v` de control como `finished_successfully` no es texto.
-      if (!pieces.length && !isPatchShaped(json)) pieces = this.#genericPieces(json);
+      if (!pieces.length && !plan.handled && !isPatchShaped(json)) pieces = this.#genericPieces(json);
       terminal = terminal || terminalOf(json);
     } else {
       pieces = this.#genericPieces(json);
@@ -269,6 +273,7 @@ export class CdpCapture {
     this.seq += 1;
     const capture = {
       text: this.text,
+      model: this.model,
       prompt: this.promptText,
       frames: this.frames,
       controls: this.controls.slice(),

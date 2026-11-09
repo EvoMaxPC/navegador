@@ -20,7 +20,7 @@ import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
 import { fingerprint, gptModelFromRequest } from '../core/text.js';
-import { countTokensForProvider } from './tokens.js';
+import { countTokensForProvider, countOutputTokens } from './tokens.js';
 import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
@@ -520,7 +520,7 @@ function registerIpc() {
           messageId: payload?.messageId || null,
           conversationId: payload?.conversationId || null,
           chars,
-          tokens: Number(payload?.tokens) || 0,
+          tokens: countOutputTokens(String(payload?.text || ''), payload?.model || '', host),
           stopped: Boolean(payload?.stopped),
           truncated: Boolean(payload?.truncated),
         },
@@ -1420,7 +1420,12 @@ app.whenReady().then(async () => {
           };
           if (store) store.pushLog(entry);
           broadcast('nexo:event', { type: 'intervention', payload: entry });
-        } else if (event?.type === 'capture' && !event.duplicate) {
+        } else if (event?.type === 'capture') {
+          if (event.duplicate) {
+            // La respuesta no es nueva, pero CDP pudo recuperar texto/tokens.
+            broadcast('nexo:stats-changed', engine.stats());
+            return;
+          }
           const capture = event.capture || {};
           const host = capture.host || 'el sitio';
           const chars = String(capture.text || '').length;
@@ -1440,7 +1445,7 @@ app.whenReady().then(async () => {
               messageId: event.messageId || null,
               paired: Boolean(event.paired),
               chars,
-              tokens: countTokensForProvider(String(capture.text || ''), capture.model || '', capture.host || ''),
+              tokens: countOutputTokens(String(capture.text || ''), capture.model || '', capture.host || ''),
               conversationId: capture.conversationId || null,
             },
             ts: Date.now(),

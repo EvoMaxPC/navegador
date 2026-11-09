@@ -33,6 +33,7 @@ import {
 import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
 import { fingerprint, gptModelFromRequest } from '../core/text.js';
 import { countTokensForProvider } from './tokens.js';
+import { parseSSE } from '../core/sse.js';
 
 /** Versión del protocolo que expone Electron/Chromium. */
 const CDP_VERSION = '1.3';
@@ -781,7 +782,7 @@ export class CdpObserver {
       }
       this.stats.bodies += 1;
       const listo = capture.take();
-      if (listo) listo.model = request?.model || '';
+      if (listo) listo.model = listo.model || request?.model || '';
       if (!listo) {
         // El cuerpo se leyó y los eventos se parsearon, pero ninguno trajo
         // texto del asistente. Es la forma silenciosa de perder una respuesta:
@@ -821,7 +822,7 @@ export class CdpObserver {
         this.stats.bodies += 1;
         const listoNd = captureNd.take();
         if (listoNd) {
-          listoNd.model = request?.model || '';
+          listoNd.model = listoNd.model || request?.model || '';
           this.#deliver(state, listoNd);
           return;
         }
@@ -877,7 +878,7 @@ export class CdpObserver {
     }
     this.stats.bodies += 1;
     const listo = capture.take();
-    if (listo) listo.model = request?.model || '';
+    if (listo) listo.model = listo.model || request?.model || '';
     this.#deliver(state, listo);
   }
 
@@ -932,16 +933,8 @@ export class CdpObserver {
 
 /** Eventos SSE (`data: …`) de un cuerpo ya descargado. */
 function eventosSSE(cuerpo) {
-  const eventos = [];
-  for (const linea of String(cuerpo).split(/\r?\n/)) {
-    const limpia = linea.trim();
-    if (!limpia.startsWith('data:')) continue;
-    const dato = limpia.slice(5).trim();
-    if (!dato || dato === '[DONE]') continue;
-    const evento = safeJson(dato);
-    if (evento) eventos.push(evento);
-  }
-  return eventos;
+  return parseSSE(`${cuerpo}\n\n`).events
+    .map((event) => safeJson(event.data)).filter(Boolean);
 }
 
 /**

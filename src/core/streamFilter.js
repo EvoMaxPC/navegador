@@ -35,6 +35,7 @@ const encoder = new TextEncoder();
 
 /**
  * @param {{
+ *   format?: 'sse'|'ndjson'|'auto',
  *   settings?: object,
  *   adapter?: string|null,
  *   deltaPaths?: string[]|null,
@@ -62,6 +63,43 @@ export function createStreamFilter(opts = {}) {
 
   const decoder = new TextDecoder();
   let buffered = '';
+  let format = opts.format || 'sse';
+  let ended = false;
+  const pendingChunks = [];
+  let plainText = '';
+  let lineText = '';
+
+  const consumeLines = (final = false) => {
+    const lines = buffered.split('\n');
+    buffered = final ? '' : lines.pop();
+    for (const line of lines) {
+      const json = safeJson(line);
+      if (!json) continue;
+      const plan = adapter.read(json);
+      lineText += (plan.segments || []).map((segment) => segment.newText).join('');
+    }
+  };
+
+  // NDJSON se observaba sin mediación: conservar los bytes y usar el mismo
+  // adaptador para su contenido, sin convertirlo al protocolo SSE.
+  const finishCapture = (interrupted = false) => {
+    if (ended) return;
+    ended = true;
+    if (format === 'ndjson') consumeLines(true);
+    const verdict = sentinel.finish();
+    const text = format === 'ndjson' ? (adapter.snapshot?.() ?? lineText)
+      : format === 'text' ? plainText : verdict.delivered;
+    opts.onEnd?.({
+      stopped: format === 'sse' && verdict.stopped,
+      code: interrupted ? 'stream-interrupted' : verdict.stopReason,
+      truncated: interrupted || (format === 'sse' && verdict.truncated),
+      truncationReason: interrupted ? 'stream-interrupted' : verdict.truncationReason,
+      deliveredChars: text.length,
+      droppedChars: format === 'sse' ? verdict.droppedChars : 0,
+      text, dropped: format === 'sse' ? verdict.dropped : '',
+      interrupted, model: adapter.model?.() || '',
+    });
+  };
   let stoppedReported = false;
   let failureReported = false;
   const delayed = [];
@@ -185,9 +223,29 @@ export function createStreamFilter(opts = {}) {
     }
   };
 
-  return new TransformStream({
+  const stream = new TransformStream({
     transform(chunk, controller) {
-      buffered += decoder.decode(chunk, { stream: true });
+      const decoded = decoder.decode(chunk, { stream: true });
+      buffered += decoded;
+      if (format === 'auto') {
+        pendingChunks.push(chunk);
+        const head = buffered.trimStart();
+        if (!head || (!head.includes('\n') && head.length < 512 && !/^[{[]/.test(head))) return;
+        format = /^[{[]/.test(head) ? 'ndjson' : /^(?:data|event|id|retry):|^:/.test(head) ? 'sse' : 'text';
+        if (format !== 'sse') for (const raw of pendingChunks) controller.enqueue(raw);
+        pendingChunks.length = 0;
+        if (format === 'text') { plainText += buffered; buffered = ''; return; }
+        if (format === 'ndjson') { consumeLines(); return; }
+      } else if (format === 'ndjson') {
+        controller.enqueue(chunk);
+        consumeLines();
+        return;
+      } else if (format === 'text') {
+        controller.enqueue(chunk);
+        plainText += decoded;
+        buffered = '';
+        return;
+      }
       const { events, rest } = parseSSE(buffered);
       buffered = rest;
       if (!events.length) return;
@@ -198,6 +256,15 @@ export function createStreamFilter(opts = {}) {
     },
 
     flush(controller) {
+      buffered += decoder.decode();
+      if (format === 'auto') {
+        const head = buffered.trimStart();
+        format = /^[{[]/.test(head) ? 'ndjson' : /^(?:data|event|id|retry):|^:/.test(head) ? 'sse' : 'text';
+        if (format !== 'sse') for (const raw of pendingChunks) controller.enqueue(raw);
+        pendingChunks.length = 0;
+        if (format === 'text') plainText += buffered;
+      }
+      if (format !== 'sse') { finishCapture(); return; }
       let out = '';
 
       // 1) Un evento final sin la línea en blanco todavía se procesa; si llegó
@@ -228,19 +295,13 @@ export function createStreamFilter(opts = {}) {
       for (const evt of delayed) out += passthroughSSE(evt);
       if (out) controller.enqueue(encoder.encode(out));
 
-      const verdict = sentinel.finish();
-      opts.onEnd?.({
-        stopped: verdict.stopped,
-        code: verdict.stopReason,
-        truncated: verdict.truncated,
-        truncationReason: verdict.truncationReason,
-        deliveredChars: verdict.chars,
-        droppedChars: verdict.droppedChars,
-        text: verdict.delivered,
-        dropped: verdict.dropped,
-      });
+      finishCapture();
     },
   });
+  // pipeTo rechaza si el origen falla o el consumidor cancela: notificar una
+  // única captura parcial sin ocultar ese error a la página.
+  stream.finishInterrupted = () => finishCapture(true);
+  return stream;
 }
 
 function safeJson(text) {

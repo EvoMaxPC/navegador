@@ -12,7 +12,7 @@ import { settingsForHost } from '../core/settings.js';
 import { StreamSentinel } from '../core/streamSentinel.js';
 import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
 import { fingerprint } from '../core/text.js';
-import { countTokensForProvider } from './tokens.js';
+import { countOutputTokens } from './tokens.js';
 import { looksEncrypted } from '../memory/item.js';
 
 /** Cómo se llama cada canal en los textos que ve el usuario. */
@@ -299,7 +299,7 @@ export class Engine {
     const textoPayload = String(payload.text || '');
     // El texto de una respuesta ya contada por la red: se suman los tokens y la
     // respuesta no se cuenta dos veces.
-    if (textoPayload.trim() && this.#absorbTokens(webContentsId, textoPayload, messageId || null)) {
+    if (textoPayload.trim() && this.#absorbTokens(webContentsId, textoPayload, messageId || null, payload.model, payload.host)) {
       return { ok: true, duplicate: true, tokens: true };
     }
     // La clave es el identificador del envío; si el sitio no lo diera (camino
@@ -308,7 +308,7 @@ export class Engine {
     const key = messageId
       ? `${webContentsId}|${messageId}`
       : `${webContentsId}|sse|${String(payload.text || '').length}|${fingerprint(String(payload.text || ''))}`;
-    if (this.seenResponses.has(key)) return { ok: true, duplicate: true };
+    const alreadySeen = this.seenResponses.has(key);
 
     // Misma respuesta vista antes (por CDP o por otro cierre del stream): no se
     // cuenta, aunque el identificador del envío haya cambiado. Lo que decide es
@@ -324,6 +324,7 @@ export class Engine {
       return { ok: true, duplicate: true, merged: true };
     }
 
+    if (alreadySeen) return { ok: true, duplicate: true };
     this.seenResponses.set(key, now);
     this.#prune(this.seenResponses, now);
 
@@ -419,7 +420,7 @@ export class Engine {
    * de respuestas: la red ya sumó la respuesta cuando cerró la petición; cuando
    * CDP consigue el texto un segundo después, lo que faltaba eran los tokens.
    */
-  #absorbTokens(webContentsId, text, messageId = null) {
+  #absorbTokens(webContentsId, text, messageId = null, model = '', provider = '') {
     const anotada = this.sinTexto.get(webContentsId);
     if (!anotada) return false;
     const now = Date.now();
@@ -436,7 +437,7 @@ export class Engine {
     // esto resuelve. Lo que acota es la pestaña, la ventana y que no haya salido
     // una pregunta nueva. `messageId` queda para anotar el texto ya contado.
 
-    const tokens = countTokensForProvider(text, anotada.model, anotada.host);
+    const tokens = this.#outputTokens(text, model || anotada.model, provider || anotada.host);
     this.counters.outputTokens += Math.max(0, tokens);
     this.sinTexto.delete(webContentsId);
     // Queda en el registro: si los tokens de salida suben sin una respuesta
@@ -457,9 +458,22 @@ export class Engine {
     // El texto entra en la lista de lo ya contado: un segundo canal no lo suma
     // de nuevo, y un fragmento posterior sólo aporta la diferencia.
     const vistos = (this.recentTexts.get(webContentsId) || []).filter((v) => now - v.at < VENTANA_RESPUESTA_MS);
-    vistos.push({ at: now, text, tokens, messageId: messageId || anotada.messageId || null });
+    vistos.push({ at: now, text, tokens, messageId: messageId || anotada.messageId || null,
+      model: model || anotada.model, provider: provider || anotada.host });
     this.recentTexts.set(webContentsId, vistos.slice(-6));
     return true;
+  }
+
+  #outputTokens(text, model = '', provider = '') {
+    return countOutputTokens(text, model, provider, (detail) => {
+      const entry = {
+        kind: 'receiving', code: 'output-tokenizer-fallback', severity: 'warn',
+        title: 'Tokens de salida estimados: falló el tokenizador',
+        detail: `${detail.error}. Se estimaron ${detail.tokens} tokens sobre ${detail.chars} caracteres reales.`,
+        meta: { ...detail, method: 'estimateTokens' }, ts: Date.now(),
+      };
+      try { this.store?.pushLog?.(entry); } catch { console.warn('[nexo]', entry); }
+    });
   }
 
   /**
@@ -496,8 +510,8 @@ export class Engine {
         visto.at > turno.at;
       if (!mismoTurno) continue;
       if (crece) {
-        const tokens = countTokensForProvider(text, model || esperando?.entry?.model || '', provider || esperando?.entry?.host || '');
-        this.counters.outputTokens += Math.max(0, tokens - visto.tokens);
+        const tokens = this.#outputTokens(text, model || visto.model || esperando?.entry?.model || '', provider || visto.provider || esperando?.entry?.host || '');
+        this.counters.outputTokens += tokens - visto.tokens;
         visto.text = text;
         visto.tokens = tokens;
         visto.at = now;
@@ -513,8 +527,8 @@ export class Engine {
     const ultima = vistos[vistos.length - 1];
     if (!esperando && ultima && !ultima.text.includes(text)) {
       const junto = `${ultima.text}${text}`;
-      const tokens = countTokensForProvider(junto, model || esperando?.entry?.model || '', provider || esperando?.entry?.host || '');
-      this.counters.outputTokens += Math.max(0, tokens - ultima.tokens);
+      const tokens = this.#outputTokens(junto, model || ultima.model || esperando?.entry?.model || '', provider || ultima.provider || esperando?.entry?.host || '');
+      this.counters.outputTokens += tokens - ultima.tokens;
       ultima.text = junto;
       ultima.tokens = tokens;
       ultima.at = now;
@@ -522,8 +536,9 @@ export class Engine {
       return { duplicate: true, sameText: false, tokens: 0, joined: true };
     }
 
-    const tokens = countTokensForProvider(text, model || esperando?.entry?.model || '', provider || esperando?.entry?.host || '');
-    vistos.push({ at: now, text, tokens, messageId: messageId || null });
+    const tokens = this.#outputTokens(text, model || esperando?.entry?.model || '', provider || esperando?.entry?.host || '');
+    vistos.push({ at: now, text, tokens, messageId: messageId || null,
+      model: model || esperando?.entry?.model || '', provider: provider || esperando?.entry?.host || '' });
     this.recentTexts.set(webContentsId, vistos.slice(-6));
     return { duplicate: false, sameText: false, tokens };
   }
@@ -560,7 +575,7 @@ export class Engine {
   onStreamEnd(webContentsId, payload) {
     // La capa cerró un stream: desde acá, esa respuesta ya la contó ella.
     this.layerEnded.set(webContentsId, Date.now());
-    if (payload?.text) this.layerEndedText.set(webContentsId, Date.now());
+    if (String(payload?.text || '').trim()) this.layerEndedText.set(webContentsId, Date.now());
     // Se anota lo que ya contó este camino ANTES de mirar el guard: si CDP ve el
     // mismo texto por otro canal, no se vuelve a registrar.
     const host = payload?.host || this.guards.get(webContentsId)?.host || safeHost(payload?.url) || 'desconocido';
@@ -739,7 +754,7 @@ export class Engine {
 
     // ¿Es el texto de una respuesta que la red ya contó sin texto? Entonces lo
     // que falta son los tokens, no otra respuesta.
-    if (this.#absorbTokens(webContentsId, text, awaitId)) {
+    if (this.#absorbTokens(webContentsId, text, awaitId, capture.model, capture.host)) {
       this.#markSeen(webContentsId, keys, awaitId);
       this.cdp.duplicates += 1;
       return { ok: true, duplicate: true, tokens: true };

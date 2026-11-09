@@ -415,8 +415,10 @@ function wrapResponse(response, capture = {}) {
   if (!response || !response.body || !looksLikeStream(response.headers)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
-  const filtered = response.body.pipeThrough(
-    createStreamFilter({
+  const mime = String(response.headers?.get?.('content-type') || '');
+  const filter = createStreamFilter({
+      format: site.id === 'chatgpt' && /ndjson|jsonl/i.test(mime) ? 'ndjson'
+        : site.id === 'chatgpt' && /text\/plain/i.test(mime) ? 'auto' : 'sse',
       settings: state.settings,
       adapter: site.streamAdapter || null,
       deltaPaths: site.deltaPaths,
@@ -437,7 +439,9 @@ function wrapResponse(response, capture = {}) {
           ...capture,
           site: site.id,
           host: CONFIG.host,
-          finished: true,
+          finished: !info.interrupted,
+          interrupted: Boolean(info.interrupted),
+          model: info.model || capture.model || '',
           stopped: info.stopped,
           code: info.code,
           truncated: info.truncated,
@@ -451,8 +455,12 @@ function wrapResponse(response, capture = {}) {
           dropped: info.dropped.slice(0, 600),
         });
       },
-    }),
-  );
+    });
+  response.body.pipeTo(filter.writable).catch((error) => {
+    filter.finishInterrupted();
+    bridge.event('error', { stage: 'stream-interrupted', message: String(error?.message || error) });
+  });
+  const filtered = filter.readable;
 
   const headers = new Headers(response.headers);
   // El cuerpo ya viene descomprimido: si la cabecera sobrevive, el cliente
