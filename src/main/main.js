@@ -613,6 +613,20 @@ function registerIpc() {
     if (!result.ok) noteDiagnostic({ code: 'conversation-memory-error', severity: 'warn',
       title: 'No se pudo guardar la conversación', detail: result.error });
 
+    const userTurns = payload.turns.filter((turn) => turn?.role === 'user').length;
+    const assistantTurns = payload.turns.filter((turn) => turn?.role === 'assistant').length;
+    const assistantChars = payload.turns.reduce((sum, turn) =>
+      sum + (turn?.role === 'assistant' ? String(turn.content || '').length : 0), 0);
+    noteDiagnostic({
+      code: 'chatgpt-conversation-read',
+      key: 'chatgpt-conversation-read',
+      severity: assistantTurns ? 'info' : 'warn',
+      title: assistantTurns ? 'NEXO leyó la conversación de ChatGPT' : 'NEXO no encontró respuestas de ChatGPT en la conversación',
+      detail: `DOM: ${userTurns} mensaje(s) de usuario, ${assistantTurns} respuesta(s) de GPT y ${assistantChars} caracteres de salida. ${payload.streaming ? 'La generación sigue activa; se espera el cierre para guardar la respuesta final.' : `Respuestas literales nuevas guardadas: ${(result.assistantCaptures || []).length}.`}`,
+      meta: { userTurns, assistantTurns, assistantChars, streaming: payload.streaming === true,
+        savedAssistantTurns: (result.assistantCaptures || []).length },
+    });
+
     // El snapshot del DOM es una fuente independiente del fetch/CDP. Sólo se
     // cuentan respuestas finales de la última intervención pendiente: al abrir
     // un historial se archivan sus respuestas, pero no se simula actividad nueva.
