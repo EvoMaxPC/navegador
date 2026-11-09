@@ -195,6 +195,14 @@ export class CdpObserver {
       maxResourceBufferSize: MAX_BODY_BYTES,
       maxPostDataSize: 65536,
     }).catch((error) => this.log(`CDP: Network.enable: ${error?.message || error}`));
+    this.onDiagnostic({
+      code: 'cdp-attached',
+      key: `cdp-attached|${hostOf(target)}|${contents.id}`,
+      severity: 'info',
+      title: `Observación CDP activa en ${hostOf(target)}`,
+      detail: 'El observador quedó conectado a la pestaña. Espera envíos y respuestas de conversación.',
+      meta: { host: hostOf(target), tabId: contents.id },
+    });
 
     return true;
   }
@@ -289,8 +297,8 @@ export class CdpObserver {
     }
     const site = detectSite(host);
     if (!this.contentAllowed(host)) {
-      // Mediación apagada para este sitio: se mira el tráfico para detectar
-      // fallos, pero no se lee la conversación.
+      // La observación de conversación sólo sigue activa si la configuración
+      // del sitio o la autorización de memoria la permiten.
       this.stats.ignored += 1;
       return;
     }
