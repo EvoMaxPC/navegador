@@ -38,6 +38,12 @@ const CDP_VERSION = '1.3';
 
 /** Tipos de recurso que pueden traer una respuesta de chat en JSON. */
 const OBSERVED_RESOURCE_TYPES = new Set(['XHR', 'Fetch']);
+/**
+ * Tipos con los que Chromium a veces informa un `fetch` hecho desde un worker.
+ * Sólo se aceptan si la respuesta es un stream: un JSON de esta puerta sería un
+ * listado o el historial, no la respuesta del modelo.
+ */
+const ALTERNATIVE_STREAM_TYPES = new Set(['Other', 'EventSource']);
 
 /** Tope del cuerpo que se pide al depurador. */
 const MAX_BODY_BYTES = 2_000_000;
@@ -70,6 +76,13 @@ export class CdpObserver {
      * cambia el interruptor con la pestaña ya abierta).
      */
     this.contentAllowed = opts.contentAllowed || (() => true);
+    /**
+     * Aviso de lo que se descartó y por qué. Sin esto, una respuesta que no se
+     * captura deja un cero sin rastro: el registro dirá si faltó el cuerpo, si
+     * el tipo o el MIME no estaban entre los observados, o si el cuerpo llegó
+     * pero no se reconoció texto.
+     */
+    this.onDiagnostic = opts.onDiagnostic || (() => {});
     /** @type {Map<number, object>} pestañas observadas */
     this.tabs = new Map();
     this.stats = {
@@ -469,14 +482,47 @@ export class CdpObserver {
   #responseReceived(state, params) {
     const response = params.response || {};
     const requestId = params.requestId;
-    if (!OBSERVED_RESOURCE_TYPES.has(String(params.type || ''))) return;
     const url = String(response.url || '');
     const host = hostOf(url);
     if (!isAiHost(host)) return;
+    const origenTipo = state.requests.get(requestId);
+    const mimePrevio = String(response.mimeType || '');
+    // Un stream es la respuesta del modelo aunque Chromium lo clasifique como
+    // «Other» o «EventSource» (pasa cuando el fetch sale de un worker). Lo que
+    // nunca se acepta por esta puerta es un JSON: un historial o una lista
+    // también llegan como «Other» y no son respuestas.
+    const tipoAlternativo = ALTERNATIVE_STREAM_TYPES.has(String(params.type || '')) && isStreamMime(mimePrevio);
+    if (!OBSERVED_RESOURCE_TYPES.has(String(params.type || '')) && !tipoAlternativo) {
+      // Una respuesta del endpoint de conversación con un tipo que no miramos
+      // (por ejemplo «Other», típico de un fetch desde un worker) se perdía sin
+      // decir nada. Si es la conversación, se avisa.
+      if (origenTipo?.chat) {
+        this.stats.ignored += 1;
+        this.onDiagnostic({
+          code: 'response-tipo',
+          key: `response-tipo|${host}|${String(params.type || 'otro')}`,
+          severity: 'warn',
+          title: `${host}: respuesta de tipo no observado`,
+          detail: `La respuesta de la conversación llegó como «${params.type || 'sin tipo'}»: el depurador no la lee, así que el texto no se cuenta.`,
+          meta: { host, tipo: params.type || null, url },
+        });
+      }
+      return;
+    }
     const mimeType = String(response.mimeType || '');
     const stream = isStreamMime(mimeType);
     if (!stream && !isJsonMime(mimeType)) {
       this.stats.ignored += 1;
+      if (state.requests.get(requestId)?.chat) {
+        this.onDiagnostic({
+          code: 'response-mime',
+          key: `response-mime|${host}|${mimeType}`,
+          severity: 'warn',
+          title: `${host}: respuesta con MIME no observado`,
+          detail: `La respuesta de la conversación llegó como «${mimeType || 'sin MIME'}»: no es SSE ni JSON, así que su texto no se cuenta.`,
+          meta: { host, mimeType: mimeType || null, url },
+        });
+      }
       return;
     }
     // Sólo la respuesta a la petición de conversación es una respuesta del
@@ -548,16 +594,59 @@ export class CdpObserver {
     try {
       body = await this.#send(state, 'Network.getResponseBody', { requestId: params.requestId });
     } catch (error) {
-      // El cuerpo ya no está en el búfer (o era una descarga): no es un error.
+      // El cuerpo ya no está en el búfer (o era una descarga). No es un error
+      // del navegador, pero sí explica una respuesta que no se cuenta.
       this.log(`CDP: cuerpo no disponible: ${error?.message || error}`);
+      if (pending.url) {
+        this.onDiagnostic({
+          code: 'response-sin-cuerpo',
+          key: `response-sin-cuerpo|${pending.host}`,
+          severity: 'warn',
+          title: `${pending.host}: no se pudo leer el cuerpo de la respuesta`,
+          detail: `${error?.message || error}. El depurador no conservó el cuerpo (respuesta muy larga o ya liberada): el texto no se cuenta.`,
+          meta: { host: pending.host, url: pending.url },
+        });
+      }
       return;
     }
     if (!body || typeof body.body !== 'string') return;
+    let cuerpo = body.body;
     if (body.base64Encoded) {
-      this.stats.ignored += 1;
+      // Chromium entrega en base64 cuando el cuerpo no es texto plano. Un SSE
+      // puede llegar así si el servidor comprime la respuesta: antes se
+      // descartaba en silencio y la respuesta no la contaba nadie.
+      try {
+        cuerpo = Buffer.from(String(cuerpo), 'base64').toString('utf8');
+      } catch {
+        this.stats.ignored += 1;
+        return;
+      }
+      this.onDiagnostic({
+        code: 'response-base64',
+        key: `response-base64|${pending.host}`,
+        severity: 'info',
+        title: `${pending.host}: la respuesta llegó codificada en base64`,
+        detail: 'Se decodificó para poder leer el texto. Si la respuesta se ve, quedó registrado el detalle.',
+        meta: { host: pending.host, url: pending.url },
+      });
+    }
+    if (!cuerpo) {
+      // El depurador devolvió el cuerpo vacío: es lo que pasa con algunos
+      // streams largos. La respuesta la contará el camino de red, pero el texto
+      // no se puede leer y hay que decirlo.
+      if (pending.stream) {
+        this.onDiagnostic({
+          code: 'response-vacio',
+          key: `response-vacio|${pending.host}`,
+          severity: 'warn',
+          title: `${pending.host}: el depurador devolvió el cuerpo vacío`,
+          detail: 'La respuesta llegó, pero su texto no está en el búfer del depurador.',
+          meta: { host: pending.host, url: pending.url },
+        });
+      }
       return;
     }
-    if (body.body.length > MAX_BODY_BYTES) return;
+    if (cuerpo.length > MAX_BODY_BYTES) return;
 
     // Respuesta en streaming (SSE): se arma igual que en la página, con los
     // mismos adaptadores, y se cuenta una sola vez al terminar.
@@ -572,13 +661,28 @@ export class CdpObserver {
       });
       const prompt = request?.prompt || null;
       if (prompt) capture.prompt(prompt);
-      for (const linea of body.body.split(/\r?\n/)) {
+      let eventos = 0;
+      for (const linea of cuerpo.split(/\r?\n/)) {
         const limpia = linea.trim();
         if (!limpia.startsWith('data:')) continue;
         const dato = limpia.slice(5).trim();
         if (!dato || dato === '[DONE]') continue;
         const evento = safeJson(dato);
-        if (evento) capture.add(evento);
+        if (!evento) continue;
+        eventos += 1;
+        capture.add(evento);
+      }
+      if (!eventos) {
+        // Cuerpo sin un solo evento `data:` parseable: no es el stream que
+        // creemos. Se avisa con una muestra corta en vez de dejar un cero mudo.
+        this.onDiagnostic({
+          code: 'response-formato',
+          key: `response-formato|${pending.host}`,
+          severity: 'warn',
+          title: `${pending.host}: la respuesta no tiene eventos SSE reconocibles`,
+          detail: `Se leyeron ${cuerpo.length} caracteres y ningún evento «data:» con JSON. Muestra: ${cuerpo.slice(0, 120).replace(/\s+/g, ' ')}`,
+          meta: { host: pending.host, url: pending.url, bytes: cuerpo.length },
+        });
       }
       this.stats.bodies += 1;
       const listo = capture.take();
@@ -586,7 +690,7 @@ export class CdpObserver {
       return;
     }
 
-    const json = safeJson(body.body);
+    const json = safeJson(cuerpo);
     if (!json) {
       this.stats.ignored += 1;
       return;

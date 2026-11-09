@@ -69,8 +69,14 @@ function fakeEngine() {
 
 function makeObserver({ engine = fakeEngine(), enabled = true } = {}) {
   const logs = [];
-  const observer = new CdpObserver({ engine, enabled, log: (message) => logs.push(message) });
-  return { observer, engine, logs };
+  const diagnostics = [];
+  const observer = new CdpObserver({
+    engine,
+    enabled,
+    log: (message) => logs.push(message),
+    onDiagnostic: (diagnostico) => diagnostics.push(diagnostico),
+  });
+  return { observer, engine, logs, diagnostics };
 }
 
 /* ------------------------------------------------------------------ */
@@ -390,19 +396,35 @@ test('si el cuerpo ya no está en el búfer, no se entrega nada ni se rompe', as
   assert.match(logs.join(' '), /cuerpo no disponible/i);
 });
 
-test('un cuerpo codificado en base64 no se interpreta', async () => {
-  const { observer, engine } = makeObserver();
+test('un cuerpo en base64 se decodifica en vez de descartarse', async () => {
+  const { observer, engine, diagnostics } = makeObserver();
   const tab = fakeTab(17, 'https://chatgpt.com/');
   observer.attach(tab);
-  tab.debugger.bodies.set('req-4', { body: Buffer.from('{"content":"x"}').toString('base64'), base64Encoded: true });
+  // Chromium entrega en base64 los cuerpos que no son texto plano; un SSE puede
+  // llegar así. Antes se descartaba en silencio y la respuesta no la contaba
+  // nadie.
+  const sse = 'data: {"message":{"author":{"role":"assistant"},"content":{"parts":["hola desde base64"]}}}\n\n';
+  tab.debugger.bodies.set('req-4', { body: Buffer.from(sse).toString('base64'), base64Encoded: true });
+  tab.debugger.emitEvent('Network.responseWillBeSent', {});
+  tab.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-4',
+    type: 'XHR',
+    request: { url: 'https://chatgpt.com/backend-api/conversation', method: 'POST' },
+  });
   tab.debugger.emitEvent('Network.responseReceived', {
     requestId: 'req-4',
     type: 'XHR',
-    response: { url: 'https://chatgpt.com/x', status: 200, mimeType: 'application/json' },
+    response: { url: 'https://chatgpt.com/backend-api/conversation', status: 200, mimeType: 'text/event-stream' },
   });
   tab.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-4' });
   await settle();
-  assert.equal(engine.captures.length, 0);
+
+  assert.equal(engine.captures.length, 1, 'la respuesta se cuenta');
+  assert.match(engine.captures[0].capture.text, /hola desde base64/, 'con su texto decodificado');
+  assert.ok(
+    diagnostics.some((item) => item.code === 'response-base64'),
+    'y queda dicho que llegó codificada',
+  );
 });
 
 /* ------------------------------------------------------------------ */

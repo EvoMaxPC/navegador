@@ -226,8 +226,14 @@ La salida (respuesta) se captura por:
   leer; si no lo informó, lo lee y el motor descarta el duplicado por
   `messageId` y, en su defecto, por el texto;
 - **CDP**, con los frames de WebSocket, los cuerpos JSON de una petición propia
-  del sitio y —cuando la capa no está viva en esa pestaña— el cuerpo completo del
-  SSE, que el depurador entrega al terminar.
+  del sitio y el cuerpo completo del SSE, que el depurador entrega al terminar
+  (salvo que la capa haya cerrado ese stream);
+- **el cierre de la petición en la red**: si el POST de conversación termina con
+  2xx y en esa pestaña sigue un mensaje esperando respuesta, el modelo contestó.
+  Es el único camino que no necesita leer el cuerpo: no aporta texto ni tokens de
+  salida, pero cuenta la respuesta y cierra el turno. Espera un margen corto para
+  que la capa o CDP cuenten primero, con texto; si alguno lo hizo, el turno ya no
+  está esperando y este camino no hace nada.
 
 Sólo la respuesta a una petición **de conversación** puede ser una respuesta del
 modelo: CDP exige que la URL sea la del endpoint de chat del sitio

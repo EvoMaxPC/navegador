@@ -1092,10 +1092,54 @@ function watchProviderNetwork(s) {
     callback({});
   });
 
+  /**
+   * La respuesta contada desde la red.
+   *
+   * Cuando el POST de conversación termina bien, el modelo contestó. Se espera
+   * un instante corto para que la capa o CDP cuenten primero (ellos traen el
+   * texto y los tokens) y, si nadie lo hizo, se cuenta acá: +1 respuesta, +1
+   * turno y +1 intervención, sin caracteres ni tokens inventados.
+   */
+  const RETRASO_RED_MS = Number(process.env.NEXO_NETRESP_MS) || 1500;
   s.webRequest.onCompleted({ urls: ['*://*/*'] }, (details = {}) => {
     const url = String(details.url || '');
     const host = hostOf(url);
     if (!isAiHost(host)) return;
+    const method = String(details.method || 'GET').toUpperCase();
+    if (method === 'POST' && isMediable(detectSite(host), url, method)) {
+      const status = Number(details.statusCode) || 0;
+      if (status >= 200 && status < 300 && engine.isEnabledFor(host)) {
+        const id = Number(details.webContentsId);
+        const tabId = Number.isFinite(id) ? id : -1;
+        const esperaba = engine.currentSendId(tabId);
+        if (esperaba) {
+          setTimeout(() => {
+            try {
+              // Si en el medio llegó otra pregunta, este cierre ya no es suyo.
+              if (engine.currentSendId(tabId) !== esperaba) return;
+              const contada = engine.onNetworkResponse(tabId, { host, url });
+              if (!contada?.counted) return;
+              const entry = {
+                kind: 'receiving',
+                code: 'incoming-network',
+                severity: 'info',
+                title: `Respuesta recibida en ${host}`,
+                detail:
+                  'La petición de conversación terminó bien y el mensaje quedó contestado. El texto no se pudo leer: los tokens de salida no se suman.',
+                meta: { host, url: shortPath(url), source: 'network', chars: 0, tokens: 0, messageId: contada.messageId },
+                ts: Date.now(),
+              };
+              if (store) store.pushLog(entry);
+              broadcast('nexo:event', { type: 'intervention', payload: entry });
+              broadcast('nexo:stats-changed', engine.stats());
+            } catch (error) {
+              console.log('[red] al contar la respuesta:', error?.message || error);
+            }
+          }, RETRASO_RED_MS);
+        }
+      }
+    }
+
     if (!WATCHED_RESOURCE_TYPES.has(String(details.resourceType || 'other'))) return;
     const status = Number(details.statusCode) || 0;
     if (status < 400) return;
@@ -1256,6 +1300,9 @@ app.whenReady().then(async () => {
     // Se vuelve a consultar al leer cuerpos, por si el interruptor cambia con la
     // pestaña ya abierta.
     contentAllowed: (host) => engine.isEnabledFor(host),
+    // Lo que el depurador no pudo leer se ve en el registro: un cero sin causa
+    // es lo que nos tuvo dando vueltas cuatro versiones.
+    onDiagnostic: (diagnostico) => noteDiagnostic(diagnostico),
     // Lo que CDP cuenta se ve al instante y queda en el registro con su origen:
     // sin esto, una respuesta contada por observación no refrescaba el panel.
     onEvent: (id, event) => {

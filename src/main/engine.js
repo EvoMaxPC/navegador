@@ -319,6 +319,39 @@ export class Engine {
   }
 
   /**
+   * Respuesta contada desde la red: la petición de conversación terminó bien.
+   *
+   * Es el quinto camino de salida y el único que no depende de leer el cuerpo:
+   * si el POST de conversación completó con 2xx y en esa pestaña sigue habiendo
+   * un mensaje esperando respuesta, entonces el modelo contestó. No se inventan
+   * caracteres ni tokens (no hay texto: la capa y CDP no lo dieron), y por eso
+   * tampoco suma tokens de salida.
+   *
+   * No puede duplicar: si la capa o CDP ya contaron esa respuesta, el turno ya
+   * no está esperando y esto no hace nada.
+   */
+  onNetworkResponse(webContentsId, payload = {}) {
+    const now = Date.now();
+    const pendiente = this.#pendingTurn(webContentsId, now);
+    if (!pendiente) return { ok: true, skipped: 'sin-turno' };
+    const key = `${webContentsId}|net-resp|${pendiente.entry.messageId || pendiente.entry.at}`;
+    if (this.seenResponses.has(key)) return { ok: true, duplicate: true };
+    this.seenResponses.set(key, now);
+
+    this.counters.responses += 1;
+    this.counters.activity += 1;
+    this.counters.turns += 1;
+    this.awaiting.delete(pendiente.id);
+
+    return {
+      ok: true,
+      counted: true,
+      messageId: pendiente.entry.messageId || null,
+      host: pendiente.entry.host || payload.host || null,
+    };
+  }
+
+  /**
    * ¿Es la misma respuesta que ya se contó, llegando en pedazos?
    *
    * Una captura parcial es un prefijo de la respuesta completa: no es otra

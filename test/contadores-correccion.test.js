@@ -16,6 +16,10 @@ import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
 
+// La respuesta contada desde la red espera a que la capa o CDP cuenten primero.
+// En la prueba ese margen se acorta para no esperar segundo y medio por caso.
+process.env.NEXO_NETRESP_MS = '100';
+
 register('./harness/loader.mjs', import.meta.url);
 
 const { journal } = await import('./harness/electron-stub.mjs');
@@ -406,4 +410,89 @@ test('13. tres intercambios suman seis intervenciones', async () => {
   assert.equal(despues.messages, antes.messages + 3, 'tres mensajes');
   assert.equal(despues.responses, antes.responses + 3, 'tres respuestas');
   assert.equal(despues.interventions, antes.interventions + 6, 'seis intervenciones');
+});
+
+/* ------------------------------------------------------------------ */
+/* 14-17. la respuesta cuando nadie lee el cuerpo                      */
+/* ------------------------------------------------------------------ */
+
+/** El POST de conversación termina, como lo informa Chromium. */
+function completarRed({ webContentsId = 1, status = 200 } = {}) {
+  const manos = journal.webRequest.completed.get(PARTITION);
+  assert.ok(manos, 'el vigilante mira las peticiones completadas');
+  manos.listener({
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    method: 'POST',
+    resourceType: 'xhr',
+    statusCode: status,
+    webContentsId,
+  });
+}
+
+test('14. si la capa y CDP no leen el cuerpo, la respuesta se cuenta por red', async () => {
+  const view = await abrir('https://chatgpt.com/c/c14');
+  const antes = await stats();
+
+  enviar('pregunta cuya respuesta no leerá nadie', { webContentsId: view.id });
+  await settle(20);
+  completarRed({ webContentsId: view.id });
+  await settle(200);
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages + 1, 'un mensaje');
+  assert.equal(despues.responses, antes.responses + 1, '+1 respuestas de la IA');
+  assert.equal(despues.turns, antes.turns + 1, 'el turno queda cerrado');
+  assert.equal(despues.interventions, antes.interventions + 2, 'envío + respuesta');
+  assert.equal(
+    despues.outputTokens,
+    antes.outputTokens,
+    'sin texto no se inventan tokens de salida',
+  );
+
+  const log = await callIpc('nexo:log');
+  assert.ok(
+    log.some((e) => e.code === 'incoming-network'),
+    'y el registro dice por qué no hay texto',
+  );
+});
+
+test('15. si CDP ya contó la respuesta, la red no la cuenta otra vez', async () => {
+  const view = await abrir('https://chatgpt.com/c/c15');
+  const antes = await stats();
+
+  enviar('pregunta que sí leerá CDP', { webContentsId: view.id });
+  await settle(20);
+  await respuestaPorCDP(view, { requestId: 'req-c15', texto: 'Respuesta leída del stream.' });
+  completarRed({ webContentsId: view.id });
+  await settle(200);
+
+  const despues = await stats();
+  assert.equal(despues.responses, antes.responses + 1, 'una respuesta, no dos');
+  assert.equal(despues.turns, antes.turns + 1, 'un turno');
+});
+
+test('16. una petición que termina mal no cuenta como respuesta', async () => {
+  const view = await abrir('https://chatgpt.com/c/c16');
+  const antes = await stats();
+
+  enviar('pregunta que va a fallar', { webContentsId: view.id });
+  await settle(20);
+  completarRed({ webContentsId: view.id, status: 500 });
+  await settle(200);
+
+  const despues = await stats();
+  assert.equal(despues.responses, antes.responses, 'un 500 no es una respuesta');
+  assert.equal(despues.turns, antes.turns, 'ni cierra el turno');
+});
+
+test('17. sin mensaje esperando, la red no inventa una respuesta', async () => {
+  await abrir('https://chatgpt.com/c/c17');
+  const antes = await stats();
+
+  // Ningún envío previo en esta pestaña: no hay turno que cerrar.
+  completarRed({ webContentsId: 999_001 });
+  await settle(200);
+
+  const despues = await stats();
+  assert.equal(despues.responses, antes.responses, 'no se cuenta nada');
 });

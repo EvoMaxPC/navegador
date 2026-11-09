@@ -12,7 +12,7 @@ Cada etiqueta `v*` compila en un runner de Windows y adjunta el ZIP a la release
 
 | Versión | Archivo | Tamaño | sha256 |
 |---|---|---|---|
-| [v0.1.9](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.9) | `Nexo-0.1.9-win32-x64.zip` | 149 MB | ver el adjunto en la release |
+| [v0.1.10](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.10) | `Nexo-0.1.10-win32-x64.zip` | 149 MB | ver el adjunto en la release |
 | [v0.1.3](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.3) | `Nexo-0.1.3-win32-x64.zip` | 149 MB | ver el adjunto en la release |
 | [v0.1.2](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.2) | `Nexo-0.1.2-win32-x64.zip` | 149 MB | ver el adjunto en la release |
 | [v0.1.1](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.1) | `Nexo-0.1.1-win32-x64.zip` | 149 MB | ver el adjunto en la release |
@@ -173,7 +173,7 @@ Tampoco hay actualizaciones automáticas: es una distribución manual.
   con los 62 archivos correctos y un ZIP que lectores independientes abren sin
   errores. Esto prueba el empaquetador, **no** el binario real.
 - **En GitHub Actions (Windows Server 2022, Electron 45.2.3 real):** instalación,
-  `npm run verify` (424 pruebas), empaquetado, la prueba de humo sobre el `.exe`
+  `npm run verify` (428 pruebas), empaquetado, la prueba de humo sobre el `.exe`
   empaquetado y publicación del ZIP de 161 MB. Ese es el archivo de la sección 1:
   el que se descarga y se ejecuta.
 
