@@ -19,7 +19,7 @@ import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locate
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
-import { countGptTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
+import { countTokensForProvider, fingerprint, gptModelFromRequest } from '../core/text.js';
 import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
@@ -1060,7 +1060,7 @@ function noteUserMessageFromNetwork(details = {}) {
     host,
     url,
     chars: text.length,
-    tokens: text ? countGptTokens(text, model) : 0,
+    tokens: text ? countTokensForProvider(text, model, site.id) : 0,
     model,
     promptHash: text ? fingerprint(text) : '',
     textFound: Boolean(text),
@@ -1439,7 +1439,7 @@ app.whenReady().then(async () => {
               messageId: event.messageId || null,
               paired: Boolean(event.paired),
               chars,
-              tokens: countGptTokens(String(capture.text || ''), capture.model || ''),
+              tokens: countTokensForProvider(String(capture.text || ''), capture.model || '', capture.host || ''),
               conversationId: capture.conversationId || null,
             },
             ts: Date.now(),
