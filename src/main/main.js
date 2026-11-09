@@ -38,18 +38,23 @@ const isSmoke = process.argv.includes('--smoke') || process.env.NEXO_SMOKE === '
  */
 const smokeOut = process.env.NEXO_SMOKE_OUT || null;
 
+/** Evita que una excepción de apagado cambie un resultado ya escrito. */
+let smokeDone = false;
+
 if (isSmoke && smokeOut) {
   // Si el arranque revienta antes de la prueba, el archivo tiene que decirlo.
-  process.on('uncaughtException', (error) => {
-    appendFile(smokeOut, `\n✖ excepción al arrancar: ${error?.stack || error}\n`).finally(() =>
+  const crash = (kind) => (error) => {
+    if (smokeDone) {
+      // Tarde: el informe ya está y el código de salida ya se decidió.
+      appendFile(smokeOut, `\n· ${kind} durante el apagado: ${error?.message || error}\n`).catch(() => {});
+      return;
+    }
+    appendFile(smokeOut, `\n✖ ${kind} al arrancar: ${error?.stack || error}\n`).finally(() =>
       app.exit(70),
     );
-  });
-  process.on('unhandledRejection', (error) => {
-    appendFile(smokeOut, `\n✖ promesa rechazada al arrancar: ${error?.stack || error}\n`).finally(() =>
-      app.exit(70),
-    );
-  });
+  };
+  process.on('uncaughtException', crash('excepción'));
+  process.on('unhandledRejection', crash('promesa rechazada'));
 }
 
 let win = null;
@@ -584,6 +589,7 @@ app.whenReady().then(async () => {
       ok: false,
       checks: [{ name: 'prueba de humo', ok: false, detail: error?.message || String(error) }],
     }));
+    smokeDone = true;
     const code = reportSmoke(smoke);
     if (smokeOut) {
       // `reportSmoke` ya escribió en consola; el archivo es la vía confiable.
