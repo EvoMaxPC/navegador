@@ -30,7 +30,7 @@ import {
   promptOf,
   terminalOf,
 } from '../core/cdp.js';
-import { detectSite, isMediable, locateUserText } from '../core/sites.js';
+import { detectSite, isMediable, isResponseRequest, locateUserText } from '../core/sites.js';
 import { estimateTokens, fingerprint } from '../core/text.js';
 
 /** Versión del protocolo que expone Electron/Chromium. */
@@ -368,7 +368,8 @@ export class CdpObserver {
        * POST al dominio: el resto de las peticiones del sitio devuelven JSON
        * de cuentas, listas y metadatos, que no son respuestas del modelo.
        */
-      chat: isMediable(site, url, method),
+      chat: isMediable(site, url, method) || isResponseRequest(site, url, method),
+      sendRequest: isMediable(site, url, method),
       /** Cuándo se vio salir la petición: acota qué cierre de la capa cuenta. */
       at: Date.now(),
       send: false,
@@ -383,7 +384,7 @@ export class CdpObserver {
 
     // El cuerpo de la petición trae el mensaje del usuario. Leerlo acá es lo que
     // hace que la entrada se cuente aunque la capa de la página no esté activa.
-    if (entry.post && entry.chat && this.contentAllowed(host)) {
+    if (entry.post && entry.sendRequest && this.contentAllowed(host)) {
       this.#noteSend(state, params.requestId, String(request.postData || '')).catch((error) =>
         this.log(`CDP: al leer el envío: ${error?.message || error}`),
       );
