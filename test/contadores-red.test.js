@@ -376,7 +376,7 @@ test('CDP lee el texto y los tokens del stream unauth-mweb de ChatGPT', async ()
   });
   view.debugger.bodies.set(
     'req-unauth-mweb-cdp',
-    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta GPT capturada por CDP.'] } } })}\\n\\ndata: [DONE]\\n\\n`,
+    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta GPT capturada por CDP.'] } } })}\n\ndata: [DONE]\n\n`,
   );
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-unauth-mweb-cdp' });
   await settle(80);
