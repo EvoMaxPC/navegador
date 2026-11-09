@@ -146,3 +146,30 @@ test('el informe de rendimiento se arma con lo que haya', async () => {
   assert.ok(!vacio.includes('NaN'));
   assert.equal(normalizarBench(null).length, 0);
 });
+
+test('el informe de humo lleva las medidas y el publicador las encuentra', async () => {
+  const { smokeReport, mark, marks } = await import('../src/main/perf.js');
+  const { formatMarkdown } = await import('../scripts/reportar-rendimiento.mjs');
+
+  mark('ready');
+  mark('ventana');
+  const informe = smokeReport({
+    informe: '── prueba de humo ──\n✔ ventana\n✔ arrancó y funciona\n',
+    app: { getAppMetrics: () => [{ type: 'browser', memory: { workingSetSize: 98_611 } }] },
+    code: 0,
+  });
+
+  // El archivo que lee `scripts/humo.mjs` sigue diciendo que arrancó.
+  assert.match(informe, /arrancó y funciona/);
+  assert.match(informe, /^tiempos: /m);
+  assert.match(informe, /^principal: /m);
+  assert.match(informe, /^procesos: 1 · 96,3 MB$/m);
+  assert.equal(informe.endsWith('código previsto: 0\n'), true);
+  assert.ok(marks().ventana >= marks().ready);
+
+  // Y el publicador tiene que reconocer esas líneas aun con el prefijo nuevo.
+  const cuerpo = formatMarkdown({ smoke: informe, meta: { commit: 'abcdef1234' } });
+  assert.match(cuerpo, /ready \d/);
+  assert.match(cuerpo, /96,3 MB/);
+  assert.doesNotMatch(cuerpo, /no trajo medidas/);
+});

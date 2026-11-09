@@ -22,7 +22,7 @@ import { sanitizeFilename } from '../nav/downloads.js';
 import { runSmoke, report as reportSmoke, render as renderSmoke } from './smoke.js';
 import { eventMessage, permissionName, safeExternalUrl, sessionPayload } from './validate.js';
 import { PERMISSION_CATALOG } from '../nav/permissions.js';
-import { mark, summary as perfSummary } from './perf.js';
+import { mark, smokeReport } from './perf.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -631,7 +631,9 @@ app.whenReady().then(async () => {
     const code = reportSmoke(smoke);
     if (smokeOut) {
       // `reportSmoke` ya escribió en consola; el archivo es la vía confiable.
-      const informe = `${renderSmoke(smoke)}código previsto: ${code}\n`;
+      // Incluye las medidas de arranque y memoria: son los números que se
+      // comparan entre compilaciones de Windows.
+      const informe = smokeReport({ informe: renderSmoke(smoke), app, code });
       await writeFile(smokeOut, informe, 'utf8').catch(() => {});
     }
     app.exit(code);

@@ -11,6 +11,9 @@
 
 const t0 = performance.now();
 
+/** Número con coma decimal, como el resto de la salida en español. */
+const num = (valor, decimales = 1) => valor.toFixed(decimales).replace('.', ',');
+
 /** @type {Record<string, number>} */
 const marcas = {};
 
@@ -32,14 +35,14 @@ export function total() {
 }
 
 /**
- * Consumo del proceso principal.
- * @returns {{rssMB: number, heapMB: number}}
+ * Consumo del proceso principal, ya formateado en español.
+ * @returns {{rss: string, heap: string}}
  */
 export function mainMemory() {
   const mem = process.memoryUsage();
   return {
-    rssMB: Number((mem.rss / 1024 / 1024).toFixed(1)),
-    heapMB: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
+    rss: num(mem.rss / 1024 / 1024),
+    heap: num(mem.heapUsed / 1024 / 1024),
   };
 }
 
@@ -48,7 +51,7 @@ export function mainMemory() {
  * Chromium. `app.getAppMetrics()` devuelve kilobytes en `memory.workingSetSize`.
  *
  * @param {{ getAppMetrics?: () => Array }} app
- * @returns {{processes: number, workingSetMB: number, byType: Record<string, number>}}
+ * @returns {{processes: number, workingSet: string, byType: Record<string, string>}}
  */
 export function appMemory(app) {
   const metrics = typeof app?.getAppMetrics === 'function' ? app.getAppMetrics() : [];
@@ -58,12 +61,14 @@ export function appMemory(app) {
     const size = metric?.memory?.workingSetSize || 0;
     kb += size;
     const type = metric?.type || 'desconocido';
-    byType[type] = Number((((byType[type] || 0) + size) / 1024).toFixed(1));
+    byType[type] = (Number(byType[type] || 0) + size) / 1024;
   }
+  const tipos = {};
+  for (const [type, mb] of Object.entries(byType)) tipos[type] = num(mb);
   return {
     processes: metrics.length,
-    workingSetMB: Number((kb / 1024).toFixed(1)),
-    byType,
+    workingSet: num(kb / 1024),
+    byType: tipos,
   };
 }
 
@@ -79,9 +84,9 @@ export function summary({ app = null, extra = {} } = {}) {
   const tiempos = Object.entries(marks())
     .map(([name, ms]) => `${name} ${ms} ms`)
     .join(' · ');
-  const partes = [`tiempos: ${tiempos || 'sin marcas'}`, `principal: ${main.rssMB} MB (heap ${main.heapMB} MB)`];
+  const partes = [`tiempos: ${tiempos || 'sin marcas'}`, `principal: ${main.rss} MB (heap ${main.heap} MB)`];
   if (all) {
-    partes.push(`procesos: ${all.processes} · ${all.workingSetMB} MB`);
+    partes.push(`procesos: ${all.processes} · ${all.workingSet} MB`);
     const detalle = Object.entries(all.byType)
       .map(([type, mb]) => `${type} ${mb} MB`)
       .join(', ');
@@ -89,4 +94,24 @@ export function summary({ app = null, extra = {} } = {}) {
   }
   for (const [key, value] of Object.entries(extra)) partes.push(`${key}: ${value}`);
   return partes.join('\n');
+}
+
+/**
+ * Arma el texto que va al archivo de la prueba de humo: informe de
+ * comprobaciones, medidas y código de salida.
+ *
+ * Se separa de `main.js` para poder probarlo sin Electron, y porque el orden de
+ * las líneas importa: `scripts/humo.mjs` decide el veredicto buscando el texto
+ * de éxito en este archivo.
+ *
+ * @param {{ informe: string, app?: object, code?: number|null, extra?: Record<string, unknown> }} entrada
+ * @returns {string}
+ */
+export function smokeReport({ informe, app = null, code = null, extra = {} } = {}) {
+  const partes = [String(informe || '').replace(/\n+$/, '')];
+  partes.push('');
+  partes.push('[medidas]');
+  partes.push(summary({ app, extra }));
+  if (code !== null) partes.push(`código previsto: ${code}`);
+  return `${partes.join('\n')}\n`;
 }
