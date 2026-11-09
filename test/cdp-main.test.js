@@ -171,9 +171,9 @@ test('un bucle observado se registra como observación, no como corte', async ()
 
 test('la capa activa no impide que CDP observe el SSE para cubrir respuestas no capturadas', async () => {
   const view = await abrirPestana('https://claude.ai/chat/cdp-6');
-  // La capa no sólo se anuncia: cuenta un envío. Eso es lo que la da por viva y
-  // deja el stream en sus manos (anunciarse no alcanza: una capa que corre y no
-  // ve las peticiones del sitio no puede quedarse con la respuesta).
+  // La capa informa el envío, pero eso no demuestra que haya capturado la
+  // respuesta. CDP debe observar el SSE como respaldo; el motor deduplica si
+  // ambos caminos entregan el mismo contenido.
   journal.ipcListeners.get('nexo:event')(
     { sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://claude.ai/chat/cdp-6' } },
     {
