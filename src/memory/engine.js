@@ -286,7 +286,7 @@ export class EvoMemory {
         }
       }
     }
-    if (!changed) return { ok: true, changed: 0, turns: saved.size };
+    if (!changed) return { ok: true, changed: 0, turns: saved.size, assistantCaptures: [] };
     let chars = 0;
     const kept = [];
     for (const turn of [...saved.values()].slice(-200).reverse()) {
