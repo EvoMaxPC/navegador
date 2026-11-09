@@ -50,6 +50,21 @@ test('no devuelve una respuesta anterior si el prompt actual todavía no tiene r
   assert.equal(extractChatGptDpuAnswer(body, 'pregunta nueva'), '');
 });
 
+test('no reutiliza la respuesta previa cuando el usuario repite el mismo prompt', () => {
+  const pending = [
+    'You said:',
+    'misma pregunta',
+    'ChatGPT said:',
+    'respuesta anterior',
+    'You said:',
+    'misma pregunta',
+  ].join('\n');
+  assert.equal(extractChatGptDpuAnswer(pending, 'misma pregunta'), '');
+
+  const completed = `${pending}\nChatGPT said:\nrespuesta nueva`;
+  assert.equal(extractChatGptDpuAnswer(completed, 'misma pregunta'), 'respuesta nueva');
+});
+
 test('asocia prompts con saltos de línea y admite el marcador español', () => {
   const body = 'Tú dijiste:\nuna pregunta\ncon dos líneas\nChatGPT dijo:\nrespuesta final';
   assert.equal(extractChatGptDpuAnswer(body, 'una pregunta con dos líneas'), 'respuesta final');
@@ -97,4 +112,10 @@ test('espera DPU: la misma respuesta a un prompt repetido sí cuenta cuando pert
   const before = readChatGptDpuAnswer(doc, 'hola');
   nodes = [...nodes, roleNode('user', 'hola'), roleNode('assistant', 'Igual.')];
   assert.equal(await waitForChatGptDpuAnswer(doc, 'hola', before, { timeout: 100, interval: 5, stableFor: 10 }), 'Igual.');
+});
+
+test('lector autenticado comparte la normalización de saltos y espacios del lector DPU', async () => {
+  const { extractChatGptAssistantDomText } = await import('../src/core/chatgptDpu.js');
+  const nodes = [roleNode('user', 'una pregunta\ncon dos líneas'), roleNode('assistant', 'Respuesta actual.')];
+  assert.equal(extractChatGptAssistantDomText({ querySelectorAll: () => nodes }, 'una pregunta con dos líneas'), 'Respuesta actual.');
 });

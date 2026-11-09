@@ -511,7 +511,11 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle('nexo:stream-end', (event, payload) => {
-    const result = engine.onStreamEnd(event.sender.id, payload);
+    // Texto tardío del mismo turno: reutilizar la absorción/deduplicación que
+    // ya atiende CDP, sin volver a finalizar la memoria del guardián.
+    const result = payload?.source === 'dom-recovery' && payload?.site === 'chatgpt'
+      ? { counted: engine.onCdpCapture(event.sender.id, payload), nextAction: null }
+      : engine.onStreamEnd(event.sender.id, payload);
     const chars = Number(payload?.chars) || Number(payload?.deliveredChars) || 0;
     if (chars > 0 && !result?.counted?.duplicate) {
       const host = String(payload?.host || payload?.site || 'el sitio');

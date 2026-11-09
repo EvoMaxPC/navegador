@@ -539,7 +539,7 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
   }
 }
 
-function wrapResponse(response, capture = {}, generation = null) {
+function wrapResponse(response, capture = {}, generation = null, promptText = '') {
   if (!response || !response.body || !looksLikeStream(response.headers)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
@@ -561,30 +561,37 @@ function wrapResponse(response, capture = {}, generation = null) {
         bridge.event('error', { stage: `filtro:${info.stage}`, message: info.message });
       },
       onEnd: (info) => {
+        const sendEnd = (text, source = null) => {
+          const clipped = text.length > MAX_CAPTURE_CHARS;
+          bridge.event('stream-end', {
+            ...capture, site: site.id, host: CONFIG.host || location.hostname,
+            ...(source ? { source } : {}),
+            outcome: generation?.stoppedByUser ? 'cancelled' : info.outcome,
+            stoppedByUser: Boolean(generation?.stoppedByUser),
+            finished: !info.interrupted, interrupted: Boolean(info.interrupted),
+            model: info.model || capture.model || '', stopped: info.stopped, code: info.code,
+            truncated: info.truncated, truncationReason: info.truncationReason,
+            deliveredChars: text.length, droppedChars: info.droppedChars,
+            chars: text.length, tokens: estimateTokens(text), clipped,
+            text: clipped ? text.slice(0, MAX_CAPTURE_CHARS) : text,
+            dropped: String(info.dropped || '').slice(0, 600),
+          });
+        };
         const text = String(info.text || '');
-        const recortado = text.length > MAX_CAPTURE_CHARS;
-        bridge.event('stream-end', {
-          ...capture,
-          site: site.id,
-          host: CONFIG.host,
-          outcome: generation?.stoppedByUser ? 'cancelled' : info.outcome,
-          stoppedByUser: Boolean(generation?.stoppedByUser),
-          finished: !info.interrupted,
-          interrupted: Boolean(info.interrupted),
-          model: info.model || capture.model || '',
-          stopped: info.stopped,
-          code: info.code,
-          truncated: info.truncated,
-          truncationReason: info.truncationReason,
-          deliveredChars: info.deliveredChars,
-          droppedChars: info.droppedChars,
-          chars: text.length,
-          tokens: estimateTokens(text),
-          clipped: recortado,
-          text: recortado ? text.slice(0, MAX_CAPTURE_CHARS) : text,
-          dropped: info.dropped.slice(0, 600),
-        });
-        if (state.response === generation) state.response = null;
+        // No retrasar respuestas/contadores si la captura de red vino vacía.
+        sendEnd(text);
+        if (site.id === 'chatgpt' && !text.trim() && !info.stopped) {
+          // Complemento recibido del remoto: sólo si la red no aportó texto.
+          // Reutiliza la misma espera, la identidad y la recuperación CDP/main.
+          void waitForChatGptDpuAnswer(document, promptText, generation?.dpuBefore, {
+            requireRole: true, isCurrent: () => !generation || state.response === generation,
+          }).then((answer) => {
+            if (answer) sendEnd(answer, 'dom-recovery');
+            else bridge.event('error', { stage: 'chatgpt-output-capture',
+              message: 'El stream terminó sin texto y no se pudo confirmar una respuesta nueva del prompt actual en el DOM.' });
+          }).catch((error) => bridge.event('error', { stage: 'chatgpt-output-capture', message: String(error?.message || error) }))
+            .finally(() => { if (state.response === generation) state.response = null; });
+        } else if (state.response === generation) state.response = null;
       },
     });
   response.body.pipeTo(filter.writable).catch((error) => {
@@ -674,7 +681,7 @@ if (!window.__NEXO_HOOKED__) {
     const generation = prepared.chat ? { messageId, stoppedByUser: false } : null;
     if (generation) {
       state.response = generation;
-      if (prepared.dpu) generation.dpuBefore = readChatGptDpuAnswer(document, prepared.promptText || '');
+      if (site.id === 'chatgpt') generation.dpuBefore = readChatGptDpuAnswer(document, prepared.promptText || '');
       if (prepared.send === false) bridge.event('turn-result', { phase: 'started', messageId, site: site.id,
         host: CONFIG.host || location.hostname, model: prepared.model || '' });
     }
@@ -730,7 +737,7 @@ if (!window.__NEXO_HOOKED__) {
       return response;
     }
     try {
-      return wrapResponse(response, capture, generation);
+      return wrapResponse(response, capture, generation, prepared.promptText || '');
     } catch (error) {
       bridge.event('error', { stage: 'stream', message: String(error?.message || error) });
       return response;

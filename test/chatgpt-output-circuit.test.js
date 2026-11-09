@@ -98,8 +98,9 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     },
   };
   const domListeners = new Map();
-  const document = { body: { get innerText() { if (!transportStarted) return initialBodyText; return typeof bodyText === 'function' ? bodyText() : bodyText; } }, querySelector: () => null, querySelectorAll: (selector) => selector === '[data-message-author-role]' && roleNodes ? roleNodes(transportStarted) : [],
+  const document = { body: { get innerText() { if (!transportStarted) return initialBodyText; return typeof bodyText === 'function' ? bodyText() : bodyText; }, set innerText(value) { bodyText = value; } }, querySelector: () => null, querySelectorAll: (selector) => selector === '[data-message-author-role]' && roleNodes ? roleNodes(transportStarted) : [],
     addEventListener(name, handler) { domListeners.set(name, handler); } };
+  page.document = document;
   page.stop = (isTrusted = true, attributes = { 'data-testid': 'stop-button' }) => {
     // DOM mínimo: compara atributos reales del botón, sin copiar los selectores
     // de producción. El target puede ser el icono hijo del botón.
@@ -557,6 +558,22 @@ test('integración remota DPU: conserva captura de texto y clasifica un único t
   assertOutcomeUi();
 });
 
+test('integración remota DPU: espera el renderizado tardío del DOM y suma tokens de salida', async () => {
+  const view = await openTab(), before = stats();
+  const answer = 'Respuesta DPU aplicada tarde al documento.';
+  const page = pageFor(view, '<template>DPU</template>', { mime: dpuMime,
+    bodyText: 'You said:\nPregunta DPU\nAplicando respuesta...' });
+  const response = await requestDpu(page);
+  setTimeout(() => {
+    page.document.body.innerText = `You said:\nPregunta DPU\nChatGPT said:\n${answer}`;
+  }, 350);
+  assert.equal(await response.text(), '<template>DPU</template>', 'el transporte original permanece intacto');
+  await pause(650);
+  assert.equal(stats().responses, before.responses + 1);
+  assert.equal(stats().outputTokens, before.outputTokens + countGptTokens(answer));
+  assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+});
+
 test('integración remota DPU: Stop y cierre posterior no crean otro resultado', async () => {
   const view = await openTab(), before = stats();
   let release;
@@ -681,4 +698,45 @@ test('DPU sin etiquetas traducidas: nodos user/assistant → BPE → tokens de s
   assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
   assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
   assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+});
+
+test('SSE vacío recupera el texto autenticado tardío por el mismo turno, sin otra respuesta', async () => {
+  const view = await openTab(), before = stats();
+  const answer = 'Texto final que sólo está disponible en el mensaje de GPT.';
+  const node = (role, text) => ({ innerText: text, getAttribute: () => role, querySelector: () => null });
+  const old = [node('user', 'Test'), node('assistant', 'Respuesta anterior.')];
+  const current = node('user', 'Test'), assistant = node('assistant', answer);
+  let rendered = false;
+  const page = pageFor(view, 'data: [DONE]\n\n', { roleNodes: (started) => !started ? old
+    : [...old, current, ...(rendered ? [assistant] : [])] });
+  const response = await requestReply(page);
+  await response.text();
+  await pause(50);
+  assert.equal(stats().responses - before.responses, 1, 'el cierre no espera al fallback DOM');
+  assert.equal(stats().outputTokens, before.outputTokens, 'no toma el texto anterior');
+  rendered = true;
+  await pause(300);
+  assert.equal(page.captures.at(-1)?.text, answer);
+  assert.equal(page.captures.at(-1)?.source, 'dom-recovery');
+  assert.equal(page.captures.length, 2, 'cierre y recuperación llevan el mismo ID, no otra respuesta');
+  assert.equal(page.captures[0].messageId, page.captures[1].messageId);
+  assert.equal(stats().responses - before.responses, 1);
+  assert.equal(stats().interventions - before.interventions, 2);
+  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer, 'gpt-6'));
+  assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+});
+
+test('fallback autenticado no tokeniza una respuesta previa al repetir el prompt', async () => {
+  const view = await openTab(), before = stats();
+  const old = [
+    { innerText: 'Test', getAttribute: () => 'user' },
+    { innerText: 'No es la respuesta nueva.', getAttribute: () => 'assistant', querySelector: () => null },
+  ];
+  const page = pageFor(view, 'data: [DONE]\n\n', { roleNodes: () => old });
+  const response = await requestReply(page);
+  await response.text();
+  await pause(5200);
+  assert.equal(stats().outputTokens, before.outputTokens);
+  assert.equal(stats().responses - before.responses, 1);
+  assert.equal(page.captures.length, 1, 'no hay recuperación ficticia');
 });
