@@ -8,6 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { runSmoke, report } from '../src/main/smoke.js';
 
 /** Respuesta típica de una shell sana. */
@@ -28,19 +29,21 @@ function healthy(overrides = {}) {
   });
 }
 
-function fakeWindow(response) {
-  return {
-    isDestroyed: () => false,
-    webContents: {
-      calls: 0,
-      async executeJavaScript() {
-        this.calls += 1;
-        if (typeof response === 'function') return response();
-        return response;
-      },
-    },
+function fakeWindow(response, { loading = false } = {}) {
+  const contents = new EventEmitter();
+  contents.loading = loading;
+  contents.calls = 0;
+  contents.isLoading = () => contents.loading;
+  contents.executeJavaScript = async function execute() {
+    contents.calls += 1;
+    if (typeof response === 'function') return response(contents.calls);
+    return response;
   };
+  return { isDestroyed: () => false, webContents: contents };
 }
+
+// Sin esperas reales: los reintentos se cuentan, no se cronometran.
+const fast = { attempts: 3, pause: 0, sleep: async () => {} };
 
 const names = (checks) => checks.filter((item) => !item.ok).map((item) => item.name);
 
@@ -77,8 +80,40 @@ test('detecta estilos que no cargaron (CSS fuera del paquete)', async () => {
 
 test('detecta que no se creó ninguna pestaña', async () => {
   const win = fakeWindow(healthy({ webviews: 0 }));
-  const result = await runSmoke({ win });
+  const result = await runSmoke({ win, ...fast });
   assert.deepEqual(names(result.checks), ['webview montada']);
+  assert.equal(win.webContents.calls, 3, 'reintenta antes de darse por vencida');
+});
+
+test('reintenta hasta que la shell monta la primera pestaña', async () => {
+  const win = fakeWindow((call) => healthy({ webviews: call < 3 ? 0 : 1 }));
+  const result = await runSmoke({ win, ...fast });
+  assert.equal(result.ok, true, names(result.checks).join(', '));
+  assert.equal(win.webContents.calls, 3);
+});
+
+test('espera a que la página termine de cargar antes de mirar', async () => {
+  const win = fakeWindow(healthy({ omnibox: false }));
+  const contents = win.webContents;
+  contents.loading = true;
+
+  const pending = runSmoke({ win, ...fast });
+  // Todavía no debe haber preguntado nada: la página no terminó de cargar.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(contents.calls, 0);
+
+  contents.loading = false;
+  contents.emit('did-finish-load');
+  const result = await pending;
+  assert.equal(contents.calls >= 1, true);
+  assert.deepEqual(names(result.checks), ['barra de direcciones']);
+});
+
+test('una carga que no termina se informa como error, no como cuelgue', async () => {
+  const win = fakeWindow(healthy(), { loading: true });
+  const result = await runSmoke({ win, timeout: 40, ...fast });
+  assert.equal(result.ok, false);
+  assert.match(result.checks.at(-1).detail, /sin respuesta en 40 ms/);
 });
 
 test('una ventana inexistente no rompe la prueba', async () => {
@@ -101,14 +136,14 @@ test('un error dentro de la página se informa en vez de propagarse', async () =
 
 test('una respuesta ilegible no deja la prueba sin informe', async () => {
   const win = fakeWindow('esto no es JSON');
-  const result = await runSmoke({ win });
+  const result = await runSmoke({ win, ...fast });
   assert.equal(result.ok, false);
   assert.equal(result.checks.length, 2);
 });
 
 test('la prueba se corta si la página no responde', async () => {
   const win = fakeWindow(() => new Promise(() => {}));
-  const result = await runSmoke({ win, timeout: 30 });
+  const result = await runSmoke({ win, timeout: 30, ...fast });
   assert.equal(result.ok, false);
   assert.match(result.checks.at(-1).detail, /sin respuesta en 30 ms/);
 });

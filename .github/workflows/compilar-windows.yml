@@ -55,38 +55,6 @@ jobs:
       - name: Verificación automática
         run: npm run verify
 
-      # Si las pruebas fallan en Windows y no en Linux, el log del flujo no es
-      # legible desde cualquier entorno; el detalle se publica como check run,
-      # que sí se lee por la API.
-      - name: Publicar el diagnóstico del fallo
-        if: failure()
-        shell: pwsh
-        env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          node --test --test-reporter=tap *> ci-fallo.txt
-          $texto = Get-Content ci-fallo.txt -Raw
-          if ($null -eq $texto) { $texto = 'sin salida' }
-          if (Test-Path ci-humo.txt) {
-            $texto = "===== prueba de humo =====`n" + (Get-Content ci-humo.txt -Raw) + "`n===== pruebas =====`n" + $texto
-          }
-          if ($texto.Length -gt 60000) { $texto = $texto.Substring($texto.Length - 60000) }
-          $cuerpo = @{
-            name      = 'diagnostico'
-            head_sha  = '${{ github.sha }}'
-            status    = 'completed'
-            conclusion = 'neutral'
-            output    = @{
-              title   = 'Salida de las pruebas en Windows'
-              summary = 'Detalle del fallo de la verificación automática'
-              text    = $texto
-            }
-          } | ConvertTo-Json -Depth 6
-          Invoke-RestMethod -Method Post `
-            -Uri 'https://api.github.com/repos/${{ github.repository }}/check-runs' `
-            -Headers @{ Authorization = "Bearer $env:TOKEN"; Accept = 'application/vnd.github+json' } `
-            -Body $cuerpo -ContentType 'application/json' | Out-Null
-
       - name: Empaquetar
         run: npm run dist:win
 
@@ -122,3 +90,35 @@ jobs:
         with:
           files: dist/*.zip
           generate_release_notes: true
+
+      # Si las pruebas fallan en Windows y no en Linux, el log del flujo no es
+      # legible desde cualquier entorno; el detalle se publica como check run,
+      # que sí se lee por la API.
+      - name: Publicar el diagnóstico del fallo
+        if: failure()
+        shell: pwsh
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node --test --test-reporter=tap *> ci-fallo.txt
+          $texto = Get-Content ci-fallo.txt -Raw
+          if ($null -eq $texto) { $texto = 'sin salida' }
+          if (Test-Path ci-humo.txt) {
+            $texto = "===== prueba de humo =====`n" + (Get-Content ci-humo.txt -Raw) + "`n===== pruebas =====`n" + $texto
+          }
+          if ($texto.Length -gt 60000) { $texto = $texto.Substring($texto.Length - 60000) }
+          $cuerpo = @{
+            name      = 'diagnostico'
+            head_sha  = '${{ github.sha }}'
+            status    = 'completed'
+            conclusion = 'neutral'
+            output    = @{
+              title   = 'Salida de las pruebas en Windows'
+              summary = 'Detalle del fallo de la verificación automática'
+              text    = $texto
+            }
+          } | ConvertTo-Json -Depth 6
+          Invoke-RestMethod -Method Post `
+            -Uri 'https://api.github.com/repos/${{ github.repository }}/check-runs' `
+            -Headers @{ Authorization = "Bearer $env:TOKEN"; Accept = 'application/vnd.github+json' } `
+            -Body $cuerpo -ContentType 'application/json' | Out-Null

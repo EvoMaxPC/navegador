@@ -39,10 +39,20 @@ const REQUIRED_BRIDGE_KEYS = ['bookmarks', 'downloads', 'getSettings', 'history'
 /**
  * Corre la prueba de humo contra una ventana ya creada.
  *
- * @param {{ win: Electron.BrowserWindow, timeout?: number }} options
+ * Espera a que la página termine de cargar y a que la shell monte su primera
+ * pestaña: la ventana recién se creó, y preguntarle antes devuelve un documento
+ * vacío.
+ *
+ * @param {{
+ *   win: Electron.BrowserWindow,
+ *   timeout?: number,
+ *   attempts?: number,
+ *   pause?: number,
+ *   sleep?: (ms: number) => Promise<void>
+ * }} options
  * @returns {Promise<{ ok: boolean, checks: Array<{ name: string, ok: boolean, detail?: string }> }>}
  */
-export async function runSmoke({ win, timeout = 20000 }) {
+export async function runSmoke({ win, timeout = 20000, attempts = 20, pause = 150, sleep = defaultSleep }) {
   const checks = [];
   const check = (name, ok, detail) => {
     checks.push({ name, ok: Boolean(ok), detail: detail === undefined ? undefined : String(detail) });
@@ -60,10 +70,23 @@ export async function runSmoke({ win, timeout = 20000 }) {
     return { ok: false, checks };
   }
 
+  try {
+    await waitForLoad(contents, timeout);
+  } catch (error) {
+    check('página inspeccionable', false, error?.message || String(error));
+    return { ok: false, checks };
+  }
+
+  // La shell crea la primera pestaña con JavaScript, después de cargar: se
+  // reintenta la lectura hasta que haya algo montado.
   let probe;
   try {
-    const raw = await withTimeout(contents.executeJavaScript(PROBE), timeout);
-    probe = JSON.parse(raw);
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const raw = await withTimeout(contents.executeJavaScript(PROBE), timeout);
+      probe = JSON.parse(raw);
+      if (probe.webviews >= 1) break;
+      if (attempt < attempts) await sleep(pause);
+    }
   } catch (error) {
     check('página inspeccionable', false, error?.message || String(error));
     return { ok: false, checks };
@@ -84,6 +107,21 @@ export async function runSmoke({ win, timeout = 20000 }) {
   check('webview montada', probe.webviews >= 1, `${probe.webviews} webviews`);
 
   return { ok: checks.every((item) => item.ok), checks };
+}
+
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Espera el `did-finish-load` si la página todavía está cargando. */
+function waitForLoad(contents, timeout) {
+  if (typeof contents.isLoading === 'function' && !contents.isLoading()) return Promise.resolve();
+  if (typeof contents.once !== 'function') return Promise.resolve();
+  return withTimeout(
+    new Promise((resolve) => {
+      contents.once('did-finish-load', resolve);
+      contents.once('did-fail-load', resolve);
+    }),
+    timeout,
+  );
 }
 
 function withTimeout(promise, ms) {
