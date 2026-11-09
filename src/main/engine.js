@@ -370,7 +370,7 @@ export class Engine {
       responseAlreadyCounted: Boolean(
         this.sinTexto.get(webContentsId) &&
         now - this.sinTexto.get(webContentsId).at <= VENTANA_RESPUESTA_MS &&
-        (!pending || pending.at < this.sinTexto.get(webContentsId).at)
+        (!pending || pending.entry.at < this.sinTexto.get(webContentsId).at)
       ),
     };
     current.text += fragment;
