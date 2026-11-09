@@ -273,7 +273,7 @@ export class EvoMemory {
       if (!streaming && turn.role === 'assistant' && !artifactMemorized) {
         const result = this.store.add({
           kind: 'artifact',
-          text: `Respuesta de ChatGPT capturada: ${content}`,
+          text: `Respuesta GPT capturada: ${content}`,
           projectId: this.projectId,
           conversationId,
           confidence: 0.98,
