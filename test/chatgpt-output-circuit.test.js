@@ -53,6 +53,7 @@ function thinkingExpected() {
 // Ejecuta las funciones reales de la shell y su suscripción IPC sobre elementos
 // mínimos. Es integración con DOM simulado, NO una prueba visual en Chromium.
 const appSource = readFileSync(new URL('../src/ui/shell/app.js', import.meta.url), 'utf8');
+const shellHtml = readFileSync(new URL('../src/ui/shell/index.html', import.meta.url), 'utf8');
 const elements = Object.fromEntries(['messages', 'responses', 'turnsCancelled', 'turnsFailed', 'turnsPerformed', 'inTokens', 'outTokens', 'interventions', 'capture'].map((key) => [key, { textContent: '0' }]));
 let refreshFromIpc;
 const ui = vm.createContext({
@@ -382,6 +383,13 @@ function outcomeDelta(before) { return outcomes.map((key) => stats()[key] - befo
 function assertOutcomeUi() {
   for (const key of outcomes) assert.equal(elements[key].textContent, stats()[key].toLocaleString('es-AR'), key);
 }
+test('el panel muestra los tres contadores actuales y elimina el contador duplicado', () => {
+  assert.match(shellHtml, /id="statTurnsCancelled">0<\/b><span>turnos cancelados<\/span>/);
+  assert.match(shellHtml, /id="statTurnsFailed">0<\/b><span>turnos fallidos<\/span>/);
+  assert.match(shellHtml, /id="statTurnsPerformed">0<\/b><span>turnos realizados<\/span>/);
+  assert.doesNotMatch(shellHtml, /id="statTurnsCompleted"/);
+  assert.doesNotMatch(shellHtml, /<span>turnos completos<\/span>/);
+});
 function requestReply(page) {
   return page.fetch('/backend-api/f/conversation', { method: 'POST', body: JSON.stringify({ action: 'next',
     model: 'gpt-6', messages: [{ author: { role: 'user' }, content: { parts: ['Test'] } }],

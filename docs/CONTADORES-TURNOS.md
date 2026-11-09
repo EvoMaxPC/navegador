@@ -79,7 +79,7 @@ que dependían del antiguo total de turnos.
 - Pruebas existentes adaptadas a la semántica nueva: una red sin confirmación
   ya no se etiqueta como turno completo. Las verificaciones de tokens,
   mensajes, respuestas y demás funciones se conservan.
-- `npm run verify`: **528 pruebas, 527 aprobadas, 1 omitida, 0 fallos**.
+- `npm run verify`: **529 pruebas, 528 aprobadas, 1 omitida, 0 fallos**.
   La omitida requiere un ZIP externo de Electron para la cadena local.
 - Bundle: **45.2 kB**, **16.2 kB gzip**, 10 módulos; sin nuevas dependencias ni
   relajación de límites de rendimiento.
