@@ -31,6 +31,53 @@ const CHANNEL_LABEL = {
   json: 'respuesta JSON',
 };
 
+/**
+ * Guarda la respuesta literal de ChatGPT en EVO MEMORY, incluso cuando la
+ * mediación está apagada y no existe un ConversationGuard para esa pestaña.
+ * El registro "artifact" conserva el texto completo como evidencia de lectura.
+ */
+function rememberCapturedGptAnswer(memory, store, capture = {}) {
+  const text = String(capture.text || '').trim();
+  const host = String(capture.host || '').toLowerCase();
+  if (!memory?.store || !text || (capture.site !== 'chatgpt' && !host.includes('chatgpt'))) return null;
+
+  const result = memory.store.add({
+    kind: 'artifact',
+    text: `Respuesta GPT capturada: ${text}`,
+    projectId: memory.projectId || 'default',
+    conversationId: capture.conversationId || null,
+    confidence: 0.98,
+    source: {
+      role: 'assistant',
+      model: capture.model || null,
+      url: capture.url || null,
+      messageId: capture.messageId || null,
+    },
+  });
+  const persisted = memory.store.save();
+  if (store?.pushLog) {
+    store.pushLog({
+      kind: 'receiving',
+      code: 'gpt-response-memory',
+      severity: 'info',
+      title: 'Respuesta de ChatGPT leída y guardada en EVO MEMORY',
+      detail: `Se capturaron ${text.length} caracteres de la respuesta real y se guardaron en memoria (${result.action}).`,
+      meta: {
+        site: 'chatgpt',
+        host: capture.host || 'chatgpt.com',
+        chars: text.length,
+        memoryAction: result.action,
+        memoryId: result.item?.id || null,
+        persisted,
+        messageId: capture.messageId || null,
+        conversationId: capture.conversationId || null,
+      },
+      ts: Date.now(),
+    });
+  }
+  return result;
+}
+
 export class Engine {
   /**
    * @param {{
@@ -672,6 +719,7 @@ export class Engine {
    * actualiza el historial de la conversación.
    */
   onStreamEnd(webContentsId, payload) {
+    rememberCapturedGptAnswer(this.memory, this.store, payload);
     this.onTurnResult(webContentsId, { ...payload, finished: payload?.finished ?? true });
     // La capa cerró un stream: desde acá, esa respuesta ya la contó ella.
     this.layerEnded.set(webContentsId, Date.now());
@@ -834,6 +882,7 @@ export class Engine {
       return { ok: false, skipped: 'empty' };
     }
     const now = Date.now();
+    rememberCapturedGptAnswer(this.memory, this.store, capture);
 
     const host = capture.host || safeHost(capture.url) || 'desconocido';
     if (!this.isEnabledFor(host)) {
