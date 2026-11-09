@@ -19,7 +19,7 @@
 
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
-import { detectSite, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
+import { detectSite, isChatRequest, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
 import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
 import { watchChatGptConversation } from '../core/chatgptConversation.js';
 import { estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
@@ -393,7 +393,12 @@ async function planRequest(input, init) {
     };
   }
 
-  if (!shouldMediate(url, method)) return { chat: false };
+  // Capturar una respuesta no debe depender de que la mediación esté activa.
+  // Primero reconocemos la petición de chat por su endpoint; después decidimos
+  // por separado si podemos modificar el prompt. Si se sale aquí por
+  // shouldMediate(), con la mediación apagada también se pierde la respuesta.
+  if (!isChatRequest(site, url, method)) return { chat: false };
+  const canMediate = shouldMediate(url, method);
 
   // El cuerpo viaja como string en `init`, o dentro de un objeto `Request`.
   let text = typeof init?.body === 'string' ? init.body : null;
@@ -416,15 +421,6 @@ async function planRequest(input, init) {
   if (!located || !located.value) return { chat: true, send: true, reason: 'sin-texto' };
 
   const prompt = located.value;
-  // El motor puede no contestar (arranque, IPC lento, error interno). Eso **no**
-  // puede costar la captura: se sigue sin mediación, pero contando el mensaje y
-  // envolviendo la respuesta.
-  let report = null;
-  try {
-    report = await bridge.request('prepare', { prompt, url, site: site.id });
-  } catch (error) {
-    bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
-  }
   const base = {
     chat: true,
     send: true,
@@ -435,6 +431,21 @@ async function planRequest(input, init) {
     promptHash: fingerprint(prompt),
     url,
   };
+
+  // La captura pasiva sigue activa aunque el usuario haya apagado la
+  // intervención de NEXO. En ese caso se devuelve la petición original y se
+  // conserva el envoltorio de la respuesta para contabilizarla/guardarla.
+  if (!canMediate) return { ...base, plan: null, mediated: false };
+
+  // El motor puede no contestar (arranque, IPC lento, error interno). Eso **no**
+  // puede costar la captura: se sigue sin mediación, pero contando el mensaje y
+  // envolviendo la respuesta.
+  let report = null;
+  try {
+    report = await bridge.request('prepare', { prompt, url, site: site.id });
+  } catch (error) {
+    bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
+  }
   if (!report?.text) return { ...base, plan: null };
 
   // El texto no cambió: no hay nada que reescribir, pero el envío se registra y
