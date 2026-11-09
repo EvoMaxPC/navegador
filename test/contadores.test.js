@@ -13,6 +13,7 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
+import { countTokensForProvider } from '../src/core/text.js';
 
 process.env.NEXO_CRASH_WINDOW_MS = '600';
 
@@ -155,7 +156,8 @@ test('4. una respuesta de más de 8 000 caracteres se registra entera', async ()
 
   assert.equal(despues.responses, antes.responses + 1);
   assert.equal(despues.turns, antes.turns + 1);
-  assert.equal(despues.outputTokens, antes.outputTokens + 2400, 'cuenta los tokens de toda la respuesta');
+  const tokensEsperados = countTokensForProvider(largo, '', 'chatgpt');
+  assert.equal(despues.outputTokens, antes.outputTokens + tokensEsperados, 'cuenta los tokens BPE de toda la respuesta');
   assert.ok(resultado.counted && !resultado.counted.duplicate, 'el cierre informa que contó');
 
   // El recorte de 8 000 caracteres estaba en la capa de la página. Se comprueba
