@@ -74,7 +74,7 @@ async function openTab() {
 
 // Capa de producción + preload real + IPC real del principal, sin copiar su
 // extracción/tokenización. Sólo se sustituye el transporte externo por replay.
-function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null, fetchError = null, status = 200 } = {}) {
+function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null, fetchError = null, status = 200, bodyText = '' } = {}) {
   const listeners = [];
   const bytes = new TextEncoder().encode(body);
   let offset = 0;
@@ -96,13 +96,13 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     },
   };
   const domListeners = new Map();
-  const document = { querySelector: () => null, querySelectorAll: () => [],
+  const document = { body: { innerText: bodyText }, querySelector: () => null, querySelectorAll: () => [],
     addEventListener(name, handler) { domListeners.set(name, handler); } };
   page.stop = (isTrusted = true) => domListeners.get('click')?.({ isTrusted, target: {
     closest: (selector) => selector.includes('stop-button') ? {} : null,
   } });
   const context = vm.createContext({ window: page, location: page.location, document, console,
-    setTimeout, clearTimeout, TextEncoder, TextDecoder, ReadableStream, WritableStream, TransformStream, Response, Headers, Request, URL });
+    setTimeout, clearTimeout, TextEncoder, TextDecoder, ReadableStream, WritableStream, TransformStream, Response, Headers, Request, URL, URLSearchParams, FormData });
   const requireBridge = createRequire(new URL('../src/preload/bridge.cjs', import.meta.url));
   const sender = { id: view.id, getURL: () => page.location.href, getType: () => 'webview' };
   const ipcRenderer = {
@@ -510,5 +510,54 @@ test('resultados: regenerar dos veces el mismo texto cuenta dos turnos, no otros
   assert.deepEqual(outcomeDelta(before), [2, 0, 0, 0]);
   assert.equal(stats().messages, before.messages);
   assert.equal(stats().inputTokens, before.inputTokens);
+  assertOutcomeUi();
+});
+
+const dpuMime = 'text/vnd.openai.web-mobile-partial+html';
+function requestDpu(page) {
+  return page.fetch('/unauth-mweb/conversation/updates?operationId=test', {
+    method: 'POST', body: new URLSearchParams({ prompt: 'Pregunta DPU' }),
+  });
+}
+
+test('integración remota DPU: conserva captura de texto y clasifica un único turno completo', async () => {
+  const view = await openTab(), before = stats();
+  const answer = 'Respuesta DPU visible.';
+  const page = pageFor(view, '<template>DPU</template>', { mime: dpuMime,
+    bodyText: `You said:\nPregunta DPU\nChatGPT said:\n${answer}` });
+  const response = await requestDpu(page);
+  assert.equal(await response.text(), '<template>DPU</template>', 'no se altera el transporte DPU');
+  await pause(260);
+  assert.deepEqual(outcomeDelta(before), [1, 0, 0, 0]);
+  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
+  assertOutcomeUi();
+});
+
+test('integración remota DPU: Stop y cierre posterior no crean otro resultado', async () => {
+  const view = await openTab(), before = stats();
+  let release;
+  const holdOpen = new Promise((resolve) => { release = resolve; });
+  const page = pageFor(view, '<template>DPU</template>', { mime: dpuMime, holdOpen,
+    bodyText: 'You said:\nPregunta DPU\nChatGPT said:\nRespuesta parcial.' });
+  const response = await requestDpu(page);
+  const reading = response.text();
+  try {
+    await pause(40);
+    page.stop();
+    await pause();
+    assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+    assertOutcomeUi();
+  } finally { release(); await reading; await pause(260); }
+  assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+});
+
+test('integración remota DPU: sin respuesta verificable en DOM queda desconocido, no completo', async () => {
+  const view = await openTab(), before = stats();
+  const page = pageFor(view, '<template>DPU sin respuesta</template>', { mime: dpuMime });
+  const response = await requestDpu(page);
+  await response.text();
+  await pause(260);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+  assert.equal(stats().outputTokens, before.outputTokens, 'no inventa tokens si falta la respuesta');
   assertOutcomeUi();
 });

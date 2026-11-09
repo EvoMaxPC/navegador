@@ -80,9 +80,9 @@ que dependían del antiguo total de turnos.
 - Pruebas existentes adaptadas a la semántica nueva: una red sin confirmación
   ya no se etiqueta como turno completo. Las verificaciones de tokens,
   mensajes, respuestas y demás funciones se conservan.
-- `npm run verify`: **512 pruebas, 511 aprobadas, 1 omitida, 0 fallos**.
+- `npm run verify`: **521 pruebas, 520 aprobadas, 1 omitida, 0 fallos**.
   La omitida requiere un ZIP externo de Electron para la cadena local.
-- Bundle: **41.8 kB**, **15.1 kB gzip**, 9 módulos; sin nuevas dependencias ni
+- Bundle: **45.1 kB**, **16.2 kB gzip**, 10 módulos; sin nuevas dependencias ni
   relajación de límites de rendimiento.
 
 Estas son pruebas automatizadas, incluidas grabaciones externas de ChatGPT.
@@ -91,3 +91,18 @@ sandbox.** El paquete Windows y su arranque pueden comprobarse en CI, pero eso
 no sustituye una conversación real. Si ChatGPT cambia los identificadores del
 botón Stop, sin señal explícita del proveedor la interrupción quedará como
 "desconocida", no se inventará una cancelación confirmada.
+
+
+## Integración de cambios concurrentes
+
+Durante la publicación se detectaron cuatro commits remotos nuevos en esta
+misma rama: `f333bc7`, `f00ebe8`, `6259b86` y `7a65760`, para capturar ChatGPT
+anónimo mediante DPU/HTML y lectura final de DOM. Se integraron por merge normal,
+sin force push ni eliminación de esa captura. Se resolvió el solapamiento de
+`wrapResponse` conservando los metadatos DPU y la identidad del turno.
+
+La ruta DPU ahora conserva también el estado Stop, emite completo sólo al obtener
+la respuesta visible y registra desconocido si no puede confirmarla, sin
+inventar texto ni tokens. Se agregaron **3 pruebas de integración DPU** con DOM y
+transporte sintéticos (normal, Stop/cierre y respuesta no verificable), además
+de las **6 pruebas DPU recibidas del remoto**. No constituyen validación en vivo.
