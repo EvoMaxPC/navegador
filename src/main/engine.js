@@ -367,6 +367,11 @@ export class Engine {
     }
     const current = this.streamProgress.get(webContentsId) || {
       messageId, text: '', tokens: 0, model: payload.model || '', host: payload.host || '',
+      responseAlreadyCounted: Boolean(
+        this.sinTexto.get(webContentsId) &&
+        now - this.sinTexto.get(webContentsId).at <= VENTANA_RESPUESTA_MS &&
+        (!pending || pending.at < this.sinTexto.get(webContentsId).at)
+      ),
     };
     current.text += fragment;
     current.messageId ||= messageId;
@@ -424,6 +429,12 @@ export class Engine {
         : live.tokens;
       this.counters.outputTokens = Math.max(0, this.counters.outputTokens + finalTokens - live.tokens);
       this.streamProgress.delete(webContentsId);
+      // Si la red ya registró el +1 de respuesta sin texto, el flujo en vivo
+      // sólo completa sus tokens; no vuelve a sumar la respuesta.
+      if (live.responseAlreadyCounted) {
+        this.seenResponses.set(key, now);
+        return { ok: true, duplicate: true, tokens: true };
+      }
       // Los tokens ya se actualizaron fragmento a fragmento; aquí sólo se
       // registra el +1 de respuesta, sin sumar el texto otra vez.
       merge = { ...merge, duplicate: true, tokens: 0 };
