@@ -14,6 +14,9 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
+import { countTokens as countO200k } from 'gpt-tokenizer';
+import { countTokens as countCl100k } from 'gpt-tokenizer/encoding/cl100k_base';
+import { countGptTokens, gptModelFromRequest } from '../src/core/text.js';
 
 // La respuesta contada desde la red espera a que la capa o CDP cuenten primero.
 // En la prueba ese margen se acorta para no esperar segundo y medio por caso.
@@ -655,4 +658,21 @@ test('restablecer los ajustes vuelve a habilitar el sitio que se había apagado'
   // apagado y el panel mostraba ceros sin ninguna causa visible.
   await callIpc('nexo:settings:reset');
   assert.equal((await callIpc('nexo:config', { host: 'chatgpt.com' })).enabled, true, 'y queda habilitado');
+});
+
+
+test('el contador GPT usa BPE o200k para modelos actuales y cl100k para GPT-4 clásico', () => {
+  const texto = 'Hola, mundo. ¿Cómo estás?';
+  assert.equal(countGptTokens(texto, 'gpt-5'), countO200k(texto));
+  assert.equal(countGptTokens(texto, 'gpt-4o'), countO200k(texto));
+  assert.equal(countGptTokens(texto, 'gpt-4.1'), countO200k(texto));
+  assert.equal(countGptTokens(texto, 'gpt-4-turbo'), countCl100k(texto));
+  assert.equal(countGptTokens(texto, 'gpt-3.5-turbo'), countCl100k(texto));
+  assert.equal(countGptTokens('', 'gpt-5'), 0);
+});
+
+test('el modelo GPT se obtiene del cuerpo de la solicitud cuando está disponible', () => {
+  assert.equal(gptModelFromRequest({ model: 'gpt-4o' }), 'gpt-4o');
+  assert.equal(gptModelFromRequest({ metadata: { model_slug: 'gpt-5' } }), 'gpt-5');
+  assert.equal(gptModelFromRequest({}), '');
 });
