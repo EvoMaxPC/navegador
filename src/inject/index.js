@@ -467,6 +467,21 @@ const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
 const MAX_CAPTURE_CHARS = 200_000;
 const MAX_DPU_RESPONSE_BYTES = 12_000_000;
 
+const DPU_DOM_CAPTURE_TIMEOUT_MS = 5_000;
+const DPU_DOM_POLL_MS = 50;
+
+async function waitForChatGptDpuAnswer(prompt) {
+  const deadline = Date.now() + DPU_DOM_CAPTURE_TIMEOUT_MS;
+  let bodyText = '';
+  while (true) {
+    bodyText = String(document.body?.innerText || '');
+    const answer = extractChatGptDpuAnswer(bodyText, prompt);
+    if (answer) return { answer, bodyText };
+    if (Date.now() >= deadline) return { answer: '', bodyText };
+    await new Promise((resolve) => setTimeout(resolve, DPU_DOM_POLL_MS));
+  }
+}
+
 /**
  * ChatGPT anónimo aplica la respuesta como HTML DPU al documento. Se lee una
  * copia del stream (sin alterar el que consume el sitio) y, al llegar EOF, se
@@ -494,12 +509,11 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
     }
     if (!bytes) throw new Error('ChatGPT devolvió un stream DPU vacío');
 
-    // El consumidor original termina de aplicar el último template al DOM.
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    const bodyText = String(document.body?.innerText || '');
-    const answer = extractChatGptDpuAnswer(bodyText, capture.promptText || '');
+    // El HTML DPU puede llegar antes de que ChatGPT lo aplique al DOM.
+    // Esperar el contenido real, con límite, evita perder tokens por una carrera.
+    const { answer, bodyText } = await waitForChatGptDpuAnswer(capture.promptText || '');
     if (!answer) {
-      throw new Error(`el stream DPU terminó (${bytes} bytes), pero no se encontró la respuesta del prompt actual en el DOM (${bodyText.length} caracteres visibles)`);
+      throw new Error(`el stream DPU terminó (${bytes} bytes), pero no se encontró la respuesta del prompt actual en el DOM tras ${DPU_DOM_CAPTURE_TIMEOUT_MS} ms (${bodyText.length} caracteres visibles)`);
     }
 
     const clipped = answer.length > MAX_CAPTURE_CHARS;
