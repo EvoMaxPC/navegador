@@ -25,8 +25,6 @@ export const ignore = [
   /^\/scripts($|\/)/,
   /^\/dev($|\/)/,
   /^\/dist($|\/)/,
-  // No hay dependencias de ejecución: todo lo de node_modules es de desarrollo.
-  /^\/node_modules($|\/)/,
   /^\/\.nexo-profile($|\/)/,
   /^\/\.cache($|\/)/,
   /^\/build\/icon\.png$/,
