@@ -612,8 +612,26 @@ function registerIpc() {
       turns: payload.turns, streaming: payload.streaming === true });
     if (!result.ok) noteDiagnostic({ code: 'conversation-memory-error', severity: 'warn',
       title: 'No se pudo guardar la conversación', detail: result.error });
+
+    // El snapshot del DOM es una fuente independiente del fetch/CDP. Sólo se
+    // cuentan respuestas finales de la última intervención pendiente: al abrir
+    // un historial se archivan sus respuestas, pero no se simula actividad nueva.
+    const lastTurn = payload.turns[payload.turns.length - 1];
+    const pendingMessageId = engine.currentSendId(event.sender.id);
+    if (!payload.streaming && lastTurn?.role === 'assistant' && pendingMessageId) {
+      const captured = (result.assistantCaptures || []).find((turn) => turn.id === String(lastTurn.id || ''));
+      if (captured?.content) {
+        engine.onCdpCapture(event.sender.id, {
+          site: 'chatgpt', host: url.hostname, url: `${url.origin}${url.pathname}`,
+          messageId: pendingMessageId, conversationId, source: 'dom-conversation',
+          text: captured.content, chars: captured.content.length, finished: true,
+          model: '',
+        });
+        broadcast('nexo:stats-changed', engine.stats());
+      }
+    }
     if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());
-    return result;
+    return { ...result, assistantCaptures: undefined };
   });
   ipcMain.handle('nexo:memory:conversations', () => memory.memory.listConversations());
   ipcMain.handle('nexo:memory:stats', () => ({ ...engine.memoryStats(), file: memory?.file || null }));
