@@ -417,8 +417,12 @@ export class Engine {
     const live = this.streamProgress.get(webContentsId);
     const belongsToLive = Boolean(live && (!messageId || !live.messageId || live.messageId === messageId));
     if (belongsToLive) {
-      const finalTokens = texto.trim() ? this.#outputTokens(texto, payload.model || live.model, payload.host || live.host) : live.tokens;
-      this.counters.outputTokens += finalTokens - live.tokens;
+      // El cierre puede traer el texto completo o un prefijo recortado para el
+      // registro. Nunca rebajar el conteo en vivo por recibir ese prefijo.
+      const finalTokens = texto.startsWith(live.text)
+        ? this.#outputTokens(texto, payload.model || live.model, payload.host || live.host)
+        : live.tokens;
+      this.counters.outputTokens = Math.max(0, this.counters.outputTokens + finalTokens - live.tokens);
       this.streamProgress.delete(webContentsId);
       // Los tokens ya se actualizaron fragmento a fragmento; aquí sólo se
       // registra el +1 de respuesta, sin sumar el texto otra vez.
