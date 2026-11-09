@@ -273,9 +273,17 @@ function updateWelcome() {
 function navigate(url) {
   const target = normalizeInput(url);
   if (!target) return;
-  const tab = activeTab() || createTab(target);
+
+  // Si no hay pestaña, `createTab` ya la abre en esa URL: cargarla otra vez
+  // duplicaría la petición y el historial.
+  if (!activeTab()) {
+    createTab(target);
+    return;
+  }
+
+  const tab = activeTab();
   tab.url = target;
-  if (tab.view.getURL?.() && tab.view.loadURL) tab.view.loadURL(target);
+  if (typeof tab.view.loadURL === 'function') tab.view.loadURL(target);
   else tab.view.setAttribute('src', target);
 }
 
@@ -1087,12 +1095,13 @@ nexo.on('nexo:bookmarks-changed', () => {
 });
 nexo.on('nexo:profile-changed', () => renderSitePanel());
 
-// Al cerrar la ventana se guarda la sesión con los datos más frescos.
+// Al cerrar la ventana se guarda la sesión con los datos más frescos. Se usa
+// `send` y no `invoke` porque en `beforeunload` no hay tiempo para una respuesta.
 window.addEventListener('beforeunload', () => {
   const tabs = [...state.tabs.values()].map((tab) => ({ url: tab.url, title: tab.title }));
   if (!tabs.length) return;
   const activeIndex = Math.max(0, [...state.tabs.keys()].indexOf(state.activeId));
-  nexo.session.capture([{ tabs, activeIndex }]);
+  nexo.session.saveNow([{ tabs, activeIndex }]);
 });
 
 document.querySelectorAll('.stab').forEach((tab) => {

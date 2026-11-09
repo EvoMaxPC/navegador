@@ -15,10 +15,12 @@
     "demo": "node dev/serve.mjs",
     "test": "node --test",
     "test:watch": "node --test --watch",
-    "verify": "node scripts/verificar.mjs"
+    "verify": "node scripts/verificar.mjs",
+    "make:icon": "node scripts/make-icon.mjs",
+    "dist:win": "npm run build:inject && npm run make:icon && node scripts/empaquetar.mjs"
   },
-  "dependencies": {},
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "electron": "^45.2.3",
     "esbuild": "^0.25.0"
   }

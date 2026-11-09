@@ -80,6 +80,8 @@ contextBridge.exposeInMainWorld('nexo', {
 
   session: {
     capture: (windows) => ipcRenderer.invoke('nexo:session:capture', { windows }),
+    /** Guardado sin esperar respuesta: para el cierre de la ventana. */
+    saveNow: (windows) => ipcRenderer.send('nexo:session:save-now', { windows }),
     restore: () => ipcRenderer.invoke('nexo:session:restore'),
     clear: () => ipcRenderer.invoke('nexo:session:clear'),
   },

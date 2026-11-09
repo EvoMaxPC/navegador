@@ -1,0 +1,88 @@
+# Compila Nexo para Windows en un runner de GitHub y deja el ZIP para descargar.
+#
+# Se usa cuando la máquina donde está el repo no puede bajar Electron (por
+# ejemplo, un entorno sin salida a las releases de GitHub): acá la descarga la
+# hace el runner, y el resultado queda como artefacto del flujo.
+
+name: Compilar para Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'arena/**'
+    # Las rutas no se evalúan en los push de etiquetas: ahí siempre compila.
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'build/**'
+      - 'demo/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/compilar-windows.yml'
+    tags:
+      - 'v*'
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  compilar:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Bajar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Verificación automática
+        run: npm run verify
+
+      - name: Empaquetar
+        run: npm run dist:win
+
+      - name: Prueba de humo del ejecutable
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'dist\Nexo-win32-x64\nexo.exe'
+          if (-not (Test-Path $exe)) { throw "no se generó $exe" }
+          & $exe --smoke
+          if ($LASTEXITCODE -ne 0) { throw "la prueba de humo falló con código $LASTEXITCODE" }
+
+      - name: Resumen
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist\*.zip | Select-Object -First 1
+          $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower()
+          $mb = [math]::Round($zip.Length / 1MB, 1)
+          "ZIP: $($zip.Name) · $mb MB · sha256 $hash" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY
+
+      - name: Dejar el ZIP como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nexo-win32-x64
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Adjuntarlo a la release (sólo en etiquetas v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true

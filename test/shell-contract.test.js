@@ -50,6 +50,13 @@ test('todo canal IPC que invoca el preload está registrado en el principal', ()
   assert.deepEqual(missing, [], `canales sin handler: ${missing.join(', ')}`);
 });
 
+test('todo canal que el preload envía sin respuesta tiene su listener', () => {
+  const sent = unique([...preload.matchAll(/ipcRenderer\.send\('([^']+)'/g)].map((m) => m[1]));
+  const listened = new Set([...main.matchAll(/ipcMain\.on\('([^']+)'/g)].map((m) => m[1]));
+  const missing = sent.filter((channel) => !listened.has(channel));
+  assert.deepEqual(missing, [], `canales enviados sin listener: ${missing.join(', ')}`);
+});
+
 test('todo canal que el principal emite puede escucharse desde el preload', () => {
   const broadcasted = unique([...main.matchAll(/broadcast\('([^']+)'/g)].map((m) => m[1]));
   const allowed = new Set([...preload.matchAll(/'([^']+)'/g)].map((m) => m[1]));

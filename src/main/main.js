@@ -6,9 +6,10 @@
  * mediación en el sitio de IA.
  */
 
-import { app, BrowserWindow, ipcMain, net, protocol, session, shell } from 'electron';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, normalize, sep } from 'node:path';
+import { app, BrowserWindow, ipcMain, protocol, session, shell } from 'electron';
+import { fileURLToPath } from 'node:url';
+import { readFile, stat } from 'node:fs/promises';
+import { dirname, extname, join, normalize, sep } from 'node:path';
 import { Store } from './store.js';
 import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
@@ -16,7 +17,9 @@ import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
 import { hostOf, isInternal } from '../nav/url.js';
+import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
+import { runSmoke, report as reportSmoke } from './smoke.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -24,6 +27,8 @@ const SHELL_PRELOAD = join(ROOT, 'src', 'preload', 'shell.cjs');
 const PAGE_PRELOAD = join(ROOT, 'src', 'preload', 'bridge.cjs');
 
 const isDev = process.argv.includes('--dev');
+/** `--smoke`: arranca, revisa la interfaz y sale. Lo usa el flujo de Windows. */
+const isSmoke = process.argv.includes('--smoke') || process.env.NEXO_SMOKE === '1';
 
 let win = null;
 let store = null;
@@ -47,17 +52,53 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+/**
+ * Sirve la interfaz y la sala de pruebas desde el disco (o desde el asar del
+ * empaquetado, que `node:fs` lee de forma transparente).
+ *
+ * Se lee con `fs` en lugar de `net.fetch('file://…')` para controlar el
+ * `Content-Type` —los módulos ES no cargan sin `text/javascript`— y para poder
+ * decir «no encontrado» sin que Chromium lo interprete como un fallo de red.
+ */
 function registerProtocol() {
   protocol.handle('nexo', async (request) => {
-    const url = new URL(request.url);
-    let pathname = decodeURIComponent(url.pathname);
+    let pathname;
+    try {
+      pathname = decodeURIComponent(new URL(request.url).pathname);
+    } catch {
+      return new Response('Pedido inválido', { status: 400 });
+    }
+    if (pathname.includes('\0')) return new Response('Pedido inválido', { status: 400 });
     if (pathname.endsWith('/') || pathname === '') pathname += 'index.html';
     const file = normalize(join(ROOT, pathname));
     if (!file.startsWith(ROOT + sep)) {
       return new Response('Prohibido', { status: 403 });
     }
     try {
-      return await net.fetch(pathToFileURL(file).toString());
+      const info = await stat(file);
+      if (!info.isFile()) return new Response('No encontrado', { status: 404 });
+      const body = await readFile(file);
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream',
+          'content-length': String(info.size),
+          'cache-control': 'no-store',
+        },
+      });
     } catch {
       return new Response('No encontrado', { status: 404 });
     }
@@ -87,7 +128,9 @@ function createWindow() {
     },
   });
 
-  win.once('ready-to-show', () => win.show());
+  // En modo humo la ventana queda oculta: hay runners sin escritorio donde
+  // mostrar una ventana falla, y la prueba no necesita ver nada.
+  if (!isSmoke) win.once('ready-to-show', () => win.show());
   win.on('closed', () => {
     win = null;
   });
@@ -130,6 +173,18 @@ function createWindow() {
     });
     contents.on('did-finish-load', () => {
       applyZoom(contents);
+    });
+
+    // Atajos del navegador aunque la página tenga el foco: los aceleradores del
+    // menú no siempre ganan contra una webview, y Ctrl+F se lo come el sitio.
+    contents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return;
+      const command = commandFor(input, { platform: process.platform });
+      // Escape y teclas sin modificador siguen siendo de la página.
+      if (!command || command === 'escape') return;
+      if (!input.control && !input.meta && !input.alt) return;
+      event.preventDefault();
+      broadcast('nexo:command', { type: command });
     });
 
     contents.on('destroyed', () => {
@@ -338,6 +393,13 @@ function registerIpc() {
     return { ok: true };
   });
   ipcMain.handle('nexo:session:restore', () => profile?.session.restore() || null);
+  ipcMain.on('nexo:session:save-now', (_event, payload = {}) => {
+    try {
+      profile?.session.capture(payload.windows || []);
+    } catch (error) {
+      console.error('[nexo] no se pudo guardar la sesión:', error.message);
+    }
+  });
   ipcMain.handle('nexo:session:clear', () => {
     profile?.session.clear();
     return { ok: true };
@@ -475,6 +537,19 @@ app.whenReady().then(async () => {
   configureSession();
   buildMenu({ send: (channel, payload) => broadcast(channel, payload) });
   createWindow();
+
+  if (isSmoke) {
+    // Sin ventana visible ni interacción: sólo comprobar que el paquete vivo
+    // carga la shell desde el asar. Cualquier excepción debe terminar el
+    // proceso, no dejarlo colgado en CI.
+    const smoke = await runSmoke({ win }).catch((error) => ({
+      ok: false,
+      checks: [{ name: 'prueba de humo', ok: false, detail: error?.message || String(error) }],
+    }));
+    const code = reportSmoke(smoke);
+    app.exit(code);
+    return;
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
