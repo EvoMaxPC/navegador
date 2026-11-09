@@ -1,0 +1,24 @@
+{
+  "name": "nexo-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nexo — navegador basado en Chromium con una capa de mediación que interviene los mensajes antes de enviarlos y las respuestas de la IA antes de mostrarlas.",
+  "type": "module",
+  "main": "src/main/main.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "npm run build:inject && electron .",
+    "build:inject": "node scripts/build-inject.mjs",
+    "dev": "npm run build:inject && electron . --dev",
+    "demo": "node dev/serve.mjs",
+    "test": "node --test",
+    "test:watch": "node --test --watch"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "esbuild": "^0.25.0"
+  }
+}

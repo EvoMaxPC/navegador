@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexo · sala de pruebas de mediación</title>
+  <meta name="description" content="Nexo: navegador Chromium que interviene los mensajes antes de enviarlos y las respuestas antes de mostrarlas." />
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%237c8cff'/><path d='M9 22V10l14 12V10' stroke='%23080910' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="9" fill="url(#g)" />
+          <path d="M9 22V10l14 12V10" stroke="#08090f" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+          <defs>
+            <linearGradient id="g" x1="0" y1="0" x2="32" y2="32">
+              <stop offset="0" stop-color="#8f9dff" />
+              <stop offset="1" stop-color="#3ee0b0" />
+            </linearGradient>
+          </defs>
+        </svg>
+        <div class="brand-text">
+          <strong>Nexo</strong>
+          <span>sala de pruebas de mediación</span>
+        </div>
+      </div>
+
+      <div class="topbar-center">
+        <label class="field">
+          <span>Escenario</span>
+          <select id="scenario"></select>
+        </label>
+        <p class="scenario-hint" id="scenarioHint"></p>
+      </div>
+
+      <div class="topbar-actions">
+        <label class="toggle" title="Activa o desactiva todo el motor de mediación">
+          <input type="checkbox" id="engine" checked />
+          <span class="track"><span class="thumb"></span></span>
+          <span class="toggle-label">Motor activo</span>
+        </label>
+        <button class="ghost" id="reset" type="button">Reiniciar</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="chat">
+        <div class="transcript" id="transcript">
+          <div class="intro" id="intro">
+            <h1>La misma respuesta, dos realidades.</h1>
+            <p>
+              A la izquierda, lo que el modelo generó. A la derecha, lo que Nexo dejó pasar.
+              El motor analiza cada fragmento mientras llega, retiene los últimos caracteres y,
+              cuando detecta una repetición, corta antes de que aparezca en pantalla.
+            </p>
+            <p class="muted">Todo el análisis es local y determinista: ninguna palabra sale de esta máquina.</p>
+          </div>
+        </div>
+
+        <form class="composer" id="composer">
+          <div class="composer-box">
+            <textarea id="prompt" rows="2" spellcheck="false" placeholder="Escribí tu mensaje…"></textarea>
+            <div class="composer-actions">
+              <span class="composer-meta" id="composerMeta"></span>
+              <button class="send" id="send" type="submit">
+                <span>Enviar</span>
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 12l16-8-6 8 6 8-16-8z" fill="currentColor"/></svg>
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <aside class="inspector">
+        <section class="panel">
+          <header class="panel-head">
+            <h2>Mensaje mediado</h2>
+            <span class="pill" id="tokenPill">0 tokens</span>
+          </header>
+          <div class="panel-body">
+            <div class="chips" id="blockChips"></div>
+            <div class="warnings" id="warnings"></div>
+            <details class="sent-prompt">
+              <summary>Ver lo que se envía al modelo</summary>
+              <pre id="promptPreview"></pre>
+            </details>
+          </div>
+        </section>
+
+        <section class="panel tall">
+          <header class="panel-head">
+            <h2>Intervenciones</h2>
+            <span class="pill" id="logCount">0</span>
+          </header>
+          <ul class="log" id="log">
+            <li class="log-empty">Sin intervenciones todavía. Enviá un mensaje.</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <header class="panel-head"><h2>Balance</h2></header>
+          <div class="metrics" id="metrics">
+            <div class="metric"><span class="metric-value" id="mDelivered">0</span><span class="metric-label">caracteres entregados</span></div>
+            <div class="metric"><span class="metric-value" id="mDropped">0</span><span class="metric-label">caracteres de bucle descartados</span></div>
+            <div class="metric"><span class="metric-value" id="mLoop">0</span><span class="metric-label">bucles cortados</span></div>
+            <div class="metric"><span class="metric-value" id="mContext">0</span><span class="metric-label">tokens de contexto ahorrados</span></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <header class="panel-head"><h2>Ajustes en vivo</h2></header>
+          <div class="panel-body settings">
+            <label class="row">
+              <span>Protocolo</span>
+              <select id="protocolLevel">
+                <option value="off">desactivado</option>
+                <option value="suave">suave</option>
+                <option value="equilibrado" selected>equilibrado</option>
+                <option value="agresivo">agresivo</option>
+              </select>
+            </label>
+            <label class="row">
+              <span>Umbral de corte</span>
+              <select id="threshold">
+                <option value="low">bajo</option>
+                <option value="medium" selected>medio</option>
+                <option value="high">alto</option>
+              </select>
+            </label>
+            <label class="row">
+              <span>Continuación automática</span>
+              <input type="checkbox" id="autoContinue" checked />
+            </label>
+            <label class="row">
+              <span>Velocidad del stream</span>
+              <input type="range" id="speed" min="0" max="40" value="14" />
+            </label>
+          </div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' nexo:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' nexo:;" />
+  <title>Nexo</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="browser">
+    <header class="chrome">
+      <div class="tabstrip">
+        <div class="tabs" id="tabs" role="tablist"></div>
+        <button class="icon-btn new-tab" id="newTab" title="Pestaña nueva (Ctrl+T)" aria-label="Pestaña nueva">+</button>
+        <div class="chrome-right">
+          <span class="engine-pill" id="enginePill" title="Estado del motor de mediación">
+            <span class="dot"></span><span id="enginePillText">Mediación activa</span>
+          </span>
+          <button class="icon-btn" id="toggleSidebar" title="Panel de intervenciones (Ctrl+Shift+I)" aria-label="Panel de intervenciones">
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 5h16v14H4z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 5v14" stroke="currentColor" stroke-width="1.6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="nav-group">
+          <button class="icon-btn" id="back" title="Atrás" aria-label="Atrás">
+            <svg viewBox="0 0 24 24" width="17" height="17"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="icon-btn" id="forward" title="Adelante" aria-label="Adelante">
+            <svg viewBox="0 0 24 24" width="17" height="17"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="icon-btn" id="reload" title="Recargar" aria-label="Recargar">
+            <svg viewBox="0 0 24 24" width="17" height="17"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <form class="omnibox-form" id="omniboxForm">
+          <input class="omnibox" id="omnibox" type="text" spellcheck="false" placeholder="Buscá o escribí una dirección…" />
+        </form>
+
+        <div class="sites" id="sites"></div>
+      </div>
+    </header>
+
+    <main class="viewport" id="viewport"></main>
+
+    <aside class="sidebar" id="sidebar" aria-label="Panel de Nexo">
+      <div class="sidebar-tabs" role="tablist">
+        <button class="stab active" data-panel="activity">Actividad</button>
+        <button class="stab" data-panel="settings">Ajustes</button>
+        <button class="stab" data-panel="about">Acerca</button>
+      </div>
+
+      <section class="panel-view active" data-panel="activity">
+        <div class="stats" id="stats">
+          <div class="stat"><b id="statTurns">0</b><span>turnos mediados</span></div>
+          <div class="stat"><b id="statLoops">0</b><span>bucles cortados</span></div>
+          <div class="stat"><b id="statLog">0</b><span>intervenciones</span></div>
+        </div>
+        <div class="panel-head">
+          <h2>Intervenciones</h2>
+          <button class="link" id="clearLog">Limpiar</button>
+        </div>
+        <ul class="log" id="log"></ul>
+      </section>
+
+      <section class="panel-view" data-panel="settings">
+        <div class="panel-head"><h2>Mediación</h2></div>
+        <label class="switch-row">
+          <span>Motor activo</span>
+          <input type="checkbox" id="setEnabled" checked />
+        </label>
+
+        <label class="row">
+          <span>Protocolo anti-bucle</span>
+          <select id="setProtocol">
+            <option value="off">desactivado</option>
+            <option value="suave">suave</option>
+            <option value="equilibrado">equilibrado</option>
+            <option value="agresivo">agresivo</option>
+          </select>
+        </label>
+
+        <label class="row">
+          <span>Umbral de corte</span>
+          <select id="setThreshold">
+            <option value="low">bajo (corta antes)</option>
+            <option value="medium">medio</option>
+            <option value="high">alto (solo bucles claros)</option>
+          </select>
+        </label>
+
+        <label class="row">
+          <span>Continuación automática</span>
+          <input type="checkbox" id="setAutoContinue" />
+        </label>
+
+        <label class="row">
+          <span>Presupuesto de contexto</span>
+          <input type="number" id="setBudget" min="1000" max="128000" step="500" />
+        </label>
+
+        <label class="row">
+          <span>Turnos recientes sin tocar</span>
+          <input type="number" id="setKeepRecent" min="2" max="40" step="1" />
+        </label>
+
+        <div class="panel-head"><h2>Sitios</h2></div>
+        <ul class="sites-list" id="sitesList"></ul>
+
+        <div class="panel-head"><h2>Privacidad</h2></div>
+        <p class="note">Todo el análisis ocurre en esta máquina. Nexo no envía, copia ni resume tus conversaciones a ningún servidor.</p>
+        <button class="ghost danger" id="resetSettings">Restablecer ajustes</button>
+      </section>
+
+      <section class="panel-view" data-panel="about">
+        <div class="about">
+          <h2>Nexo</h2>
+          <p class="version" id="version">v0.1.0</p>
+          <p>
+            Navegador basado en Chromium que se sienta entre vos y los chatbots: reescribe el
+            mensaje antes de enviarlo y filtra la respuesta antes de mostrarla.
+          </p>
+          <h3>Cómo interviene</h3>
+          <ul>
+            <li><b>Antes de enviar:</b> limpia repeticiones, detecta instrucciones contradictorias, resuelve referencias sueltas y añade un protocolo anti-bucle.</li>
+            <li><b>Antes de mostrar:</b> retiene unos caracteres, detecta repeticiones por período y corta la generación en el punto exacto.</li>
+            <li><b>Después:</b> repara markdown, cierra bloques de código y ofrece continuar sin repetir.</li>
+          </ul>
+          <p class="note">Sala de pruebas: <button class="link" id="openDemo">abrir</button></p>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
