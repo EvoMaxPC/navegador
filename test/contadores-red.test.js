@@ -678,3 +678,40 @@ test('el modelo GPT se obtiene del cuerpo de la solicitud cuando está disponibl
   assert.equal(gptModelFromRequest({ metadata: { model_slug: 'gpt-5' } }), 'gpt-5');
   assert.equal(gptModelFromRequest({}), '');
 });
+
+
+test('el contador de salida recalcula en el proceso principal si el preload envía cero', async () => {
+  const view = await abrir('https://chatgpt.com/c/red-output-zero');
+  const antes = await stats();
+
+  journal.ipcListeners.get('nexo:event')(
+    { sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' } },
+    {
+      type: 'outgoing',
+      payload: {
+        messageId: 'm-output-zero',
+        source: 'request',
+        host: 'chatgpt.com',
+        site: 'chatgpt',
+        chars: 5,
+        tokens: 2,
+        promptHash: 'prompt-output-zero',
+        textFound: true,
+      },
+    },
+  );
+
+  const texto = 'Esta es una respuesta real de la inteligencia artificial.';
+  await callIpc('nexo:stream-end', {
+    messageId: 'm-output-zero',
+    host: 'chatgpt.com',
+    site: 'chatgpt',
+    model: 'gpt-5',
+    text: texto,
+    chars: texto.length,
+    tokens: 0,
+    finished: true,
+  });
+  const fin = await stats();
+  assert.ok(fin.outputTokens > antes.outputTokens, 'el proceso principal calcula tokens aunque el preload informe cero');
+});
