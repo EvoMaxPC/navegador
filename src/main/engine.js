@@ -121,6 +121,8 @@ export class Engine {
      * tokens para siempre.
      */
     this.layerEndedText = new Map();
+    /** Captura acumulada en vivo por pestaña para contabilizar tokens incrementalmente. */
+    this.streamProgress = new Map();
     /**
      * Respuestas ya contadas sin poder leer su texto, por pestaña:
      * `{at, messageId, host}`. Si el texto aparece después —CDP suele llegar más
@@ -352,6 +354,33 @@ export class Engine {
     return this.onTurnResult(webContentsId, { ...pending, outcome: 'unknown' });
   }
 
+  /** Fragmento nuevo de una respuesta: actualiza tokens sin esperar al cierre. */
+  onStreamProgress(webContentsId, payload = {}) {
+    const fragment = String(payload.text || '');
+    if (!fragment) return { ok: true, skipped: 'empty' };
+    const now = Date.now();
+    const pending = this.#pendingTurn(webContentsId, now);
+    const messageId = String(payload.messageId || pending?.entry?.messageId || '');
+    const previous = this.streamProgress.get(webContentsId);
+    if (previous && messageId && previous.messageId && previous.messageId !== messageId) {
+      this.streamProgress.delete(webContentsId);
+    }
+    const current = this.streamProgress.get(webContentsId) || {
+      messageId, text: '', tokens: 0, model: payload.model || '', host: payload.host || '',
+    };
+    current.text += fragment;
+    current.messageId ||= messageId;
+    current.model ||= payload.model || '';
+    current.host ||= payload.host || '';
+    const totalTokens = this.#outputTokens(current.text, current.model, current.host);
+    const increment = Math.max(0, totalTokens - current.tokens);
+    if (increment) this.counters.outputTokens += increment;
+    current.tokens = totalTokens;
+    current.at = now;
+    this.streamProgress.set(webContentsId, current);
+    return { ok: true, chars: current.text.length, tokens: current.tokens, added: increment };
+  }
+
   /**
    * Respuesta cerrada. Cuenta una sola vez, asocia el turno y distingue una
    * respuesta completa de una cortada.
@@ -381,8 +410,18 @@ export class Engine {
     this.noteLayer(webContentsId);
     const pendiente = this.#pendingTurn(webContentsId, now);
     const awaitId = this.resolveMessageId(pendiente?.id ?? webContentsId, messageId);
-    const merge = this.#mergeResponse(webContentsId, texto, { messageId: awaitId, pendiente, model: payload.model || pendiente?.entry?.model || '', provider: payload.host || pendiente?.entry?.host || '' });
-    if (merge.duplicate) {
+    let merge = this.#mergeResponse(webContentsId, texto, { messageId: awaitId, pendiente, model: payload.model || pendiente?.entry?.model || '', provider: payload.host || pendiente?.entry?.host || '' });
+    const live = this.streamProgress.get(webContentsId);
+    const belongsToLive = Boolean(live && (!messageId || !live.messageId || live.messageId === messageId));
+    if (belongsToLive) {
+      const finalTokens = texto.trim() ? this.#outputTokens(texto, payload.model || live.model, payload.host || live.host) : live.tokens;
+      this.counters.outputTokens += finalTokens - live.tokens;
+      this.streamProgress.delete(webContentsId);
+      // Los tokens ya se actualizaron fragmento a fragmento; aquí sólo se
+      // registra el +1 de respuesta, sin sumar el texto otra vez.
+      merge = { ...merge, duplicate: true, tokens: 0 };
+    }
+    if (merge.duplicate && !belongsToLive) {
       this.seenResponses.set(key, now);
       return { ok: true, duplicate: true, merged: true };
     }
