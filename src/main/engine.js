@@ -530,16 +530,15 @@ export class Engine {
   #pendingTurn(webContentsId, now) {
     const propio = this.awaiting.get(webContentsId);
     if (propio) return { id: webContentsId, entry: propio };
-
-    // Si el evento no trae una pestaña fiable, sólo se puede asociar cuando
-    // existe exactamente un turno pendiente en todo el navegador. Esto cubre
-    // webRequest/CDP que alternan entre un webContentsId real y -1 sin atribuir
-    // jamás una respuesta a una conversación elegida por aproximación.
-    const candidatos = [...this.awaiting.entries()]
-      .filter(([, entry]) => now - entry.at <= VENTANA_RESPUESTA_MS)
-      .map(([id, entry]) => ({ id, entry }));
-    if (candidatos.length === 1) return candidatos[0];
-    return null;
+    const sinPestana = this.awaiting.get(-1);
+    if (!sinPestana || now - sinPestana.at > VENTANA_RESPUESTA_MS) return null;
+    // Sólo se enlaza si es el turno más reciente: si hay otro más nuevo en otra
+    // pestaña, esta respuesta no le pertenece al mensaje sin pestaña.
+    let ultimo = null;
+    for (const [id, entry] of this.awaiting) {
+      if (!ultimo || entry.at > ultimo.entry.at) ultimo = { id, entry };
+    }
+    return ultimo && ultimo.id === -1 ? ultimo : null;
   }
 
   /** Identificador canónico de un mensaje, aunque haya llegado con un alias. */
@@ -549,18 +548,10 @@ export class Engine {
   }
 
   currentSendId(webContentsId, withinMs = VENTANA_RESPUESTA_MS) {
-    const now = Date.now();
-    const own = this.awaiting.get(webContentsId);
-    if (own) return now - own.at <= withinMs ? own.messageId || null : null;
-
-    // webRequest puede informar webContentsId=-1 (o no informar la pestaña)
-    // aunque el envío haya quedado asociado a una pestaña real, y viceversa.
-    // Reutilizamos la misma regla conservadora del motor: sólo se admite el
-    // turno sin pestaña cuando es el único más reciente; nunca se adivina entre
-    // dos conversaciones pendientes.
-    const pending = this.#pendingTurn(webContentsId, now);
-    if (!pending || now - pending.entry.at > withinMs) return null;
-    return pending.entry.messageId || null;
+    const awaiting = this.awaiting.get(webContentsId);
+    if (!awaiting) return null;
+    if (Date.now() - awaiting.at > withinMs) return null;
+    return awaiting.messageId || null;
   }
 
   /**
