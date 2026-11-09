@@ -48,6 +48,20 @@ function readConfigSync(host) {
   return null;
 }
 
+/**
+ * La lectura de EVO MEMORY no depende de la mediación.
+ *
+ * Con la mediación global apagada, el bundle sigue siendo necesario en
+ * ChatGPT para observar el DOM y enviar conversation-snapshot. El propio
+ * motor mantiene state.enabled=false, por lo que no modifica los mensajes.
+ */
+function shouldInject(config, host) {
+  if (!config || config.profiled === false) return false;
+  const isChatGpt = host === 'chatgpt.com' || host === 'chat.openai.com';
+  const memoryEnabled = config.settings?.memory?.enabled !== false;
+  return config.enabled !== false || (isChatGpt && memoryEnabled);
+}
+
 /** Inyecta la capa en el mundo principal de la página. */
 function inject(config) {
   const source = readInjectSource();
@@ -74,7 +88,7 @@ function boot() {
   const host = location.hostname;
   const config = readConfigSync(host);
   if (config) {
-    if (config.enabled !== false && config.profiled !== false) inject(config);
+    if (shouldInject(config, host)) inject(config);
     return;
   }
 
@@ -83,7 +97,7 @@ function boot() {
   ipcRenderer
     .invoke('nexo:config', { host, href: location.href })
     .then((asyncConfig) => {
-      if (asyncConfig && asyncConfig.enabled !== false && asyncConfig.profiled !== false) inject(asyncConfig);
+      if (shouldInject(asyncConfig, host)) inject(asyncConfig);
     })
     .catch((error) => console.warn('[nexo] sin configuración:', error.message));
 }
