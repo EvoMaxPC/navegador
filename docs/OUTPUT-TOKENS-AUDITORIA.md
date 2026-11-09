@@ -91,3 +91,34 @@ El digest corresponde al contenedor del artefacto, no se presenta como hash del
 ZIP interno. La descarga de logs desde el host externo de Actions está bloqueada
 en este entorno; los resultados de cada paso y los metadatos del artefacto se
 confirmaron mediante la API de GitHub. No se probó el ejecutable localmente.
+
+
+## 8. Corrección adicional 0.1.15: fin de respuesta ≠ cierre HTTP
+
+Se reprodujo otro bloqueo del conteo en 0.1.14 manteniendo abierto el transporte
+tras enviar una grabación completa. Aunque el cliente había recibido el texto y
+la señal final, `onEnd` sólo se emitía desde `TransformStream.flush` (EOF HTTP).
+Los tres casos nuevos fallaron antes del cambio: SSE quedaba en **0 en vez de 12**
+tokens; NDJSON en **0 en vez de 18**, hasta cerrar la conexión.
+
+`src/core/streamFilter.js` ahora reconoce el fin lógico ChatGPT:
+
+- SSE: `message_stream_complete` o `[DONE]`/`DONE`.
+- NDJSON: `type: "end"`.
+
+Libera primero el texto retenido, entrega la señal final al cliente y notifica
+la captura por el circuito existente a principal/BPE/UI. No cierra la conexión
+por la fuerza, no captura el prompt como salida y no cambia el comportamiento de
+otros proveedores. **No usa el cierre de un mensaje individual** como fin de toda
+la respuesta: los mensajes ocultos y las herramientas pueden terminar antes.
+El finalizador idempotente evita volver a contar en EOF, aborto posterior o CDP.
+Si no hay señal lógica, se conservan el cierre normal y el parcial por aborto.
+
+Las tres pruebas adicionales ejecutan inyección, preload, handlers, BPE y
+actualización de shell con las grabaciones anteriores; comprueban texto y señal
+entregados, tokens y UI **con el transporte aún abierto**, y deduplicación tras
+EOF y CDP tardío. No son conversaciones nuevas en vivo: HTTP/Electron/DOM siguen
+simulados. `npm run verify`: **483 pruebas, 482 aprobadas, 1 omitida, 0 fallos**;
+bundle **40.1 kB / 14.6 kB gzip**. Se mantiene pendiente el ensayo real en Windows
+descrito en la sección 6; no se puede prometer cobertura absoluta de un protocolo
+externo sin capturar la sesión que falla.

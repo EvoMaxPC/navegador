@@ -74,7 +74,7 @@ async function openTab() {
 
 // Capa de producción + preload real + IPC real del principal, sin copiar su
 // extracción/tokenización. Sólo se sustituye el transporte externo por replay.
-function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null } = {}) {
+function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null } = {}) {
   const listeners = [];
   const bytes = new TextEncoder().encode(body);
   let offset = 0;
@@ -85,8 +85,9 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     fetch: async () => {
       if (beforeResponse) await beforeResponse();
       return new Response(new ReadableStream({
-      pull(controller) {
+      async pull(controller) {
         if (offset < bytes.length) { controller.enqueue(bytes.slice(offset, offset += chunkSize)); return; }
+        if (holdOpen) await holdOpen;
         if (abort) controller.error(new DOMException('Detenido por el usuario', 'AbortError'));
         else controller.close();
       },
@@ -310,3 +311,50 @@ test('una extensión puede reducir el BPE: ajustar el total exacto, no sólo sum
   assert.equal(after.inputTokens, before.inputTokens);
   assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'));
 });
+
+for (const [name, body, mime, expected] of [
+  ['SSE message_stream_complete', fixture('normal-reply.sse').split('data: {"type":"user_signal_metadata"')[0], 'text/event-stream', normal],
+  ['SSE DONE', fixture('normal-reply.sse').replace(/data: \{"type":"message_stream_complete"[^\n]*\n\n/, ''), 'text/event-stream', normal],
+  ['NDJSON end', fixture('logged-out-reply.ndjson'), 'application/x-ndjson', anonymous],
+]) {
+  test(`${name}: contabiliza la respuesta y actualiza la UI sin esperar el cierre HTTP`, async () => {
+    const view = await openTab();
+    let release;
+    const holdOpen = new Promise((resolve) => { release = resolve; });
+    const before = stats();
+    const page = pageFor(view, body, { mime, holdOpen });
+    const response = await page.fetch('/backend-api/f/conversation', { method: 'POST', body: JSON.stringify({
+      action: 'next', model: 'gpt-6', messages: [{ author: { role: 'user' }, content: { parts: ['Test'] } }],
+    }) });
+    let closed = false, wire = '';
+    const reading = (async () => {
+      const decoder = new TextDecoder();
+      for await (const chunk of response.body) wire += decoder.decode(chunk, { stream: true });
+      wire += decoder.decode();
+      closed = true;
+    })();
+    try {
+      await pause(100);
+      assert.equal(closed, false, 'la conexión sigue abierta deliberadamente');
+      if (mime.includes('ndjson')) assert.equal(wire, body, 'el cliente recibe todos los bytes antes de EOF');
+      else {
+        const visible = records(body).find((row) => row.v?.message?.author?.role === 'assistant' &&
+          !row.v.message.metadata?.is_message_fragment && row.v.message.content?.content_type === 'text');
+        assert.equal(visibleChannelText(wire, visible.c), expected, 'el cliente recibe toda la respuesta antes de EOF');
+        if (name === 'SSE DONE') assert.match(wire, /data: \[DONE\]/);
+      }
+      assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(expected, 'gpt-6'));
+      assert.equal(stats().responses - before.responses, 1);
+      assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+    } finally {
+      release();
+      await reading;
+      await pause(50);
+    }
+    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(expected, 'gpt-6'), 'EOF no duplica tokens');
+    assert.equal(stats().responses - before.responses, 1, 'EOF no duplica respuestas');
+    await replayCdp(view, body, mime);
+    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(expected, 'gpt-6'), 'CDP tardío no duplica tokens');
+    assert.equal(stats().responses - before.responses, 1, 'CDP tardío no duplica respuestas');
+  });
+}

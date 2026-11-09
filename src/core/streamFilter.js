@@ -65,6 +65,8 @@ export function createStreamFilter(opts = {}) {
   let buffered = '';
   let format = opts.format || 'sse';
   let ended = false;
+  const chatgpt = opts.adapter === 'chatgpt' || opts.provider === 'chatgpt';
+  let protocolEnded = false;
   const pendingChunks = [];
   let plainText = '';
   let lineText = '';
@@ -77,6 +79,7 @@ export function createStreamFilter(opts = {}) {
       if (!json) continue;
       const plan = adapter.read(json);
       lineText += (plan.segments || []).map((segment) => segment.newText).join('');
+      if (chatgpt && json.type === 'end') protocolEnded = true;
     }
   };
 
@@ -167,8 +170,13 @@ export function createStreamFilter(opts = {}) {
 
   /** Procesa un evento ya parseado y devuelve lo que hay que escribir en el cable. */
   const handleEvent = (evt) => {
-    // `[DONE]` se retrasa: primero hay que devolver el texto retenido.
+    // ChatGPT recibe el fin lógico sin esperar EOF; primero liberar lo retenido.
+    // Los otros proveedores conservan su cierre diferido.
     if (evt.data === '[DONE]' || evt.data === 'DONE') {
+      if (chatgpt) {
+        protocolEnded = true;
+        return flushPending() + passthroughSSE(evt);
+      }
       delayed.push(evt);
       return '';
     }
@@ -180,13 +188,16 @@ export function createStreamFilter(opts = {}) {
     if (!json) return passthroughSSE(evt);
 
     const plan = adapter.read(json);
+    // Sólo el cierre de la conversación: un mensaje oculto o una herramienta
+    // puede finalizar antes de que llegue la respuesta visible.
+    if (chatgpt && json.type === 'message_stream_complete') protocolEnded = true;
     const segments = plan.segments || [];
 
     if (!segments.length) {
       // Evento de control. Si cierra un bloque o el mensaje, el texto retenido
       // tiene que salir antes que él.
       const body = passthroughSSE(evt);
-      return plan.terminal ? flushPending() + body : body;
+      return plan.terminal || protocolEnded ? flushPending() + body : body;
     }
 
     const delta = segments.map((segment) => segment.newText).join('');
@@ -235,10 +246,15 @@ export function createStreamFilter(opts = {}) {
         if (format !== 'sse') for (const raw of pendingChunks) controller.enqueue(raw);
         pendingChunks.length = 0;
         if (format === 'text') { plainText += buffered; buffered = ''; return; }
-        if (format === 'ndjson') { consumeLines(); return; }
+        if (format === 'ndjson') {
+          consumeLines();
+          if (protocolEnded) finishCapture();
+          return;
+        }
       } else if (format === 'ndjson') {
         controller.enqueue(chunk);
         consumeLines();
+        if (protocolEnded) finishCapture();
         return;
       } else if (format === 'text') {
         controller.enqueue(chunk);
@@ -253,6 +269,7 @@ export function createStreamFilter(opts = {}) {
       let out = '';
       for (const evt of events) out += safeHandle(evt);
       if (out) controller.enqueue(encoder.encode(out));
+      if (protocolEnded) finishCapture();
     },
 
     flush(controller) {
