@@ -224,7 +224,7 @@ test('escribir, enviar y recibir respuesta cuenta 1 mensaje, 1 respuesta y 1 tur
   const sse = [
     `data: ${JSON.stringify({ message: { id: 'r-1', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['¡Hola! '] } } })}`,
     `data: ${JSON.stringify({ message: { id: 'r-1', author: { role: 'assistant' }, content: { content_type: 'text', parts: [respuesta] } } })}`,
-    'data: [DONE]',
+    'data: [DONE]\n\n',
   ].join('\n\n');
 
   view.debugger.emitEvent('Network.requestWillBeSent', {
