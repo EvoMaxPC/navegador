@@ -15,10 +15,11 @@ import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
 import { CdpObserver } from './cdp.js';
 import { isAiHost } from '../core/cdp.js';
+import { detectSite, isMediable, locateUserText } from '../core/sites.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
-import { estimateTokens } from '../core/text.js';
+import { estimateTokens, fingerprint } from '../core/text.js';
 import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
@@ -608,9 +609,9 @@ function registerIpc() {
     // La capa avisa al instalarse. Es la señal que separa «el sitio no se está
     // mediando» de «la inyección no llegó a correr».
     if (clean.type === 'ready') {
-      // Con la capa viva, el stream lo captura ella y CDP no lo lee: así una
-      // respuesta no se cuenta dos veces.
-      engine.noteLayer(event.sender.id);
+      // Instalarse no es capturar. La capa se marca viva cuando de verdad cuenta
+      // un envío o una respuesta; si sólo se anuncia y después no captura nada,
+      // CDP tiene que leer el stream igual o la respuesta no la cuenta nadie.
       const host = hostOf(href) || String(clean.payload.host || 'la página');
       noteDiagnostic({
         code: 'layer-active',
@@ -893,6 +894,121 @@ function shortPath(url) {
  */
 const WATCHED_RESOURCE_TYPES = new Set(['xhr', 'fetch', 'other']);
 
+/**
+ * Cuerpo de una petición POST, como texto.
+ *
+ * Electron entrega `uploadData` con los bytes del cuerpo. Devuelve `''` cuando
+ * el cuerpo no viaja en memoria (un stream, un archivo): en ese caso este camino
+ * no puede leerlo y lo resuelven la capa o CDP.
+ */
+function uploadText(uploadData) {
+  if (!Array.isArray(uploadData) || !uploadData.length) return '';
+  const partes = [];
+  for (const trozo of uploadData) {
+    const bytes = trozo?.bytes;
+    if (!bytes) continue;
+    try {
+      partes.push(Buffer.from(bytes).toString('utf8'));
+    } catch {
+      /* un trozo ilegible no invalida el resto */
+    }
+  }
+  return partes.join('');
+}
+
+/**
+ * Mensaje del usuario, leído desde el proceso principal.
+ *
+ * Es el tercer camino (además de la capa y de CDP) y el más difícil de romper:
+ * no depende de que la página ejecute nada nuestro ni de que el depurador esté
+ * adjunto. Si el cuerpo trae el texto, el mensaje se cuenta; si no lo trae, no se
+ * inventa nada y queda el rastro en el registro para saber por qué.
+ */
+function noteUserMessageFromNetwork(details = {}) {
+  if (!engine) return false;
+  const url = String(details.url || '');
+  const host = hostOf(url);
+  if (!isAiHost(host)) return false;
+  const method = String(details.method || 'GET').toUpperCase();
+  if (method !== 'POST') return false;
+  const site = detectSite(host);
+  if (!isMediable(site, url, method)) return false;
+  if (!engine.isEnabledFor(host)) return false;
+
+  const webContentsId = Number(details.webContentsId);
+  const tabId = Number.isFinite(webContentsId) ? webContentsId : -1;
+  const cuerpo = uploadText(details.uploadData);
+  let json = null;
+  if (cuerpo) {
+    try {
+      json = JSON.parse(cuerpo);
+    } catch {
+      json = null;
+    }
+  }
+
+  // Regenerar o continuar no es un mensaje nuevo del usuario.
+  if (typeof json?.action === 'string' && json.action && json.action !== 'next') return false;
+
+  const located = json ? locateUserText(json, site) : null;
+  const text = located && typeof located.value === 'string' ? located.value.trim() : '';
+
+  if (!text) {
+    // Petición de conversación sin texto legible: el mensaje se cuenta igual
+    // (sin caracteres ni tokens inventados) y queda dicho en el registro.
+    const entry = {
+      kind: 'system',
+      code: 'chat-request',
+      severity: 'info',
+      title: `Petición de conversación en ${host}`,
+      detail: cuerpo
+        ? 'El cuerpo se leyó pero no se reconoció el mensaje del usuario.'
+        : 'El cuerpo de la petición no viajó en memoria: no se pudo leer el mensaje.',
+      meta: { host, site: site.id, url: shortPath(url), method },
+      ts: Date.now(),
+    };
+    if (store) store.pushLog(entry);
+    broadcast('nexo:event', { type: 'intervention', payload: entry });
+  }
+
+  const counted = engine.onUserMessage(tabId, {
+    messageId: `net-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    source: 'network',
+    site: site.id,
+    host,
+    url,
+    chars: text.length,
+    tokens: text ? estimateTokens(text) : 0,
+    promptHash: text ? fingerprint(text) : '',
+    textFound: Boolean(text),
+  });
+  if (counted?.duplicate) return true;
+
+  const entry = {
+    kind: 'sending',
+    code: 'outgoing-network',
+    severity: 'info',
+    title: `Mensaje enviado en ${host}`,
+    detail: text
+      ? 'Envío leído del cuerpo de la petición (proceso principal).'
+      : 'Envío contado: la petición salió, pero su texto no se pudo leer.',
+    meta: {
+      host,
+      site: site.id,
+      url: shortPath(url),
+      source: 'network',
+      chars: text.length,
+      tokens: text ? estimateTokens(text) : 0,
+      conversationId: null,
+    },
+    ts: Date.now(),
+  };
+  if (store) store.pushLog(entry);
+  broadcast('nexo:event', { type: 'intervention', payload: entry });
+  broadcast('nexo:stats-changed', engine.stats());
+  return true;
+}
+
 function watchProviderNetwork(s) {
   const seen = new Map();
   const once = (key) => {
@@ -902,6 +1018,19 @@ function watchProviderNetwork(s) {
     if (seen.size > 200) seen.delete(seen.keys().next().value);
     return true;
   };
+
+  // El cuerpo de la petición de conversación trae el mensaje del usuario. Se
+  // lee acá, en el proceso principal, antes de que salga: es el camino que no
+  // depende de la capa de la página ni del depurador.
+  s.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details = {}, callback) => {
+    try {
+      noteUserMessageFromNetwork(details);
+    } catch (error) {
+      console.log('[red] al leer el envío:', error?.message || error);
+    }
+    // Sin `cancel` ni `redirect`: la petición sigue tal cual. Esto sólo mira.
+    callback({});
+  });
 
   s.webRequest.onCompleted({ urls: ['*://*/*'] }, (details = {}) => {
     const url = String(details.url || '');

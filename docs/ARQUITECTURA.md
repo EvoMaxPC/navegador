@@ -192,27 +192,34 @@ Ocho métricas independientes, cada una con su hecho, expuestas por
 
 ### De dónde sale cada hecho
 
-La entrada (mensaje del usuario) se reconoce por **tres caminos independientes**,
+La entrada (mensaje del usuario) se reconoce por **cuatro caminos independientes**,
 y basta con uno:
 
-1. **El gesto de enviar** en la página: clic en el botón de enviar o Enter en el
+1. **El vigilante de red del proceso principal** (`webRequest.onBeforeRequest`):
+   lee el cuerpo que está por salir, sin ejecutar nada en la página ni depender del
+   depurador. Es el camino más difícil de romper y el primero que se prueba.
+2. **El gesto de enviar** en la página: clic en el botón de enviar o Enter en el
    cuadro, con texto escrito. No depende de cómo venga el cuerpo de la petición.
-2. **La petición de la capa**: el cuerpo JSON que sale hacia el sitio, leído
+3. **La petición de la capa**: el cuerpo JSON que sale hacia el sitio, leído
    dentro de la página.
-3. **La petición observada por CDP**: el mismo cuerpo, leído desde el proceso
-   principal con `Network.requestWillBeSent`. Es el camino que sigue funcionando
-   si la capa no se instaló o el sitio la bloqueó.
+4. **La petición observada por CDP**: el mismo cuerpo, leído con
+   `Network.requestWillBeSent`.
 
 Un envío tiene un `messageId` y se cuenta **una sola vez**: el gesto y la
-petición se enlazan por ese identificador, y si los dos caminos lo anuncian con
+petición se enlazan por ese identificador, y si los caminos lo anuncian con
 identificadores distintos, el motor los reconoce por la huella del texto
 (`fingerprint` de la misma función que usa el resto del motor) y por la cercanía
-en el tiempo. Dos mensajes iguales seguidos desde la misma fuente son dos
+en el tiempo. El identificador del mensaje que se contó primero queda como alias
+de los demás, así la respuesta cierra **ese** turno aunque llegue con otro
+identificador. Dos mensajes iguales seguidos desde la misma fuente son dos
 mensajes.
 
 La salida (respuesta) se captura por:
 
 - el **stream SSE** que envuelve la capa de la página;
+- el mismo **SSE leído por CDP** cuando la capa no está capturando de verdad (que
+  se anuncie no alcanza: si corre y no ve las peticiones del sitio, la respuesta
+  no la contaría nadie);
 - **CDP**, con los frames de WebSocket, los cuerpos JSON de una petición propia
   del sitio y —cuando la capa no está viva en esa pestaña— el cuerpo completo del
   SSE, que el depurador entrega al terminar.

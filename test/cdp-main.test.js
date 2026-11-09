@@ -171,10 +171,24 @@ test('un bucle observado se registra como observación, no como corte', async ()
 
 test('con la capa activa, los SSE no pasan por CDP: no se pide su cuerpo', async () => {
   const view = await abrirPestana('https://claude.ai/chat/cdp-6');
-  // La capa de la página avisa que está viva: el stream lo captura ella.
+  // La capa no sólo se anuncia: cuenta un envío. Eso es lo que la da por viva y
+  // deja el stream en sus manos (anunciarse no alcanza: una capa que corre y no
+  // ve las peticiones del sitio no puede quedarse con la respuesta).
   journal.ipcListeners.get('nexo:event')(
     { sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://claude.ai/chat/cdp-6' } },
-    { type: 'ready', payload: { site: 'claude', host: 'claude.ai', version: '0.1.2' } },
+    {
+      type: 'outgoing',
+      payload: {
+        messageId: 'm-capa-6',
+        source: 'request',
+        host: 'claude.ai',
+        site: 'claude',
+        chars: 12,
+        tokens: 4,
+        promptHash: 'h-capa-6',
+        textFound: true,
+      },
+    },
   );
   await settle(10);
 

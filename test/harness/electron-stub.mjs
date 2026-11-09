@@ -27,7 +27,7 @@ export const journal = {
   switches: [],
   userAgents: [],
   /** Manos de `webRequest` por partición: el navegador sólo escucha, no modifica. */
-  webRequest: { completed: new Map(), errors: new Map() },
+  webRequest: { completed: new Map(), errors: new Map(), before: new Map() },
   quit: false,
   userData: mkdtempSync(join(tmpdir(), 'nexo-audit-')),
 };
@@ -183,6 +183,9 @@ class FakeSession extends EventEmitter {
       },
       onErrorOccurred: (filter, listener) => {
         journal.webRequest.errors.set(this.partition, { filter, listener });
+      },
+      onBeforeRequest: (filter, listener) => {
+        journal.webRequest.before.set(this.partition, { filter, listener });
       },
     };
   }

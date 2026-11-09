@@ -412,6 +412,9 @@ export class CdpObserver {
         promptHash: fingerprint(text),
         textFound: true,
       });
+      // Si el envío ya estaba contado (la red o la capa lo vieron antes), la
+      // petición guarda el identificador del mensaje que manda en el turno.
+      if (counted?.messageId) entry.messageId = counted.messageId;
       this.onEvent(state.id, {
         type: 'send',
         duplicate: Boolean(counted?.duplicate),

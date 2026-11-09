@@ -325,7 +325,15 @@ async function planRequest(input, init) {
   if (!located || !located.value) return { chat: true, send: true, reason: 'sin-texto' };
 
   const prompt = located.value;
-  const report = await bridge.request('prepare', { prompt, url, site: site.id });
+  // El motor puede no contestar (arranque, IPC lento, error interno). Eso **no**
+  // puede costar la captura: se sigue sin mediación, pero contando el mensaje y
+  // envolviendo la respuesta.
+  let report = null;
+  try {
+    report = await bridge.request('prepare', { prompt, url, site: site.id });
+  } catch (error) {
+    bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
+  }
   const base = {
     chat: true,
     send: true,

@@ -86,6 +86,13 @@ export class Engine {
      * la capa, petición observada por CDP) cuando el identificador no coincide.
      */
     this.lastSend = new Map();
+    /**
+     * Identificadores alternativos del mismo envío: `${pestaña}|${id}` → id del
+     * mensaje que lo representa. La red, la capa y CDP pueden anunciar el mismo
+     * envío con identificadores distintos; con el alias, la respuesta encuentra
+     * su turno sin cerrar el de al lado.
+     */
+    this.messageAliases = new Map();
     /** Última señal de vida de la capa de la página, por pestaña. */
     this.layerSeen = new Map();
     /**
@@ -206,18 +213,24 @@ export class Engine {
       const mismaHuella = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
       if (mismaHuella && previo.source !== source) {
         this.seenMessages.set(key, now);
-        return { ok: true, duplicate: true, merged: true };
+        // El envío ya está contado con otro identificador: se registra el alias
+        // para que su respuesta cierre el turno correcto.
+        if (previo.messageId) this.messageAliases.set(key, previo.messageId);
+        return { ok: true, duplicate: true, merged: true, messageId: previo.messageId || messageId };
       }
     }
 
     this.seenMessages.set(key, now);
     this.#prune(this.seenMessages, now);
-    // Ojo: acá NO se marca la capa como viva. Este aviso también llega desde
-    // CDP, y creerlo capa activa dejaría el stream sin nadie que lo lea.
+    // La capa se marca viva sólo si el aviso viene de la página. Los avisos de
+    // CDP o del vigilante de red no dicen nada de la capa: creerlos capa activa
+    // dejaría el stream sin nadie que lo lea.
+    if (source === 'composer' || source === 'request') this.noteLayer(webContentsId);
     this.lastSend.set(webContentsId, {
       at: now,
       hash,
       source,
+      messageId,
       chars: Math.max(0, Number(payload.chars) || 0),
     });
 
@@ -270,10 +283,15 @@ export class Engine {
     this.counters.outputTokens += tokens;
     if (payload.stopped) this.counters.loopsCut += 1;
 
-    const awaiting = this.awaiting.get(webContentsId);
-    if (awaiting && (!awaiting.messageId || !messageId || awaiting.messageId === messageId)) {
+    const pendiente = this.#pendingTurn(webContentsId, now);
+    const awaitId = this.resolveMessageId(pendiente?.id ?? webContentsId, messageId);
+    if (
+      pendiente &&
+      now - pendiente.entry.at <= VENTANA_RESPUESTA_MS &&
+      (!pendiente.entry.messageId || !awaitId || pendiente.entry.messageId === awaitId)
+    ) {
       this.counters.turns += 1;
-      this.awaiting.delete(webContentsId);
+      this.awaiting.delete(pendiente.id);
     }
 
     return { ok: true, duplicate: false };
@@ -312,7 +330,8 @@ export class Engine {
     // nueva: es la misma, por otro canal o en otro trozo. Se acumula el texto
     // (sin repetir lo ya visto) y se corrige el conteo de tokens.
     const ultima = vistos[vistos.length - 1];
-    if (!this.awaiting.has(webContentsId) && ultima && !ultima.text.includes(text)) {
+    const pendiente = this.#pendingTurn(webContentsId, now);
+    if (!pendiente && ultima && !ultima.text.includes(text)) {
       const junto = `${ultima.text}${text}`;
       const tokens = estimateTokens(junto);
       this.counters.outputTokens += Math.max(0, tokens - ultima.tokens);
@@ -420,6 +439,35 @@ export class Engine {
    * ventana, no se devuelve nada: un mensaje viejo sin respuesta no se cierra con
    * una respuesta ajena.
    */
+  /**
+   * Turno esperando respuesta para esta pestaña.
+   *
+   * Cuando el navegador no informa la pestaña (una petición salida de un worker
+   * del sitio llega con `webContentsId` desconocido), el mensaje se anota en la
+   * pestaña `-1`. Si la respuesta aparece en una pestaña real y **no hay otro**
+   * turno esperando, ese mensaje es el suyo: se enlaza en vez de dejar el turno
+   * abierto para siempre. Con más de un turno pendiente no se adivina.
+   */
+  #pendingTurn(webContentsId, now) {
+    const propio = this.awaiting.get(webContentsId);
+    if (propio) return { id: webContentsId, entry: propio };
+    const sinPestana = this.awaiting.get(-1);
+    if (!sinPestana || now - sinPestana.at > VENTANA_RESPUESTA_MS) return null;
+    // Sólo se enlaza si es el turno más reciente: si hay otro más nuevo en otra
+    // pestaña, esta respuesta no le pertenece al mensaje sin pestaña.
+    let ultimo = null;
+    for (const [id, entry] of this.awaiting) {
+      if (!ultimo || entry.at > ultimo.entry.at) ultimo = { id, entry };
+    }
+    return ultimo && ultimo.id === -1 ? ultimo : null;
+  }
+
+  /** Identificador canónico de un mensaje, aunque haya llegado con un alias. */
+  resolveMessageId(webContentsId, messageId) {
+    if (!messageId) return null;
+    return this.messageAliases.get(`${webContentsId}|${messageId}`) || String(messageId);
+  }
+
   currentSendId(webContentsId, withinMs = VENTANA_RESPUESTA_MS) {
     const awaiting = this.awaiting.get(webContentsId);
     if (!awaiting) return null;
@@ -491,15 +539,17 @@ export class Engine {
     // El turno se cierra con **su** mensaje. Si la captura trae identificador, se
     // exige que coincida; si no lo trae (un socket), se acepta el pendiente de la
     // pestaña sólo dentro de la ventana de respuesta.
-    const awaitId = capture.messageId ? String(capture.messageId) : null;
-    const awaiting = this.awaiting.get(webContentsId);
+    const pendiente = this.#pendingTurn(webContentsId, now);
+    const awaitId = capture.messageId
+      ? this.resolveMessageId(pendiente?.id ?? webContentsId, capture.messageId)
+      : null;
     let paired = false;
-    if (awaiting) {
-      const vigente = now - awaiting.at <= VENTANA_RESPUESTA_MS;
-      const coincide = awaitId ? awaiting.messageId === awaitId : true;
+    if (pendiente) {
+      const vigente = now - pendiente.entry.at <= VENTANA_RESPUESTA_MS;
+      const coincide = awaitId ? pendiente.entry.messageId === awaitId : true;
       if (vigente && coincide) {
         this.counters.turns += 1;
-        this.awaiting.delete(webContentsId);
+        this.awaiting.delete(pendiente.id);
         paired = true;
       }
     }
@@ -649,6 +699,9 @@ export class Engine {
     this.lastSend.delete(webContentsId);
     this.recentTexts.delete(webContentsId);
     this.layerSeen.delete(webContentsId);
+    for (const key of [...this.messageAliases.keys()]) {
+      if (key.startsWith(`${webContentsId}|`)) this.messageAliases.delete(key);
+    }
     for (const map of [this.seenMessages, this.seenResponses]) {
       for (const key of [...map.keys()]) if (key.startsWith(`${webContentsId}|`)) map.delete(key);
     }

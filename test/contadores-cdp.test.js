@@ -307,8 +307,25 @@ test('con la capa activa, CDP no vuelve a leer el mismo stream', async () => {
   const emitir = journal.ipcListeners.get('nexo:event');
   const sender = { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' };
 
-  // La capa avisa que está instalada.
-  emitir({ sender }, { type: 'ready', payload: { site: 'chatgpt', host: 'chatgpt.com', version: '0.1.2' } });
+  // La capa cuenta un envío: eso la deja viva y dueña del stream. Anunciarse
+  // (`ready`) no alcanza: una capa instalada que no ve las peticiones del sitio
+  // no puede quedarse con la respuesta o no la cuenta nadie.
+  emitir(
+    { sender },
+    {
+      type: 'outgoing',
+      payload: {
+        messageId: 'm-capa-stream',
+        source: 'request',
+        host: 'chatgpt.com',
+        site: 'chatgpt',
+        chars: 8,
+        tokens: 3,
+        promptHash: 'h-capa-stream',
+        textFound: true,
+      },
+    },
+  );
   await settle(10);
 
   const antes = await stats();
