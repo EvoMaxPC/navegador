@@ -71,8 +71,8 @@ export class CdpObserver {
     this.onEvent = opts.onEvent || (() => {});
     this.enabled = opts.enabled !== false;
     /**
-     * ¿Está permitido observar este sitio? Con la mediación apagada, no: ni se
-     * adjunta el depurador ni se lee tráfico.
+     * ¿Está permitido observar este sitio? La política puede autorizar
+     * observación pasiva para EVO MEMORY sin habilitar mediación.
      *
      * Se consulta dos veces por motivos distintos: al adjuntar (decisión de
      * privacidad, la del interruptor) y al leer cuerpos (por si el usuario
@@ -500,6 +500,7 @@ export class CdpObserver {
       if (counted?.messageId) entry.messageId = counted.messageId;
       this.onEvent(state.id, {
         type: 'send',
+        messageId: entry.messageId,
         duplicate: Boolean(counted?.duplicate),
         host: entry.host,
         site: site.id,
@@ -948,6 +949,7 @@ export class CdpObserver {
       this.onEvent(state.id, {
         type: 'capture',
         capture,
+        memory: result?.memory || null,
         duplicate: Boolean(result?.duplicate),
         paired: Boolean(result?.paired),
         messageId: result?.messageId || capture?.messageId || null,

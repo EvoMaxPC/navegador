@@ -9,6 +9,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { register } from 'node:module';
 import { test } from 'node:test';
 
@@ -315,6 +316,14 @@ test('ChatGPT sigue observado para EVO MEMORY aunque la mediación esté apagada
   assert.equal(config.enabled, false, 'la mediación sigue apagada');
   assert.equal(config.settings.memory.enabled, true, 'la memoria sigue habilitada');
 
+  const prompt = 'PROMPT PRIVADO de observación pasiva: no debe entrar al informe';
+  const postData = JSON.stringify({ action: 'next', messages: [{ author: { role: 'user' }, content: { parts: [prompt] } }] });
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-memory-passive', type: 'XHR', request: {
+      url: 'https://chatgpt.com/backend-api/conversation', method: 'POST', postData,
+    },
+  });
+  await settle();
   const respuesta = 'PRUEBA DE CAPTURA PASIVA NEXO: respuesta guardada en EVO MEMORY.';
   view.debugger.bodies.set('req-memory-passive', JSON.stringify({
     message: { author: { role: 'assistant' }, content: { parts: [respuesta] } },
@@ -328,6 +337,21 @@ test('ChatGPT sigue observado para EVO MEMORY aunque la mediación esté apagada
   const artifacts = await callIpc('nexo:memory:list', {});
   assert.ok(artifacts.some((item) => item.kind === 'artifact' && item.text.includes(respuesta)),
     'la respuesta real observada por CDP se guarda literalmente en EVO MEMORY');
+
+  const { diagnosticFile, diagnosticError } = await callIpc('nexo:cdp:stats', {});
+  assert.equal(diagnosticError, null);
+  const raw = await readFile(diagnosticFile, 'utf8');
+  assert.ok(!raw.includes(respuesta), 'el JSONL no contiene la respuesta');
+  assert.ok(!raw.includes(prompt), 'el JSONL no contiene el prompt');
+  const rows = raw.trim().split('\n').map(JSON.parse);
+  const saved = rows.findLast((row) => row.stage === 'response-delivered' && row.chars === respuesta.length);
+  assert.equal(saved.memory.saved, true, 'confirmación del recibo actual, no de buscar logs antiguos');
+  assert.equal(saved.memory.persisted, true);
+  assert.equal(saved.memory.chars, respuesta.length);
+  assert.ok(rows.some((row) => row.stage === 'request-detected' && row.chars === prompt.length));
+  assert.equal(view.debugger.commands.some(({ method }) => /^(Fetch\.|Network\.setExtraHTTPHeaders)/.test(method)), false,
+    'la observación no intercepta ni reescribe el envío');
+  assert.equal(JSON.parse(postData).messages[0].content.parts[0], prompt);
 
   await callIpc('nexo:settings:set', { sites: { chatgpt: { enabled: true } }, memory: { enabled: true } });
 });

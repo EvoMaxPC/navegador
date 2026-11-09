@@ -79,7 +79,8 @@ function rememberCapturedGptAnswer(memory, store, capture = {}) {
       ts: Date.now(),
     });
   }
-  return result;
+  return { ...result, receipt: { saved: accepted && persisted,
+    persisted: memory.store.storage ? persisted : null, chars: text.length, action: result.action } };
 }
 
 export class Engine {
@@ -723,7 +724,12 @@ export class Engine {
    * actualiza el historial de la conversación.
    */
   onStreamEnd(webContentsId, payload) {
-    rememberCapturedGptAnswer(this.memory, this.store, payload);
+    const captured = rememberCapturedGptAnswer(this.memory, this.store, payload);
+    const result = this.#onStreamEnd(webContentsId, payload);
+    return captured ? { ...result, memory: captured.receipt } : result;
+  }
+
+  #onStreamEnd(webContentsId, payload) {
     this.onTurnResult(webContentsId, { ...payload, finished: payload?.finished ?? true });
     // La capa cerró un stream: desde acá, esa respuesta ya la contó ella.
     this.layerEnded.set(webContentsId, Date.now());
@@ -880,13 +886,18 @@ export class Engine {
    *   source?: string, conversationId?: string, seq?: number, frames?: number}} capture
    */
   onCdpCapture(webContentsId, capture = {}) {
+    const captured = rememberCapturedGptAnswer(this.memory, this.store, capture);
+    const result = this.#onCdpCapture(webContentsId, capture);
+    return captured ? { ...result, memory: captured.receipt } : result;
+  }
+
+  #onCdpCapture(webContentsId, capture = {}) {
     const text = String(capture.text || '');
     if (!text.trim()) {
       this.onTurnResult(webContentsId, capture);
       return { ok: false, skipped: 'empty' };
     }
     const now = Date.now();
-    rememberCapturedGptAnswer(this.memory, this.store, capture);
 
     const host = capture.host || safeHost(capture.url) || 'desconocido';
     if (!this.isEnabledFor(host)) {

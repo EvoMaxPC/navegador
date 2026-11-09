@@ -24,6 +24,12 @@ Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar e
 parcial al detener la respuesta. Estimación directa en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
+**Diagnóstico de captura 0.1.21:** se genera `NEXO-CAPTURE-DIAGNOSTIC.jsonl` en
+Documentos. Registra detección de envíos, respuestas y confirmación de memoria,
+sin copiar conversaciones ni URLs/IDs crudos. ChatGPT permite observación pasiva
+con EVO MEMORY habilitada aunque la mediación esté apagada, sin reescribir envíos.
+[Formato, privacidad y pruebas](docs/DIAGNOSTICO-CAPTURA.md).
+
 **Lectura y memoria de ChatGPT 0.1.20:** al abrir una conversación, la capa lee los
 mensajes de usuario y asistente cargados en el DOM, sin depender de un fetch nuevo.
 Guarda una transcripción local y destila su contenido en EVO MEMORY; las revisiones
@@ -87,7 +93,7 @@ entregó. El modelo está simulado; la mediación es la de verdad — es el mism
 código que corre dentro del navegador.
 
 ```bash
-npm test                # 585 pruebas, con dependencias instaladas
+npm test                # 593 pruebas, con dependencias instaladas
 npm run bench           # rendimiento medido: tabla antes/después
 npm run verify          # pruebas + bundle + checklist manual
 npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
@@ -283,7 +289,7 @@ src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
 scripts/         verificación, icono, empaquetado para Windows y prueba de humo
-test/            585 pruebas con node:test (incluye un Electron falso para el arranque)
+test/            593 pruebas con node:test (incluye un Electron falso para el arranque)
 docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
 .github/         flujo que compila la aplicación de Windows
 ```
