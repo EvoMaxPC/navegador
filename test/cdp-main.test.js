@@ -169,7 +169,7 @@ test('un bucle observado se registra como observación, no como corte', async ()
   assert.equal(entrada.meta.observed, true);
 });
 
-test('con la capa activa, los SSE no pasan por CDP: no se pide su cuerpo', async () => {
+test('la capa activa no impide que CDP observe el SSE para cubrir respuestas no capturadas', async () => {
   const view = await abrirPestana('https://claude.ai/chat/cdp-6');
   // La capa no sólo se anuncia: cuenta un envío. Eso es lo que la da por viva y
   // deja el stream en sus manos (anunciarse no alcanza: una capa que corre y no
@@ -201,8 +201,10 @@ test('con la capa activa, los SSE no pasan por CDP: no se pide su cuerpo', async
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-cdp-6' });
   await settle();
   assert.ok(
-    !view.debugger.commands.some((command) => command.params?.requestId === 'req-cdp-6'),
-    'no se pide el cuerpo de un stream que la página ya captura',
+    view.debugger.commands.some(
+      (command) => command.method === 'Network.getResponseBody' && command.params?.requestId === 'req-cdp-6',
+    ),
+    'CDP pide el cuerpo del SSE aunque la capa ya haya contado el envío',
   );
 });
 
