@@ -593,7 +593,8 @@ app.whenReady().then(async () => {
     const code = reportSmoke(smoke);
     if (smokeOut) {
       // `reportSmoke` ya escribió en consola; el archivo es la vía confiable.
-      await writeFile(smokeOut, renderSmoke(smoke), 'utf8').catch(() => {});
+      const informe = `${renderSmoke(smoke)}código previsto: ${code}\n`;
+      await writeFile(smokeOut, informe, 'utf8').catch(() => {});
     }
     app.exit(code);
     return;
