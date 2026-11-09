@@ -41,7 +41,8 @@ const encoder = new TextEncoder();
  *   language?: string,
  *   host?: string|null,
  *   onStop?: (info: object) => void,
- *   onEnd?: (info: object) => void
+ *   onEnd?: (info: object) => void,
+ *   onError?: (info: { stage: string, message: string }) => void
  * }} opts
  * @returns {TransformStream<Uint8Array, Uint8Array>}
  */
@@ -52,11 +53,17 @@ export function createStreamFilter(opts = {}) {
     language: opts.language || 'es',
   });
 
-  const adapter = createAdapter(opts.adapter || opts.provider || null, { deltaPaths: opts.deltaPaths || null });
+  // El adaptador puede entrar como objeto (pruebas, modos experimentales) o
+  // como nombre del catálogo de proveedores.
+  const adapter =
+    opts.adapter && typeof opts.adapter === 'object'
+      ? opts.adapter
+      : createAdapter(opts.adapter || opts.provider || null, { deltaPaths: opts.deltaPaths || null });
 
   const decoder = new TextDecoder();
   let buffered = '';
   let stoppedReported = false;
+  let failureReported = false;
   const delayed = [];
 
   const reportStop = () => {
@@ -157,6 +164,27 @@ export function createStreamFilter(opts = {}) {
     return body;
   };
 
+  /**
+   * Un fallo del adaptador no puede romper el stream del sitio.
+   *
+   * Un `throw` dentro de `transform()` cierra el cuerpo de la respuesta: la
+   * página recibe la petición de chat rota y el sitio muestra su propio error
+   * de red. Por eso, si el adaptador falla, el evento se reenvía **tal cual
+   * llegó** y el fallo se informa una sola vez. La mediación puede entonces
+   * quedarse sin efecto en ese evento, pero nunca romper la conversación.
+   */
+  const safeHandle = (evt) => {
+    try {
+      return handleEvent(evt);
+    } catch (error) {
+      if (!failureReported) {
+        failureReported = true;
+        opts.onError?.({ stage: 'event', message: String(error?.message || error) });
+      }
+      return passthroughSSE(evt);
+    }
+  };
+
   return new TransformStream({
     transform(chunk, controller) {
       buffered += decoder.decode(chunk, { stream: true });
@@ -165,7 +193,7 @@ export function createStreamFilter(opts = {}) {
       if (!events.length) return;
 
       let out = '';
-      for (const evt of events) out += handleEvent(evt);
+      for (const evt of events) out += safeHandle(evt);
       if (out) controller.enqueue(encoder.encode(out));
     },
 
@@ -177,14 +205,24 @@ export function createStreamFilter(opts = {}) {
       if (buffered.trim()) {
         const resto = buffered;
         buffered = '';
-        const { events } = parseSSE(`${resto}\n\n`);
-        const ultimo = events[0];
-        if (ultimo && safeJson(ultimo.data)) out += handleEvent(ultimo);
-        else out += resto;
+        try {
+          const { events } = parseSSE(`${resto}\n\n`);
+          const ultimo = events[0];
+          out += ultimo && safeJson(ultimo.data) ? safeHandle(ultimo) : resto;
+        } catch {
+          out += resto;
+        }
       }
 
       // 2) Cierre del centinela: entrega lo retenido antes de los cierres.
-      out += flushPending();
+      try {
+        out += flushPending();
+      } catch (error) {
+        if (!failureReported) {
+          failureReported = true;
+          opts.onError?.({ stage: 'flush', message: String(error?.message || error) });
+        }
+      }
 
       // 3) Ahora sí, los eventos que estaban esperando (`[DONE]`).
       for (const evt of delayed) out += passthroughSSE(evt);

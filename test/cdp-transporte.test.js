@@ -132,7 +132,7 @@ test('sync adjunta y suelta según la URL de la pestaña', () => {
 });
 
 test('un sitio que el usuario apagó no se observa', () => {
-  const observer = new CdpObserver({ isAllowed: (host) => host !== 'claude.ai' });
+  const observer = new CdpObserver({ contentAllowed: (host) => host !== 'claude.ai' });
   const claude = fakeTab(30, 'https://claude.ai/');
   assert.equal(observer.attach(claude), false);
   assert.equal(claude.debugger.attached, false);
@@ -395,4 +395,72 @@ test('soltar la pestaña entrega lo pendiente antes de desconectar', () => {
   assert.equal(engine.captures[0].capture.text, 'sin cerrar');
   assert.equal(engine.captures[0].capture.closedBy, 'release');
   assert.equal(tab.debugger.attached, false);
+});
+
+/* ------------------------------------------------------------------ */
+/* fallos de red                                                      */
+/* ------------------------------------------------------------------ */
+
+function fakeEngineConFallos() {
+  const engine = {
+    fallos: [],
+    onCdpCapture: () => ({ ok: true, duplicate: false }),
+    onCdpFailure(_tabId, failure) {
+      engine.fallos.push(failure);
+    },
+  };
+  return engine;
+}
+
+test('un 403 del proveedor se informa como fallo HTTP, una sola vez', () => {
+  const engine = fakeEngineConFallos();
+  const { observer } = makeObserver({ engine });
+  const tab = fakeTab(40, 'https://chatgpt.com/');
+  observer.attach(tab);
+
+  const response = {
+    url: 'https://chatgpt.com/backend-api/conversation',
+    status: 403,
+    mimeType: 'application/json',
+  };
+  tab.debugger.emitEvent('Network.responseReceived', { requestId: 'r1', type: 'Fetch', response });
+  tab.debugger.emitEvent('Network.responseReceived', { requestId: 'r1', type: 'Fetch', response });
+
+  assert.equal(engine.fallos.length, 1, 'el mismo fallo no se repite');
+  assert.equal(engine.fallos[0].kind, 'http');
+  assert.equal(engine.fallos[0].status, 403);
+  assert.equal(engine.fallos[0].host, 'chatgpt.com');
+  assert.equal(engine.fallos[0].site, 'chatgpt');
+  assert.equal(engine.fallos[0].resourceType, 'Fetch');
+  assert.equal(observer.status().failures, 1);
+});
+
+test('una carga abortada por el sitio no se informa; un fallo real sí', () => {
+  const engine = fakeEngineConFallos();
+  const { observer } = makeObserver({ engine });
+  const tab = fakeTab(41, 'https://claude.ai/');
+  observer.attach(tab);
+
+  tab.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'r2',
+    type: 'Fetch',
+    request: { url: 'https://claude.ai/api/organizations/abc/chat_conversations/xyz/completion' },
+  });
+  tab.debugger.emitEvent('Network.loadingFailed', { requestId: 'r2', canceled: true, errorText: 'net::ERR_ABORTED' });
+  assert.equal(engine.fallos.length, 0, 'un aborto normal no es un fallo');
+
+  tab.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'r3',
+    type: 'Fetch',
+    request: { url: 'https://claude.ai/api/organizations/abc/chat_conversations/xyz/completion' },
+  });
+  tab.debugger.emitEvent('Network.loadingFailed', {
+    requestId: 'r3',
+    errorText: 'net::ERR_BLOCKED_BY_CLIENT',
+    blockedReason: 'inspector',
+  });
+  assert.equal(engine.fallos.length, 1);
+  assert.equal(engine.fallos[0].kind, 'net');
+  assert.equal(engine.fallos[0].errorText, 'net::ERR_BLOCKED_BY_CLIENT');
+  assert.equal(engine.fallos[0].blockedReason, 'inspector');
 });

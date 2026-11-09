@@ -48,6 +48,29 @@ app.commandLine.appendSwitch(
 );
 
 mark('proceso');
+
+/**
+ * Chromium se presenta como «Electron» y con el nombre de la aplicación en el
+ * `User-Agent`. Varios proveedores usan ese token para separar clientes
+ * automatizados: la portada carga (viene de caché de CDN) pero las llamadas a la
+ * API devuelven 403, o el desafío anti-bot de la portada no se resuelve y la
+ * pestaña queda en blanco.
+ *
+ * Se deja un `User-Agent` de Chrome corriente. No se toca nada más del motor: el
+ * resto de la huella (pistas de cliente, WebGL) es la de Chromium.
+ */
+function normalizeUserAgent() {
+  const original = String(app.userAgentFallback || '');
+  if (!original) return '';
+  const clean = original
+    .replace(/\s(Electron|Nexo)\/[^\s]+/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (clean && clean !== original) app.userAgentFallback = clean;
+  return app.userAgentFallback;
+}
+
+const USER_AGENT = normalizeUserAgent();
 /** `--smoke`: arranca, revisa la interfaz y sale. Lo usa el flujo de Windows. */
 const isSmoke = process.argv.includes('--smoke') || process.env.NEXO_SMOKE === '1';
 /**
@@ -184,6 +207,30 @@ async function servirArchivo(request) {
     }
 }
 
+/**
+ * Deja una entrada de diagnóstico en el registro de actividad.
+ *
+ * Es el canal para lo que antes no se veía: páginas que no cargan, fallos de la
+ * capa inyectada y respuestas HTTP fallidas de un proveedor. Se deduplica por
+ * código y título en una ventana corta: una petición que se reintenta en bucle
+ * no debe llenar el registro.
+ */
+const diagnosticSeen = new Map();
+function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {} }) {
+  if (!store) return null;
+  const key = `${code}|${title}`;
+  const now = Date.now();
+  if (now - (diagnosticSeen.get(key) || 0) < 30_000) return null;
+  diagnosticSeen.set(key, now);
+  if (diagnosticSeen.size > 200) {
+    for (const [k, ts] of diagnosticSeen) if (now - ts > 120_000) diagnosticSeen.delete(k);
+  }
+  const entry = { kind: 'system', code, severity, title, detail, meta, ts: now };
+  store.pushLog(entry);
+  broadcast('nexo:event', { type: 'intervention', payload: entry });
+  return entry;
+}
+
 function broadcast(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
@@ -271,6 +318,18 @@ function createWindow() {
       applyZoom(contents);
     });
 
+    // Navegación que no llega: sin esto, una pestaña en blanco no dice nada.
+    // El código -3 es «cancelada» y es normal (redirecciones, enlaces abortados).
+    contents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isMainFrame || errorCode === -3) return;
+      noteDiagnostic({
+        code: 'load-failed',
+        title: `No se pudo cargar ${hostOf(validatedURL) || validatedURL || 'la página'}`,
+        detail: `${errorDescription || 'error de red'} (${errorCode}). URL: ${String(validatedURL || '').slice(0, 200)}`,
+        meta: { url: validatedURL || '', errorCode, errorDescription: errorDescription || '' },
+      });
+    });
+
     // CDP: observar los canales que el enganche de `fetch` no ve (frames de
     // WebSocket y respuestas JSON sin streaming). Se adjunta sólo a los sitios
     // con perfil conocido y se suelta si la pestaña navega a otro lado.
@@ -315,7 +374,15 @@ function registerIpc() {
   // de milisegundos y se paga una sola vez por documento.
   ipcMain.on('nexo:config-sync', (event, payload = {}) => {
     const host = typeof payload?.host === 'string' ? payload.host : '';
-    event.returnValue = engine ? engine.configFor(host) : null;
+    try {
+      event.returnValue = engine ? engine.configFor(host) : null;
+    } catch (error) {
+      // Un `sendSync` que se quede sin `returnValue` bloquea el renderer antes
+      // de que la página exista: la pestaña se queda en blanco. Nunca se sale
+      // de este manejador sin responder.
+      console.warn('[nexo] configuración síncrona:', error?.message || error);
+      event.returnValue = null;
+    }
   });
   ipcMain.handle('nexo:prepare', (event, payload) => engine.prepare(event.sender.id, payload));
   ipcMain.handle('nexo:stream-end', (event, payload) => engine.onStreamEnd(event.sender.id, payload));
@@ -393,7 +460,21 @@ function registerIpc() {
     if (event.sender?.getType?.() !== 'webview') return;
     const href = event.sender.getURL?.() || '';
     const clean = eventMessage(message, { href });
-    if (clean) broadcast('nexo:event', clean);
+    if (!clean) return;
+
+    // Un fallo de la capa inyectada tiene que verse. Antes se reenviaba a la
+    // interfaz, que sólo escucha `intervention`, así que se perdía: el usuario
+    // notaba el síntoma («no conecta») sin la causa.
+    if (clean.type === 'error') {
+      noteDiagnostic({
+        code: 'page-error',
+        severity: 'info',
+        title: `Fallo de la mediación en ${hostOf(href) || 'la página'}`,
+        detail: `${clean.payload.stage || 'capa'}: ${String(clean.payload.message || '').slice(0, 200)}`,
+        meta: { stage: clean.payload.stage || '', message: String(clean.payload.message || '').slice(0, 400) },
+      });
+    }
+    broadcast('nexo:event', clean);
   });
 
   ipcMain.handle('nexo:open-external', async (_event, url) => {
@@ -604,6 +685,10 @@ function applyZoom(contents) {
 function configureSession() {
   const s = session.fromPartition('persist:nexo');
 
+  // Mismo `User-Agent` limpio que el resto de la aplicación: si la sesión
+  // tuviera otro, las peticiones de las pestañas volverían a delatarse.
+  if (USER_AGENT) s.setUserAgent(USER_AGENT);
+
   // Sin corrector ortográfico: Chromium levanta un proceso aparte y descarga
   // diccionarios por idioma. En un navegador de chat el texto que se escribe
   // son mensajes cortos en un campo que ya declara `spellcheck="false"`.
@@ -701,9 +786,11 @@ app.whenReady().then(async () => {
     // Sin depurador en este arranque (prueba de humo, CI sin WebContents
     // completo) la observación queda apagada y nada más cambia.
     enabled: process.env.NEXO_CDP !== '0',
-    // Apagar un sitio en Ajustes apaga también su observación: no se mira el
-    // tráfico de un sitio que el usuario decidió dejar en paz.
-    isAllowed: (host) => engine.isEnabledFor(host),
+    // Apagar un sitio en Ajustes apaga también su observación: no se adjunta el
+    // depurador ni se lee el tráfico de un sitio que el usuario dejó en paz.
+    // Se vuelve a consultar al leer cuerpos, por si el interruptor cambia con la
+    // pestaña ya abierta.
+    contentAllowed: (host) => engine.isEnabledFor(host),
   });
   registerProtocol();
   registerIpc();

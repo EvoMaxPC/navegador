@@ -155,3 +155,48 @@ test('serializeSSE y parseSSE son inversos', () => {
   const [back] = parseSSE(serializeSSE(evt)).events;
   assert.equal(back.data, '{"a":1}');
 });
+
+/* ------------------------------------------------------------------ */
+/* tolerancia a fallos                                                 */
+/* ------------------------------------------------------------------ */
+
+test('si el adaptador falla, el evento se reenvía intacto y se informa una vez', async () => {
+  const payload = openAIStream('respuesta cualquiera que no debe perderse', { size: 11 });
+
+  const errores = [];
+  const ends = [];
+  const source = new Response(payload).body;
+  const filter = createStreamFilter({
+    // Adaptador de mentira que no sabe leer nada: simula la versión del sitio
+    // que la mediación todavía no entiende.
+    adapter: {
+      name: 'roto',
+      read() {
+        throw new Error('formato desconocido');
+      },
+      write() {},
+      pending() {
+        return null;
+      },
+    },
+    onError: (info) => errores.push(info),
+    onEnd: (info) => ends.push(info),
+  });
+
+  // Si el filtro dejara escapar la excepción, esta lectura rechazaría: es
+  // exactamente lo que la página vería como «petición rota».
+  const out = await new Response(source.pipeThrough(filter)).text();
+
+  assert.equal(errores.length, 1, 'se informa una sola vez, no en cada evento');
+  assert.equal(errores[0].stage, 'event');
+  assert.match(errores[0].message, /formato desconocido/);
+  assert.equal(ends.length, 1, 'el cierre del turno igual se avisa');
+
+  const { events } = parseSSE(out);
+  const enviados = events.map((evt) => evt.data).filter((data) => data !== '[DONE]');
+  const originales = parseSSE(payload)
+    .events.map((evt) => evt.data)
+    .filter((data) => data !== '[DONE]');
+  assert.deepEqual(enviados, originales, 'los eventos llegan tal cual, sin reescribir');
+  assert.equal(events.at(-1).data, '[DONE]', 'y el cierre sigue yendo último');
+});

@@ -163,6 +163,11 @@ function wrapResponse(response) {
       onStop: (info) => {
         bridge.event('stream-stop', { site: site.id, host: CONFIG.host, ...info });
       },
+      onError: (info) => {
+        // El adaptador no supo leer un evento. Se reenvió tal cual y la
+        // conversación siguió; queda anotado para no diagnosticar a ciegas.
+        bridge.event('error', { stage: `filtro:${info.stage}`, message: info.message });
+      },
       onEnd: (info) => {
         bridge.event('stream-end', {
           site: site.id,
@@ -181,7 +186,11 @@ function wrapResponse(response) {
   );
 
   const headers = new Headers(response.headers);
+  // El cuerpo ya viene descomprimido: si la cabecera sobrevive, el cliente
+  // intenta descomprimir otra vez y el stream falla. `content-length` deja de
+  // valer porque el texto filtrado no mide lo mismo.
   headers.delete('content-length');
+  headers.delete('content-encoding');
 
   const wrapped = new Response(filtered, {
     status: response.status,

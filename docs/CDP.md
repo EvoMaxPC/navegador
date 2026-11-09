@@ -150,3 +150,50 @@ recepción: sólo mira lo que ya pasó.
   `src/core/sites.js` (host, rutas, adaptador) antes de que CDP lo mire.
 - **El bucle observado no se puede deshacer**: queda como aviso en el libro y en
   el historial, para que la continuación o el próximo turno salgan mejor.
+
+---
+
+## 8. Fallos del proveedor y de la carga
+
+Un sitio que contesta «No se pudo conectar» o una pestaña que queda en blanco no
+dejaban rastro: la capa observaba sólo lo que salía bien. Ahora hay cuatro
+códigos en el registro de actividad, con el dato mínimo para explicar el
+síntoma —URL, código y tipo de recurso— y **sin leer contenido**:
+
+| Código | Origen | Qué dice |
+| --- | --- | --- |
+| `http-error` | `Network.responseReceived` | 4xx/5xx en un XHR/Fetch de un host con perfil: `meta.status`, `meta.resourceType`, `meta.url` recortada |
+| `net-failed` | `Network.loadingFailed` | La petición no llegó: `meta.errorText`, `meta.blockedReason` |
+| `load-failed` | `did-fail-load` de la pestaña | La navegación no llegó: `meta.errorCode`, `meta.errorDescription`, `meta.url` |
+| `page-error` | capa inyectada (`nexo:event` tipo `error`) | El adaptador o el enganche falló: `meta.stage`, `meta.message` |
+
+Reglas que los gobiernan:
+
+- **La mediación apagada no observa.** `contentAllowed(host)` decide al adjuntar
+  y al leer un cuerpo: un sitio que el usuario apagó en Ajustes no recibe
+  depurador.
+- **`canceled` no es un fallo.** Chromium informa `loadingFailed` con
+  `canceled: true` cuando el propio sitio aborta una petición; anotarlo sería
+  ruido. El código `-3` de `did-fail-load` («cancelada») se ignora por lo mismo.
+- **Deduplicación.** CDP recuerda `kind|status|url` durante 60 s y el registro
+  general agrupa por `code|title` durante 30 s: una petición que se reintenta en
+  bucle produce una entrada, no cien.
+- **Los SSE no se cuentan dos veces.** El stream de chat ya lo media la página;
+  acá sólo interesan las respuestas JSON y los fallos.
+- **Si la capa inyectada falla, el stream sigue.** El filtro reenvía el evento
+  tal cual llegó y avisa una sola vez (`page-error`): un `throw` dentro del
+  `TransformStream` cerraría el cuerpo y la página vería la petición rota.
+
+`NEXO_CDP=0` apaga toda la observación sin tocar la mediación.
+
+### Huella del cliente
+
+Chromium en Electron se presenta con `Electron/x` y el nombre de la aplicación
+en el `User-Agent`. Los proveedores con protección anti-bot (ChatGPT y Claude
+entre ellos) leen esa marca: la portada carga desde caché, pero las llamadas a
+la API devuelven 403 o el desafío de la portada no se resuelve y la pestaña queda
+en blanco. Al arrancar, `normalizeUserAgent()` quita esos dos tokens de
+`app.userAgentFallback` y `configureSession()` fija el mismo texto en
+`persist:nexo`, para que las pestañas no se delaten por su cuenta. El resto de la
+huella (pistas de cliente, WebGL, idioma) sigue siendo la de Chromium: no se
+falsifica nada más.

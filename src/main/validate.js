@@ -19,6 +19,10 @@ export const EVENT_TYPES = [
   'error',
   'ready',
   'stream-end',
+  // El corte de bucle lo anuncia la capa inyectada como `stream-stop` y tiene su
+  // propio canal (`nexo:stream-stop`); sin figurar acá, el aviso se descartaba
+  // en la validación y la interfaz nunca se enteraba del corte.
+  'stream-stop',
 ];
 
 const MAX_URL = 2048;

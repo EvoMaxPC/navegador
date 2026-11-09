@@ -47,7 +47,7 @@ export class CdpObserver {
    *   engine?: object,
    *   log?: (message: string) => void,
    *   enabled?: boolean,
-   *   isAllowed?: (host: string) => boolean
+   *   contentAllowed?: (host: string) => boolean
    * }} [opts]
    */
   constructor(opts = {}) {
@@ -55,10 +55,14 @@ export class CdpObserver {
     this.log = opts.log || (() => {});
     this.enabled = opts.enabled !== false;
     /**
-     * ¿El usuario quiere que este sitio se observe? Si apagó la mediación para
-     * un sitio, tampoco se mira su tráfico.
+     * ¿Está permitido observar este sitio? Con la mediación apagada, no: ni se
+     * adjunta el depurador ni se lee tráfico.
+     *
+     * Se consulta dos veces por motivos distintos: al adjuntar (decisión de
+     * privacidad, la del interruptor) y al leer cuerpos (por si el usuario
+     * cambia el interruptor con la pestaña ya abierta).
      */
-    this.isAllowed = opts.isAllowed || null;
+    this.contentAllowed = opts.contentAllowed || (() => true);
     /** @type {Map<number, object>} pestañas observadas */
     this.tabs = new Map();
     this.stats = {
@@ -70,6 +74,7 @@ export class CdpObserver {
       bodies: 0,
       captures: 0,
       duplicates: 0,
+      failures: 0,
       ignored: 0,
     };
   }
@@ -95,8 +100,10 @@ export class CdpObserver {
 
     const target = url || (typeof contents.getURL === 'function' ? contents.getURL() : '');
     if (!CdpObserver.wants(target)) return false;
-    const host = hostOf(target);
-    if (this.isAllowed && !this.isAllowed(host)) return false;
+    // El interruptor del sitio manda: si el usuario apagó la mediación ahí, no
+    // se adjunta el depurador. Observar un sitio que el usuario apagó sería
+    // cambiar el contrato de privacidad que muestra la interfaz.
+    if (!this.contentAllowed(hostOf(target))) return false;
 
     const debuggerApi = contents.debugger;
     if (!debuggerApi || typeof debuggerApi.attach !== 'function') {
@@ -121,6 +128,8 @@ export class CdpObserver {
       debuggerApi,
       sockets: new Map(),
       pending: new Map(),
+      requests: new Map(),
+      failures: new Set(),
       closed: false,
     };
     this.tabs.set(contents.id, state);
@@ -214,13 +223,14 @@ export class CdpObserver {
         return this.#frame(state, params, 'sent');
       case 'Network.webSocketClosed':
         return this.#socketClosed(state, params);
+      case 'Network.requestWillBeSent':
+        return this.#requestStarted(state, params);
       case 'Network.responseReceived':
         return this.#responseReceived(state, params);
       case 'Network.loadingFinished':
         return this.#loadingFinished(state, params);
       case 'Network.loadingFailed':
-        state.pending.delete(params.requestId);
-        return undefined;
+        return this.#loadingFailed(state, params);
       default:
         return undefined;
     }
@@ -236,6 +246,12 @@ export class CdpObserver {
       return;
     }
     const site = detectSite(host);
+    if (!this.contentAllowed(host)) {
+      // Mediación apagada para este sitio: se mira el tráfico para detectar
+      // fallos, pero no se lee la conversación.
+      this.stats.ignored += 1;
+      return;
+    }
     state.sockets.set(params.requestId, {
       requestId: params.requestId,
       url,
@@ -289,6 +305,54 @@ export class CdpObserver {
     state.sockets.delete(params.requestId);
   }
 
+  /* ---------------------- fallos de red ----------------------------- */
+
+  /** Recuerda las peticiones de un proveedor: sin la URL, un fallo no se explica. */
+  #requestStarted(state, params) {
+    const type = String(params.type || '');
+    if (!OBSERVED_RESOURCE_TYPES.has(type)) return;
+    const url = String(params.request?.url || '');
+    const host = hostOf(url);
+    if (!isAiHost(host)) return;
+    state.requests.set(params.requestId, { url, host, site: detectSite(host).id, type });
+    if (state.requests.size > 200) {
+      const first = state.requests.keys().next().value;
+      state.requests.delete(first);
+    }
+  }
+
+  #loadingFailed(state, params) {
+    const request = state.requests.get(params.requestId);
+    state.requests.delete(params.requestId);
+    state.pending.delete(params.requestId);
+    // `canceled` es lo normal: el usuario cambió de página o el sitio abortó.
+    if (!request || params.canceled) return;
+    this.#failure(state, {
+      kind: 'net',
+      url: request.url,
+      host: request.host,
+      site: request.site,
+      resourceType: request.type,
+      errorText: String(params.errorText || ''),
+      blockedReason: params.blockedReason ? String(params.blockedReason) : null,
+    });
+  }
+
+  /** Informa un fallo al motor. Se descarta el contenido: sólo el hecho. */
+  #failure(state, failure) {
+    const key = `${failure.kind}|${failure.status || failure.errorText}|${failure.url}`;
+    if (state.failures.has(key)) return;
+    state.failures.add(key);
+    if (state.failures.size > 100) state.failures.delete(state.failures.values().next().value);
+    this.stats.failures += 1;
+    if (!this.engine || typeof this.engine.onCdpFailure !== 'function') return;
+    try {
+      this.engine.onCdpFailure(state.id, failure);
+    } catch (error) {
+      this.log(`CDP: al informar un fallo: ${error?.message || error}`);
+    }
+  }
+
   /* ---------------------- respuestas JSON --------------------------- */
 
   #responseReceived(state, params) {
@@ -305,7 +369,20 @@ export class CdpObserver {
       this.stats.ignored += 1;
       return;
     }
-    if (response.status && (response.status < 200 || response.status > 299)) return;
+    if (response.status && (response.status < 200 || response.status > 299)) {
+      // Un 403 en `/backend-api/conversation` es exactamente el motivo por el que
+      // la interfaz del sitio dice «no se pudo conectar».
+      this.#failure(state, {
+        kind: 'http',
+        url,
+        host,
+        site: detectSite(host).id,
+        resourceType: params.type,
+        status: Number(response.status),
+        mimeType,
+      });
+      return;
+    }
 
     state.pending.set(requestId, {
       requestId,
@@ -318,8 +395,13 @@ export class CdpObserver {
 
   async #loadingFinished(state, params) {
     const pending = state.pending.get(params.requestId);
+    state.requests.delete(params.requestId);
     if (!pending) return;
     state.pending.delete(params.requestId);
+    if (!this.contentAllowed(pending.host)) {
+      this.stats.ignored += 1;
+      return;
+    }
 
     let body;
     try {

@@ -25,6 +25,7 @@ export const journal = {
   downloads: [],
   external: [],
   switches: [],
+  userAgents: [],
   quit: false,
   userData: mkdtempSync(join(tmpdir(), 'nexo-audit-')),
 };
@@ -173,6 +174,11 @@ class FakeSession extends EventEmitter {
     this.cleared = [];
   }
 
+  setUserAgent(ua) {
+    this.userAgent = ua;
+    journal.userAgents.push({ partition: this.partition, ua });
+  }
+
   setSpellCheckerEnabled(enabled) {
     this.spellcheck = enabled;
     journal.spellcheck = enabled;
@@ -238,6 +244,13 @@ export class FakeBrowserWindow extends EventEmitter {
 
 export const app = Object.assign(new EventEmitter(), {
   name: 'Nexo',
+  /**
+   * Lo que Electron pone por defecto: la huella que los sitios con protección
+   * anti-bot leen para decidir si atienden al cliente. El proceso principal la
+   * normaliza al arrancar.
+   */
+  userAgentFallback:
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Nexo/0.1.0 Chrome/130.0.6723.137 Electron/33.2.0 Safari/537.36',
   getGPUFeatureStatus: () => ({ gpu_compositing: 'enabled', webgl: 'enabled', rasterization: 'enabled' }),
   commandLine: {
     appendSwitch(name, value) {

@@ -300,3 +300,20 @@ test('la ventana aparece de inmediato en lugar de esperar al primer cuadro', asy
   const { marks } = await import('../src/main/perf.js');
   assert.equal(typeof marks().visible, 'number', 'falta la marca de ventana visible');
 });
+
+test('el navegador no se delata como cliente automatizado en el User-Agent', async () => {
+  const { app } = await import('./harness/electron-stub.mjs');
+
+  // Electron estampa `Electron/x` y el nombre de la aplicación: ChatGPT y
+  // Claude leen esa marca y responden con un bloqueo o un desafío anti-bot.
+  assert.doesNotMatch(app.userAgentFallback, /Electron\//, 'sin marca de Electron');
+  assert.doesNotMatch(app.userAgentFallback, /Nexo\//, 'sin marca de la aplicación');
+  assert.match(app.userAgentFallback, /Chrome\/\d+/, 'se presenta como Chrome');
+  assert.match(app.userAgentFallback, /Safari\/537\.36/);
+
+  // La sesión de las pestañas tiene que usar exactamente el mismo texto: si
+  // conservara otro, las peticiones del sitio volverían a delatarse.
+  const nexo = journal.userAgents.filter((item) => item.partition === 'persist:nexo');
+  assert.ok(nexo.length >= 1, 'la sesión de las pestañas fija su User-Agent');
+  for (const item of nexo) assert.equal(item.ua, app.userAgentFallback);
+});

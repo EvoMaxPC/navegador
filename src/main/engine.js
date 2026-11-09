@@ -40,7 +40,9 @@ export class Engine {
      * cuente dos veces si llega por los dos canales.
      */
     this.cdpSeen = new Map();
-    this.cdp = { captures: 0, duplicates: 0, loops: 0, truncated: 0 };
+    this.cdp = { captures: 0, duplicates: 0, loops: 0, truncated: 0, failures: 0 };
+    /** Fallos de red ya informados, para no repetirlos en cada reintento. */
+    this.cdpFailures = new Map();
   }
 
   #guard(webContentsId, host) {
@@ -319,6 +321,64 @@ export class Engine {
   dropTab(webContentsId) {
     this.guards.delete(webContentsId);
     this.cdpSeen.delete(webContentsId);
+    for (const key of [...this.cdpFailures.keys()]) {
+      if (key.startsWith(`${webContentsId}|`)) this.cdpFailures.delete(key);
+    }
+  }
+
+  /**
+   * Fallo de red observado por CDP en un sitio con perfil.
+   *
+   * No se guarda contenido: sólo la URL, el estado y el error. Es lo que explica
+   * un «no se pudo conectar» sin obligar al usuario a abrir DevTools. No depende
+   * de que la mediación esté encendida —de hecho es cuando más falta hace— pero
+   * tampoco lee la conversación.
+   *
+   * @param {number} webContentsId pestaña
+   * @param {{kind: 'http'|'net', url: string, host?: string, site?: string,
+   *   status?: number, errorText?: string, resourceType?: string,
+   *   blockedReason?: string|null}} failure
+   */
+  onCdpFailure(webContentsId, failure = {}) {
+    const url = String(failure.url || '');
+    const host = failure.host || safeHost(url) || 'desconocido';
+    const site = failure.site || detectSite(host).id;
+    const key = `${webContentsId}|${failure.kind}|${failure.status || failure.errorText}|${url}`;
+    const now = Date.now();
+    if (now - (this.cdpFailures.get(key) || 0) < 60_000) return { ok: true, duplicate: true };
+    this.cdpFailures.set(key, now);
+    if (this.cdpFailures.size > 200) {
+      for (const [k, ts] of this.cdpFailures) if (now - ts > 120_000) this.cdpFailures.delete(k);
+    }
+
+    const path = safePath(url);
+    const isHttp = failure.kind === 'http';
+    const entry = {
+      kind: 'system',
+      code: isHttp ? 'http-error' : 'net-failed',
+      severity: 'warn',
+      title: isHttp
+        ? `${site || host} respondió ${failure.status} a ${path}`
+        : `Se cortó la conexión con ${site || host} (${path})`,
+      detail: isHttp
+        ? `El sitio rechazó la petición con estado ${failure.status}. Es el error que la propia interfaz muestra como «no se pudo conectar»: si es 401/403, el proveedor está bloqueando al cliente; si es 429, hay límite de uso.`
+        : `Fallo de red: ${failure.errorText || 'sin detalle'}${failure.blockedReason ? ` (bloqueado: ${failure.blockedReason})` : ''}.`,
+      meta: {
+        via: 'cdp',
+        observed: true,
+        url,
+        host,
+        site,
+        status: failure.status ?? null,
+        errorText: failure.errorText ?? null,
+        resourceType: failure.resourceType || null,
+      },
+      ts: now,
+    };
+    this.store.pushLog(entry);
+    this.onEvent(entry);
+    this.cdp.failures += 1;
+    return { ok: true, duplicate: false, code: entry.code };
   }
 
   /* ---------------- deduplicación entre canales ---------------- */
@@ -406,6 +466,16 @@ export class Engine {
       this.store.pushLog({ ...entry, __published: undefined });
       this.onEvent(entry);
     }
+  }
+}
+
+/** Ruta corta de una URL, para textos legibles. */
+function safePath(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search ? '…' : ''}`.slice(0, 80);
+  } catch {
+    return String(url || '').slice(0, 80);
   }
 }
 
