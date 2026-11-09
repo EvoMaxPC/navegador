@@ -372,9 +372,12 @@ export class Engine {
     current.messageId ||= messageId;
     current.model ||= payload.model || '';
     current.host ||= payload.host || '';
+    // La tokenización BPE puede fusionar tokens al llegar el siguiente fragmento;
+    // aplicar también deltas negativos mantiene el total exacto en tiempo real.
+    this.sinTexto.delete(webContentsId);
     const totalTokens = this.#outputTokens(current.text, current.model, current.host);
-    const increment = Math.max(0, totalTokens - current.tokens);
-    if (increment) this.counters.outputTokens += increment;
+    const increment = totalTokens - current.tokens;
+    if (increment) this.counters.outputTokens = Math.max(0, this.counters.outputTokens + increment);
     current.tokens = totalTokens;
     current.at = now;
     this.streamProgress.set(webContentsId, current);
