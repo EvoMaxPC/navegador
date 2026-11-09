@@ -1,6 +1,3 @@
-import { countTokens as countO200k } from 'gpt-tokenizer';
-import { countTokens as countCl100k } from 'gpt-tokenizer/encoding/cl100k_base';
-
 /**
  * Utilidades de texto del motor de mediación.
  *
@@ -154,29 +151,6 @@ export function estimateTokens(text) {
   const cjk = (text.match(new RegExp(CJK, 'gu')) || []).length;
   const latin = chars - cjk;
   return Math.ceil(cjk / 1.6 + latin / 3.9) + 1;
-}
-
-/**
- * Cuenta tokens con el BPE correspondiente a la familia del modelo GPT.
- * Si el modelo no está disponible en la petición (caso habitual en algunas
- * interfaces web), usa o200k_base, codificación de los GPT modernos.
- */
-export function countGptTokens(text, model = '') {
-  if (typeof text !== 'string' || text.length === 0) return 0;
-  const id = String(model || '').toLowerCase();
-  if (/^(gpt-3\.5|gpt-4(?:-|$))/.test(id) && !/^gpt-4(?:\.1|o)/.test(id)) return countCl100k(text);
-  return countO200k(text);
-}
-
-/**
- * Cuenta tokens sin aplicar el tokenizador GPT a proveedores ajenos.
- * Para ChatGPT/OpenAI usa BPE según el modelo; otros sitios conservan la
- * estimación genérica existente hasta integrar su tokenizador propio.
- */
-export function countTokensForProvider(text, model = '', provider = '') {
-  const source = String(provider || '').toLowerCase();
-  if (source.includes('chatgpt') || source.includes('openai')) return countGptTokens(text, model);
-  return estimateTokens(text);
 }
 
 /** Identifica el modelo declarado por el cuerpo de una solicitud GPT. */

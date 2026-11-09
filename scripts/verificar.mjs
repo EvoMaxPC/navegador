@@ -25,8 +25,8 @@ function run(label, command, args) {
   return ok;
 }
 
-const testsOk = run('Pruebas automatizadas', process.execPath, ['--test']);
 const buildOk = run('Empaquetado de la capa de inyección', process.execPath, ['scripts/build-inject.mjs']);
+const testsOk = buildOk && run('Pruebas automatizadas', process.execPath, ['--test']);
 
 const checklist = [
   'Navegar a 3 sitios distintos y comprobar que renderizan.',

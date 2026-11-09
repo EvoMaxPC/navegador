@@ -11,7 +11,8 @@ import { isAiHost } from '../core/cdp.js';
 import { settingsForHost } from '../core/settings.js';
 import { StreamSentinel } from '../core/streamSentinel.js';
 import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
-import { countTokensForProvider, fingerprint } from '../core/text.js';
+import { fingerprint } from '../core/text.js';
+import { countTokensForProvider } from './tokens.js';
 import { looksEncrypted } from '../memory/item.js';
 
 /** Cómo se llama cada canal en los textos que ve el usuario. */
@@ -112,6 +113,21 @@ export class Engine {
      * la capa haya contado el envío no prueba que haya capturado la respuesta.
      */
     this.layerEnded = new Map();
+    /**
+     * Cuándo la capa cerró un stream **con texto**, por pestaña. Es lo único que
+     * prueba que la respuesta ya tiene sus tokens: un cierre sin texto no puede
+     * dejar a CDP sin leer el cuerpo, o la respuesta se cuenta y se queda sin
+     * tokens para siempre.
+     */
+    this.layerEndedText = new Map();
+    /**
+     * Respuestas ya contadas sin poder leer su texto, por pestaña:
+     * `{at, messageId, host}`. Si el texto aparece después —CDP suele llegar más
+     * tarde que el cierre de la red— sus tokens se suman a **esa** respuesta en
+     * vez de contar otra. Es lo que evita que arreglar la lectura duplique las
+     * respuestas que ya se contaban bien.
+     */
+    this.sinTexto = new Map();
     /**
      * Textos ya contados como respuesta, por pestaña. Permite reconocer la misma
      * respuesta entregada en pedazos: mientras crece, no es otra respuesta.
@@ -257,6 +273,10 @@ export class Engine {
     this.counters.inputTokens += tokens;
     this.counters.activity += 1;
 
+    // Un mensaje nuevo cierra la atribución diferida del anterior: el texto que
+    // llegue de acá en adelante es de esta pregunta, no de aquella.
+    this.sinTexto.delete(webContentsId);
+
     // Queda esperando su respuesta para poder cerrar el turno.
     this.awaiting.set(webContentsId, {
       messageId,
@@ -276,6 +296,12 @@ export class Engine {
   #countResponse(webContentsId, payload = {}) {
     const messageId = String(payload.messageId || '');
     const now = Date.now();
+    const textoPayload = String(payload.text || '');
+    // El texto de una respuesta ya contada por la red: se suman los tokens y la
+    // respuesta no se cuenta dos veces.
+    if (textoPayload.trim() && this.#absorbTokens(webContentsId, textoPayload, messageId || null)) {
+      return { ok: true, duplicate: true, tokens: true };
+    }
     // La clave es el identificador del envío; si el sitio no lo diera (camino
     // viejo), se usa pestaña + longitud + huella, que sigue distinguiendo dos
     // respuestas distintas de una repetida.
@@ -300,6 +326,20 @@ export class Engine {
 
     this.seenResponses.set(key, now);
     this.#prune(this.seenResponses, now);
+
+    // Respuesta contada sin texto: si el texto aparece después, sus tokens se
+    // suman a esta misma respuesta.
+    if (!texto.trim()) {
+      const pendienteSinTexto = pendiente || this.#pendingTurn(webContentsId, now);
+      this.sinTexto.set(pendienteSinTexto?.id ?? webContentsId, {
+        at: now,
+        messageId: awaitId || null,
+        host: pendienteSinTexto?.entry.host || payload.host || null,
+        model: payload.model || pendienteSinTexto?.entry.model || '',
+      });
+    } else {
+      this.sinTexto.delete(pendiente?.id ?? webContentsId);
+    }
 
     this.counters.responses += 1;
     this.counters.activity += 1;
@@ -352,13 +392,74 @@ export class Engine {
     this.counters.activity += 1;
     this.counters.turns += 1;
     this.awaiting.delete(pendiente.id);
+    // Queda anotado que esta respuesta se contó sin texto: si CDP o la capa
+    // consiguen el texto un instante después, suman sus tokens a **esta**
+    // respuesta en vez de contar una segunda.
+    this.sinTexto.set(pendiente.id, {
+      at: now,
+      messageId: pendiente.entry.messageId || null,
+      host: pendiente.entry.host || payload.host || null,
+      model: pendiente.entry.model || '',
+    });
 
     return {
       ok: true,
       counted: true,
       messageId: pendiente.entry.messageId || null,
       host: pendiente.entry.host || payload.host || null,
+      model: pendiente.entry.model || '',
     };
+  }
+
+  /**
+   * Si esta llegada es el **texto** de una respuesta que ya se contó sin texto,
+   * suma sus tokens y devuelve `true`: la respuesta no se cuenta otra vez.
+   *
+   * Es la pieza que permite leer el cuerpo de la respuesta sin tocar el contador
+   * de respuestas: la red ya sumó la respuesta cuando cerró la petición; cuando
+   * CDP consigue el texto un segundo después, lo que faltaba eran los tokens.
+   */
+  #absorbTokens(webContentsId, text, messageId = null) {
+    const anotada = this.sinTexto.get(webContentsId);
+    if (!anotada) return false;
+    const now = Date.now();
+    if (now - anotada.at > VENTANA_RESPUESTA_MS) {
+      this.sinTexto.delete(webContentsId);
+      return false;
+    }
+    // Un turno que salió después de contar esa respuesta ya es otra pregunta: el
+    // texto que llega es suyo, no de la respuesta anterior.
+    const esperando = this.awaiting.get(webContentsId);
+    if (esperando && esperando.at >= anotada.at) return false;
+    // El identificador no decide: la red y CDP nombran el mismo envío de forma
+    // distinta (`net-…` y `cdp-…`) y compararlos rechazaría justo el caso que
+    // esto resuelve. Lo que acota es la pestaña, la ventana y que no haya salido
+    // una pregunta nueva. `messageId` queda para anotar el texto ya contado.
+
+    const tokens = countTokensForProvider(text, anotada.model, anotada.host);
+    this.counters.outputTokens += Math.max(0, tokens);
+    this.sinTexto.delete(webContentsId);
+    // Queda en el registro: si los tokens de salida suben sin una respuesta
+    // nueva, esto es lo que lo explica.
+    try {
+      this.store?.pushLog?.({
+        kind: 'receiving',
+        code: 'tokens-recuperados',
+        severity: 'info',
+        title: `Tokens de la respuesta sumados en ${anotada.host || 'el sitio'}`,
+        detail: `La respuesta ya estaba contada sin texto; el texto apareció después y aportó ${tokens} tokens de salida (${text.length} caracteres). No se contó otra respuesta.`,
+        meta: { host: anotada.host || null, chars: text.length, tokens, messageId: messageId || anotada.messageId || null },
+        ts: now,
+      });
+    } catch {
+      /* el registro no puede tumbar el conteo */
+    }
+    // El texto entra en la lista de lo ya contado: un segundo canal no lo suma
+    // de nuevo, y un fragmento posterior sólo aporta la diferencia.
+    const vistos = (this.recentTexts.get(webContentsId) || []).filter((v) => now - v.at < VENTANA_RESPUESTA_MS);
+    vistos.push({ at: now, text, tokens, messageId: messageId || anotada.messageId || null });
+    this.recentTexts.set(webContentsId, vistos.slice(-6));
+    return true;
   }
 
   /**
@@ -459,6 +560,7 @@ export class Engine {
   onStreamEnd(webContentsId, payload) {
     // La capa cerró un stream: desde acá, esa respuesta ya la contó ella.
     this.layerEnded.set(webContentsId, Date.now());
+    if (payload?.text) this.layerEndedText.set(webContentsId, Date.now());
     // Se anota lo que ya contó este camino ANTES de mirar el guard: si CDP ve el
     // mismo texto por otro canal, no se vuelve a registrar.
     const host = payload?.host || this.guards.get(webContentsId)?.host || safeHost(payload?.url) || 'desconocido';
@@ -586,6 +688,19 @@ export class Engine {
   }
 
   /**
+   * ¿La capa cerró un stream **con texto** después de ese instante?
+   *
+   * Es la pregunta correcta antes de que CDP descarte leer un cuerpo: un cierre
+   * sin texto no prueba que la respuesta tenga sus tokens. Si la capa se calló,
+   * CDP lee el cuerpo y `#absorbTokens` suma lo que faltaba sin contar otra
+   * respuesta.
+   */
+  layerEndedWithTextAfter(webContentsId, sinceMs = 0) {
+    const at = this.layerEndedText.get(webContentsId);
+    return Boolean(at && at >= Number(sinceMs || 0));
+  }
+
+  /**
    * Turno observado por CDP (frame de WebSocket o cuerpo JSON sin streaming).
    *
    * Este camino **no media**: cuando CDP ve la respuesta, el sitio ya la mostró.
@@ -621,6 +736,14 @@ export class Engine {
     const awaitId = capture.messageId
       ? this.resolveMessageId(pendiente?.id ?? webContentsId, capture.messageId)
       : null;
+
+    // ¿Es el texto de una respuesta que la red ya contó sin texto? Entonces lo
+    // que falta son los tokens, no otra respuesta.
+    if (this.#absorbTokens(webContentsId, text, awaitId)) {
+      this.#markSeen(webContentsId, keys, awaitId);
+      this.cdp.duplicates += 1;
+      return { ok: true, duplicate: true, tokens: true };
+    }
 
     if (this.#seenAlready(webContentsId, keys, { pendiente, messageId: awaitId })) {
       this.cdp.duplicates += 1;
@@ -804,6 +927,8 @@ export class Engine {
     this.recentTexts.delete(webContentsId);
     this.layerSeen.delete(webContentsId);
     this.layerEnded.delete(webContentsId);
+    this.layerEndedText.delete(webContentsId);
+    this.sinTexto.delete(webContentsId);
     for (const key of [...this.messageAliases.keys()]) {
       if (key.startsWith(`${webContentsId}|`)) this.messageAliases.delete(key);
     }

@@ -19,7 +19,8 @@ import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locate
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
-import { countTokensForProvider, fingerprint, gptModelFromRequest } from '../core/text.js';
+import { fingerprint, gptModelFromRequest } from '../core/text.js';
+import { countTokensForProvider } from './tokens.js';
 import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
@@ -1216,7 +1217,7 @@ function watchProviderNetwork(s) {
                 severity: 'info',
                 title: `Respuesta recibida en ${host}`,
                 detail:
-                  'La petición de conversación terminó bien y el mensaje quedó contestado. El texto no se pudo leer: los tokens de salida no se suman.',
+                  'La petición de conversación terminó bien y el mensaje quedó contestado. El texto no se pudo leer todavía: si aparece un instante después, sus tokens se suman a esta misma respuesta.',
                 meta: { host, url: shortPath(url), source: 'network', chars: 0, tokens: 0, messageId: contada.messageId },
                 ts: Date.now(),
               };

@@ -31,7 +31,8 @@ import {
   terminalOf,
 } from '../core/cdp.js';
 import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
-import { countTokensForProvider, fingerprint, gptModelFromRequest } from '../core/text.js';
+import { fingerprint, gptModelFromRequest } from '../core/text.js';
+import { countTokensForProvider } from './tokens.js';
 
 /** Versión del protocolo que expone Electron/Chromium. */
 const CDP_VERSION = '1.3';
@@ -560,7 +561,15 @@ export class CdpObserver {
       return;
     }
     const mimeType = String(response.mimeType || '');
-    const stream = isStreamMime(mimeType);
+    /**
+     * Una respuesta de conversación que llega como `text/plain` se lee igual: el
+     * cuerpo se interpreta después con el lector tolerante (SSE, JSON por líneas
+     * o texto). Descartarla por el MIME era dejar la respuesta sin sus tokens.
+     */
+    const origenMime = state.requests.get(requestId);
+    const textoPlanoDeChat =
+      /^text\/plain/i.test(mimeType) && Boolean(origenMime && (origenMime.chat || origenMime.responseRequest));
+    const stream = isStreamMime(mimeType) || textoPlanoDeChat;
     if (!stream && !isJsonMime(mimeType)) {
       this.stats.ignored += 1;
       if (state.requests.get(requestId)?.chat) {
@@ -612,6 +621,7 @@ export class CdpObserver {
       site: detectSite(host),
       status: Number(response.status) || 200,
       stream,
+      textoPlanoDeChat,
       // Instante en que salió la petición: sólo un cierre de la capa posterior
       // a esto cuenta como «la respuesta ya la contó ella».
       since: Number(origen?.at) || Date.now(),
@@ -643,8 +653,14 @@ export class CdpObserver {
       return;
     }
 
-    // Un stream que la capa ya cerró está contado: no se vuelve a leer.
-    if (pending.stream && this.engine?.layerEndedAfter?.(state.id, pending.since)) {
+    // Un stream que la capa cerró **con texto** ya está contado: no se vuelve a
+    // leer. Si la capa lo cerró sin texto (su lector no reconoció el protocolo),
+    // la respuesta se contó y se quedó sin tokens: ahí CDP tiene que leer el
+    // cuerpo, y el motor suma los tokens a esa misma respuesta.
+    const cerroConTexto = this.engine?.layerEndedWithTextAfter
+      ? this.engine.layerEndedWithTextAfter(state.id, pending.since)
+      : this.engine?.layerEndedAfter?.(state.id, pending.since);
+    if (pending.stream && cerroConTexto) {
       this.stats.ignored += 1;
       // No es un fallo, pero sí la explicación de por qué el texto no vino de
       // acá: sin este aviso, «CDP no capturó» y «la capa llegó primero» se
@@ -731,30 +747,37 @@ export class CdpObserver {
       });
       const prompt = request?.prompt || null;
       if (prompt) capture.prompt(prompt);
-      let eventos = 0;
-      let primerEvento = null;
-      for (const linea of cuerpo.split(/\r?\n/)) {
-        const limpia = linea.trim();
-        if (!limpia.startsWith('data:')) continue;
-        const dato = limpia.slice(5).trim();
-        if (!dato || dato === '[DONE]') continue;
-        const evento = safeJson(dato);
-        if (!evento) continue;
-        eventos += 1;
-        if (!primerEvento) primerEvento = evento;
-        capture.add(evento);
-      }
+      // Primero SSE (`data:`), que es lo habitual. Si no hay un solo evento así,
+      // el cuerpo puede ser JSON por líneas —el canal de actualizaciones del
+      // cliente sin cuenta manda así— y antes se descartaba entero: la respuesta
+      // se contaba por la red y los tokens quedaban en cero.
+      let leidos = eventosSSE(cuerpo);
+      if (!leidos.length) leidos = eventosNDJSON(cuerpo);
+      let eventos = leidos.length;
+      let primerEvento = leidos[0] || null;
+      for (const evento of leidos) capture.add(evento);
       if (!eventos) {
-        // Cuerpo sin un solo evento `data:` parseable: no es el stream que
-        // creemos. Se avisa con una muestra corta en vez de dejar un cero mudo.
-        this.onDiagnostic({
-          code: 'response-formato',
-          key: `response-formato|${pending.host}`,
-          severity: 'warn',
-          title: `${pending.host}: la respuesta no tiene eventos SSE reconocibles`,
-          detail: `Se leyeron ${cuerpo.length} caracteres y ningún evento «data:» con JSON. Muestra: ${cuerpo.slice(0, 120).replace(/\s+/g, ' ')}`,
-          meta: { host: pending.host, url: pending.url, bytes: cuerpo.length },
-        });
+        // Sin estructura reconocible, pero si el cuerpo es texto corrido (sin
+        // una sola llave: no hay JSON que interpretar), ese texto **es** la
+        // respuesta y sus tokens se estiman de ahí. No se inventa nada: se lee
+        // lo que el sitio mandó.
+        const pareceTexto = pending.textoPlanoDeChat && !cuerpo.includes('{') && !cuerpo.includes('[') &&
+          !/^(?:event|data|id|retry):|^:/m.test(cuerpo);
+        if (pareceTexto && cuerpo.trim()) {
+          capture.add({ text: cuerpo });
+          eventos = 1;
+        } else {
+          // Cuerpo sin un solo evento `data:` parseable: no es el stream que
+          // creemos. Se avisa con una muestra corta en vez de dejar un cero mudo.
+          this.onDiagnostic({
+            code: 'response-formato',
+            key: `response-formato|${pending.host}`,
+            severity: 'warn',
+            title: `${pending.host}: la respuesta no tiene eventos SSE reconocibles`,
+            detail: `Se leyeron ${cuerpo.length} caracteres y ningún evento «data:» con JSON. Muestra: ${cuerpo.slice(0, 120).replace(/\s+/g, ' ')}`,
+            meta: { host: pending.host, url: pending.url, bytes: cuerpo.length },
+          });
+        }
       }
       this.stats.bodies += 1;
       const listo = capture.take();
@@ -778,7 +801,33 @@ export class CdpObserver {
       return;
     }
 
-    const json = safeJson(cuerpo);
+    let json = safeJson(cuerpo);
+    if (!json) {
+      // Un cuerpo con varios JSON, uno por línea (NDJSON): se entrega como
+      // captura igual que un JSON completo.
+      const sueltos = eventosNDJSON(cuerpo);
+      if (sueltos.length) {
+        const captureNd = new CdpCapture({
+          site: pending.site,
+          host: pending.host,
+          url: pending.url,
+          source: 'json',
+          messageId: request?.messageId || null,
+          conversationId: `${pending.site.id}#${state.id}#${params.requestId}`,
+        });
+        const promptNd = request?.prompt || null;
+        if (promptNd) captureNd.prompt(promptNd);
+        for (const evento of sueltos) captureNd.add(evento);
+        this.stats.bodies += 1;
+        const listoNd = captureNd.take();
+        if (listoNd) {
+          listoNd.model = request?.model || '';
+          this.#deliver(state, listoNd);
+          return;
+        }
+        json = null;
+      }
+    }
     if (!json) {
       // Cuerpo leído, ni SSE ni JSON: sin este aviso el cero no tenía causa.
       this.stats.ignored += 1;
@@ -879,6 +928,40 @@ export class CdpObserver {
     }
     return Promise.resolve(api.sendCommand(method, params));
   }
+}
+
+/** Eventos SSE (`data: …`) de un cuerpo ya descargado. */
+function eventosSSE(cuerpo) {
+  const eventos = [];
+  for (const linea of String(cuerpo).split(/\r?\n/)) {
+    const limpia = linea.trim();
+    if (!limpia.startsWith('data:')) continue;
+    const dato = limpia.slice(5).trim();
+    if (!dato || dato === '[DONE]') continue;
+    const evento = safeJson(dato);
+    if (evento) eventos.push(evento);
+  }
+  return eventos;
+}
+
+/**
+ * Eventos de un cuerpo JSON por líneas (NDJSON/JSONL).
+ *
+ * El canal de actualizaciones del cliente sin cuenta entrega la respuesta así.
+ * Se ignoran las líneas de comentario y las cabeceras SSE, y se descartan las
+ * líneas que no son un JSON completo.
+ */
+function eventosNDJSON(cuerpo) {
+  const eventos = [];
+  for (const linea of String(cuerpo).split(/\r?\n/)) {
+    const limpia = linea.trim();
+    if (!limpia || limpia === '[DONE]') continue;
+    if (limpia.startsWith('event:') || limpia.startsWith(':') || limpia.startsWith('data:')) continue;
+    if (limpia[0] !== '{' && limpia[0] !== '[') continue;
+    const evento = safeJson(limpia);
+    if (evento) eventos.push(evento);
+  }
+  return eventos;
 }
 
 /** Ruta de una URL, sin dominio ni consulta: lo que se anota en el registro. */

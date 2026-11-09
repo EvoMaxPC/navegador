@@ -179,3 +179,36 @@ Tampoco hay actualizaciones automáticas: es una distribución manual.
 
 Ver también [`NAVEGADOR.md`](NAVEGADOR.md) para el checklist manual del navegador y
 [`AUDITORIA.md`](AUDITORIA.md) para lo que se revisó en esta pasada.
+
+
+## Corrección de compilación: dependencias y certificados
+
+El conteo BPE de GPT requiere `gpt-tokenizer` en ejecución. El empaquetador ya no
+excluye todo `node_modules`: conserva las dependencias de producción mediante
+`prune: true` y comprueba los módulos de conteo dentro de `app.asar`. Las herramientas
+de desarrollo (Electron, esbuild y packager) no se distribuyen dentro del asar.
+
+Los diccionarios BPE no se incluyen en `build/inject.js`: el preload cuenta los
+metadatos de envío y el proceso principal cuenta las respuestas. Ambos usan la
+misma implementación BPE y mantienen la elección de codificación por modelo.
+`npm run verify` genera el bundle **antes** de probarlo para no validar uno viejo.
+
+Si la descarga falla con `UNABLE_TO_VERIFY_LEAF_SIGNATURE` o un error de
+certificado, configurá una CA aprobada; no uses `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+Con Node >=22.19 y la CA ya instalada en el sistema, en PowerShell:
+
+```powershell
+$env:NODE_USE_SYSTEM_CA = '1'
+npm run dist:win
+```
+
+Si tu red requiere una CA corporativa suministrada por su administrador:
+
+```powershell
+$env:NODE_EXTRA_CA_CERTS = 'C:\certificados\ca-corporativa.pem'
+npm run dist:win
+```
+
+Esto no evita una restricción de salida de red: GitHub redirige los binarios a
+sus hosts de assets. Si están bloqueados, usá GitHub Actions o el ZIP oficial de
+Electron mediante `--electron-zip-dir`, como se describe arriba.

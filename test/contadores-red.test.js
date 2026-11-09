@@ -16,7 +16,8 @@ import { register } from 'node:module';
 import { test } from 'node:test';
 import { countTokens as countO200k } from 'gpt-tokenizer';
 import { countTokens as countCl100k } from 'gpt-tokenizer/encoding/cl100k_base';
-import { countGptTokens, countTokensForProvider, estimateTokens, gptModelFromRequest } from '../src/core/text.js';
+import { estimateTokens, gptModelFromRequest } from '../src/core/text.js';
+import { countGptTokens, countTokensForProvider } from '../src/main/tokens.js';
 
 // La respuesta contada desde la red espera a que la capa o CDP cuenten primero.
 // En la prueba ese margen se acorta para no esperar segundo y medio por caso.

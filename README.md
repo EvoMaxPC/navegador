@@ -15,8 +15,8 @@ los dos sentidos**:
 - **Después** repara la respuesta (markdown roto, bloques de código sin cerrar,
   tokens internos filtrados) y ofrece continuar exactamente donde se cortó.
 
-Todo el análisis es **local y determinista**: sin modelos auxiliares, sin nube, sin
-dependencias en tiempo de ejecución.
+Todo el análisis es **local y determinista**: sin modelos auxiliares ni nube. El conteo GPT usa el tokenizador BPE local
+`gpt-tokenizer`, incluido en la distribución.
 
 **[Descargar Nexo 0.1.12 para Windows](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.12)**
 — `Nexo-0.1.12-win32-x64.zip` (149 MB). Descomprimí y
@@ -69,7 +69,7 @@ entregó. El modelo está simulado; la mediación es la de verdad — es el mism
 código que corre dentro del navegador.
 
 ```bash
-npm test                # 440 pruebas, sin dependencias
+npm test                # 464 pruebas, con dependencias instaladas
 npm run bench           # rendimiento medido: tabla antes/después
 npm run verify          # pruebas + bundle + checklist manual
 npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
@@ -265,7 +265,7 @@ src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
 scripts/         verificación, icono, empaquetado para Windows y prueba de humo
-test/            440 pruebas con node:test (incluye un Electron falso para el arranque)
+test/            464 pruebas con node:test (incluye un Electron falso para el arranque)
 docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
 .github/         flujo que compila la aplicación de Windows
 ```

@@ -184,8 +184,8 @@ Ocho métricas independientes, cada una con su hecho, expuestas por
 | `messages` | mensajes del usuario | evento `outgoing` de la capa, uno por envío reconocido |
 | `responses` | respuestas de la IA | cierre de stream (`nexo:stream-end`) o captura CDP |
 | `turns` | turnos completos | par mensaje↔respuesta, asociado por `messageId` |
-| `inputTokens` | tokens del mensaje | `estimateTokens` sobre el texto localizado |
-| `outputTokens` | tokens de la respuesta | `estimateTokens` sobre el texto entregado |
+| `inputTokens` | tokens del mensaje | `countTokensForProvider` sobre el texto localizado (BPE local para GPT) |
+| `outputTokens` | tokens de la respuesta | `countTokensForProvider` sobre el texto **real** leído (BPE local para GPT): lo entrega la capa al cerrar el stream o CDP al leer el cuerpo. Si la respuesta se contó por la red —sin texto— y el texto aparece después, sus tokens se suman a **esa** respuesta (no se cuenta otra). |
 | `interventions` | actividad de la conversación | +1 al contar un mensaje y +1 al contar una respuesta |
 | `mediatedInterventions` | intervenciones del motor | `prepare()` sólo cuando el texto cambió, más los cortes |
 | `loopsSeen` | bucles observados | centinelas de cada guardián + observación CDP |
@@ -264,9 +264,10 @@ un aviso en el registro, con el código que la identifica:
 | `response-sin-texto` | El stream se leyó, hubo eventos y ninguno trajo texto del asistente: deja la **forma** del primer evento para corregir el adaptador. |
 | `response-capa` | El stream lo cerró la capa de la página: el depurador no lo relee. |
 | `cdp-sin-depurador` | El depurador no se pudo adjuntar (o no existe en este Electron). |
-| `incoming-network` | La respuesta se contó por el cierre de la red: sin texto, sin tokens de salida. |
+| `incoming-network` | La respuesta se contó por el cierre de la red: sin texto todavía. Si el texto aparece después, sus tokens se suman a esa misma respuesta. |
 | `chat-ruta` | El mensaje viaja por una ruta que el perfil no declara: se reconoció por el cuerpo y se cuenta igual. |
 | `chat-unmatched` | POST al proveedor fuera de la ruta conocida y sin mensaje en el cuerpo. |
+| `tokens-recuperados` | El texto de una respuesta ya contada sin texto aportó sus tokens: dice cuántos y de qué host, sin sumar otra respuesta. |
 
 **Asociación.** El envío guarda su `messageId` en la petición observada. La
 respuesta a esa petición viaja con el mismo identificador y cierra **ese** turno;
@@ -275,7 +276,17 @@ respuesta en esa pestaña, y sólo dentro de la ventana de respuesta. Un mensaje
 viejo sin respuesta no se cierra con una respuesta ajena.
 
 Una respuesta que llega en pedazos se acumula y se cuenta al cerrarse; mientras
-crece no suma respuestas, sólo corrige los tokens de salida.
+crece no suma respuestas, sólo corrige los tokens de salida. El acumulador no
+vuelve a sumar lo que ya aportó el adaptador del sitio: los protocolos
+acumulados repiten el texto completo en cada evento, y sumarlo otra vez serían
+tokens contados dos veces.
+
+**Tokens sin texto no existen.** Los tokens de salida salen siempre de
+`countTokensForProvider` sobre el texto real; nunca de una cifra fija por respuesta. Si
+ningún camino logra leer el cuerpo, la respuesta se cuenta igual (camino de red)
+y los tokens quedan donde estaban. Cuando el texto aparece un instante después
+—CDP termina de leer el cuerpo cuando la petición ya cerró—, el motor lo suma a
+la respuesta que ya estaba contada, sin tocar el contador de respuestas.
 
 **Cierre dudoso ≠ corte confirmado.** Que una respuesta parezca incompleta
 (`detectTruncation`) es una heurística de texto; el registro lo dice así y no
@@ -362,3 +373,13 @@ El peor caso realista —una respuesta de 20 000 caracteres que no se traba— e
   por defecto no se usa: el producto tiene que funcionar sin conexión.
 - **Panel de comparación:** guardar las dos versiones (crudo y entregado) para medir
   cuánto se recuperó por conversación.
+
+
+### Distribución del tokenizador
+
+Las utilidades puras de `src/core/text.js` no importan diccionarios BPE.
+`src/core/gptTokens.cjs` carga la codificación bajo demanda y es compartido por
+`src/main/tokens.js` y el preload. La página sólo aporta texto y metadatos ligeros:
+el preload convierte el metadato del envío a BPE y elimina `tokenText` antes de
+reenviarlo por IPC. El Engine calcula la salida sobre el texto recibido.
+Así el bundle de captura conserva el límite de 60 kB sin quitar el conteo BPE.

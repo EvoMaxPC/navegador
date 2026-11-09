@@ -1,0 +1,53 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { countTokens as countO200k } from 'gpt-tokenizer';
+import { countTokens as countCl100k } from 'gpt-tokenizer/encoding/cl100k_base';
+
+const requireBridge = createRequire(new URL('../src/preload/bridge.cjs', import.meta.url));
+const { outgoingMetadata } = requireBridge('./token-metadata.cjs');
+
+for (const [model, count] of [['gpt-5', countO200k], ['gpt-4-turbo', countCl100k]]) {
+  test(`el preload conserva BPE para ${model} y no reenvía el texto del envío`, () => {
+    const tokenText = 'Hola, ¿cómo estás?\nUna segunda línea para probar el texto exacto.';
+    const payload = { host: 'chatgpt.com', model, tokenText, tokens: 1, messageId: 'msg-1' };
+    const result = outgoingMetadata(payload);
+    assert.equal(result.tokens, count(tokenText));
+    assert.equal(result.messageId, payload.messageId);
+    assert.ok(!('tokenText' in result));
+    assert.equal(payload.tokenText, tokenText, 'no muta el evento original');
+  });
+}
+
+test('el preload conserva el conteo existente de otros proveedores y del formato viejo', () => {
+  assert.deepEqual(outgoingMetadata({ host: 'claude.ai', tokenText: 'hola', tokens: 8 }), { host: 'claude.ai', tokens: 8 });
+  assert.deepEqual(outgoingMetadata({ host: 'chatgpt.com', tokens: 7 }), { host: 'chatgpt.com', tokens: 7 });
+  assert.equal(outgoingMetadata({ host: 'chatgpt.com', tokenText: '', tokens: 20 }).tokens, 0);
+});
+
+test('el bridge real convierte el aviso outgoing antes de enviarlo por IPC', async () => {
+  const handlers = new Map();
+  const sent = [];
+  const ipcRenderer = {
+    on() {},
+    sendSync: () => ({ enabled: false }),
+    send: (channel, payload) => sent.push({ channel, payload }),
+  };
+  const window = { addEventListener: (name, handler) => handlers.set(name, handler) };
+  const context = vm.createContext({
+    require: (name) => name === 'electron' ? { ipcRenderer, webFrame: {} } : requireBridge(name),
+    __dirname: new URL('../src/preload/', import.meta.url).pathname,
+    window, location: { protocol: 'https:', hostname: 'chatgpt.com', href: 'https://chatgpt.com/' }, console,
+  });
+  vm.runInContext(readFileSync(new URL('../src/preload/bridge.cjs', import.meta.url), 'utf8'), context);
+  const text = 'Texto de una pregunta enviada sin modificar la petición original.';
+  await handlers.get('message')({ source: window, data: {
+    __nexo: 'event', type: 'outgoing', payload: { host: 'chatgpt.com', model: 'gpt-5', tokenText: text, tokens: 0 },
+  } });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].channel, 'nexo:event');
+  assert.equal(sent[0].payload.payload.tokens, countO200k(text));
+  assert.ok(!('tokenText' in sent[0].payload.payload));
+});

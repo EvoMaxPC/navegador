@@ -201,8 +201,10 @@ function anunciarEnvio(datos = {}) {
     chars: Math.max(0, Number(datos.chars) || 0),
     tokens: Math.max(0, Number(datos.tokens) || 0),
     model: String(datos.model || ''),
+    // Sólo llega al preload local; se quita antes del IPC y del registro.
+    tokenText: datos.tokenText || '',
     // Huella del texto enviado: permite reconocer el mismo envío cuando lo
-    // anuncia también la observación CDP, sin mandar el texto por el puente.
+    // anuncia también la observación CDP, sin reenviar el texto al proceso principal.
     promptHash: datos.promptHash || (datos.texto ? fingerprint(datos.texto) : ''),
   };
   bridge.event('outgoing', payload);
@@ -278,7 +280,8 @@ function gestoDeEnvio(razon) {
     id: nuevoMessageId(),
     at: ahora,
     chars: texto.length,
-    tokens: estimateTokens(texto, '', site.id),
+    tokenText: texto,
+    tokens: estimateTokens(texto),
     promptHash: fingerprint(texto),
     razon,
     timer: null,
@@ -370,7 +373,8 @@ async function planRequest(input, init) {
     chat: true,
     send: true,
     promptChars: prompt.length,
-    promptTokens: estimateTokens(prompt, gptModelFromRequest(parsed), site.id),
+    promptText: prompt,
+    promptTokens: estimateTokens(prompt),
     model: gptModelFromRequest(parsed),
     promptHash: fingerprint(prompt),
     url,
@@ -441,7 +445,7 @@ function wrapResponse(response, capture = {}) {
           deliveredChars: info.deliveredChars,
           droppedChars: info.droppedChars,
           chars: text.length,
-          tokens: estimateTokens(text, capture.model, capture.host || site.id),
+          tokens: estimateTokens(text),
           clipped: recortado,
           text: recortado ? text.slice(0, MAX_CAPTURE_CHARS) : text,
           dropped: info.dropped.slice(0, 600),
@@ -510,6 +514,7 @@ if (!window.__NEXO_HOOKED__) {
           source: 'request',
           mediated: prepared.mediated,
           chars,
+          tokenText: prepared.promptText || gesto?.tokenText || '',
           tokens: prepared.promptTokens ?? gesto?.tokens ?? 0,
           model: prepared.model || '',
           promptHash: prepared.promptHash || gesto?.promptHash || '',

@@ -9,6 +9,7 @@
 const { ipcRenderer, webFrame } = require('electron');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
+const { outgoingMetadata } = require('./token-metadata.cjs');
 
 const INJECT_PATH = join(__dirname, '..', '..', 'build', 'inject.js');
 
@@ -128,7 +129,7 @@ window.addEventListener('message', async (event) => {
       }
       return;
     }
-    ipcRenderer.send('nexo:event', { type, payload, href: location.href });
+    ipcRenderer.send('nexo:event', { type, payload: type === 'outgoing' ? outgoingMetadata(payload) : payload, href: location.href });
   }
 });
 

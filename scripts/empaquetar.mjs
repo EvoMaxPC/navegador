@@ -19,6 +19,7 @@
  */
 
 import { packager } from '@electron/packager';
+import { downloadFailure } from './download-diagnostic.mjs';
 import { listPackage } from '@electron/asar';
 import { localesToPrune } from './packaging-config.mjs';
 import { createHash } from 'node:crypto';
@@ -72,13 +73,6 @@ if (!existsSync(join(root, 'build', 'icon.ico'))) {
 }
 if (!existsSync(join(root, pkg.main))) fail(`«main» apunta a ${pkg.main}, que no existe.`);
 
-if (pkg.dependencies && Object.keys(pkg.dependencies).length > 0) {
-  fail(
-    'hay dependencias de ejecución en package.json pero el empaquetado excluye node_modules. ' +
-      'Quitá /^\\/node_modules/ de scripts/packaging-config.mjs antes de seguir.',
-  );
-}
-
 const electronVersion = (pkg.devDependencies?.electron || '').replace(/^[^\d]*/, '');
 if (!electronVersion) fail('no se pudo determinar la versión de Electron en package.json.');
 
@@ -122,10 +116,15 @@ try {
     tmpdir: false,
   });
 } catch (error) {
-  const message = String(error?.message || error);
-  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|socket hang up|getaddrinfo/i.test(message)) {
+  const failure = downloadFailure(error);
+  if (failure) {
     console.error(`\n✖ No se pudo descargar Electron ${electronVersion} para win32-${config.arch}.`);
     console.error('  El binario no viene en el paquete de npm: se baja de las releases de Electron.');
+    if (failure === 'tls') {
+      console.error('  El certificado TLS no es de confianza para Node. No desactives la validación TLS.');
+      console.error('  Configurá NODE_EXTRA_CA_CERTS con la CA aprobada de tu red, o usá');
+      console.error('  NODE_USE_SYSTEM_CA=1 con Node >=22.19 si esa CA ya está en el almacén del sistema.');
+    }
     console.error('  Alternativas:');
     console.error('   1. Correr el empaquetado en una máquina con acceso a github.com.');
     console.error(

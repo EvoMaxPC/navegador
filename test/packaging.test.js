@@ -64,7 +64,6 @@ test('las pruebas, la documentación y los scripts no viajan en el paquete', () 
     'docs/NAVEGADOR.md',
     'scripts/empaquetar.mjs',
     'dev/serve.mjs',
-    'node_modules/electron/package.json',
     'package-lock.json',
     'build/icon.png',
     'algo.log',
@@ -82,10 +81,11 @@ test('la lista de exclusiones no se solapa con archivos requeridos', () => {
   assert.deepEqual(overlap, []);
 });
 
-test('el empaquetado excluye node_modules sólo si no hay dependencias de ejecución', () => {
-  const hasDeps = Object.keys(pkg.dependencies || {}).length > 0;
+test('el empaquetado permite las dependencias de producción y usa prune para quitar desarrollo', () => {
   const excludesModules = ignore.some((re) => re.test('/node_modules/electron/index.js'));
-  assert.equal(excludesModules, !hasDeps, 'node_modules debe seguir o salir según dependencies');
+  assert.equal(excludesModules, false, 'prune debe poder recorrer node_modules');
+  const script = readFileSync(join(root, 'scripts/empaquetar.mjs'), 'utf8');
+  assert.match(script, /prune: true/);
 });
 
 test('los nombres y la versión del empaquetado salen de un solo lugar', () => {
@@ -257,7 +257,12 @@ test(
       for (const prefix of forbiddenAsarPrefixes) {
         assert.ok(!entries.some((entry) => entry.startsWith(prefix)), `el asar trae ${prefix}`);
       }
-      assert.ok(!entries.some((entry) => entry.startsWith('node_modules/')), 'el asar trae node_modules');
+      for (const name of Object.keys(pkg.dependencies || {})) {
+        assert.ok(entries.includes(`node_modules/${name}/package.json`), `falta dependencia ${name}`);
+      }
+      for (const name of Object.keys(pkg.devDependencies || {})) {
+        assert.ok(!entries.includes(`node_modules/${name}/package.json`), `filtró dependencia dev ${name}`);
+      }
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

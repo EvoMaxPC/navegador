@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
-import { countTokensForProvider } from '../src/core/text.js';
+import { countGptTokens } from '../src/main/tokens.js';
 
 register('./harness/loader.mjs', import.meta.url);
 
@@ -113,8 +113,7 @@ test('la conversación real «hola» cuenta 1 mensaje, 1 respuesta y 1 turno', a
   assert.equal(fin.messages, antes.messages + 1, 'un mensaje, no dos');
   assert.equal(fin.responses, antes.responses + 1, 'una respuesta, no cuatro');
   assert.equal(fin.turns, antes.turns + 1, 'un turno completo');
-  const tokensRespuesta = countTokensForProvider(RESPUESTA, '', 'chatgpt');
-  assert.equal(fin.outputTokens, antes.outputTokens + tokensRespuesta, 'los tokens BPE de la respuesta visible');
+  assert.equal(fin.outputTokens, antes.outputTokens + countGptTokens(RESPUESTA), 'los tokens de la respuesta visible');
   assert.equal(
     fin.interventions,
     antes.interventions + 2,

@@ -237,6 +237,12 @@ export class CdpCapture {
     const pieces = [];
     const { texts } = extractDeltas(json, { hintPaths: this.site.deltaPaths || null });
     for (const item of texts) {
+      // Lo que el adaptador del sitio ya sumó no se vuelve a sumar por esta
+      // puerta: en los protocolos acumulados cada evento repite el texto
+      // completo, y el respaldo genérico lo duplicaba cuando el adaptador
+      // —que sí deduplica— no encontraba nada nuevo. Duplicar acá son tokens de
+      // salida contados dos veces.
+      if (this.site.id === 'chatgpt' && this.adapter && this.length && this.text.includes(item.text)) continue;
       const previous = this.seen.get(item.path) || '';
       let piece = item.text;
       if (previous) {
