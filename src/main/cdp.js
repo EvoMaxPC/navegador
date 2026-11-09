@@ -129,6 +129,17 @@ export class CdpObserver {
     if (!debuggerApi || typeof debuggerApi.attach !== 'function') {
       this.stats.failed += 1;
       this.log('CDP no disponible en esta versión de Electron');
+      // Sin depurador no hay lectura de respuestas por observación. Antes esto
+      // sólo salía por consola, que en la aplicación empaquetada no ve nadie:
+      // el panel mostraba un cero sin causa.
+      this.onDiagnostic({
+        code: 'cdp-sin-depurador',
+        key: 'cdp-sin-depurador|version',
+        severity: 'warn',
+        title: 'El depurador de Chromium no está disponible',
+        detail: 'Esta versión de Electron no expone `webContents.debugger`: las respuestas sólo se pueden leer desde la página y desde la red.',
+        meta: { host: hostOf(target) },
+      });
       return false;
     }
 
@@ -139,6 +150,14 @@ export class CdpObserver {
       // permite: se sigue sin observar, sin tocar la navegación.
       this.stats.failed += 1;
       this.log(`CDP no se pudo adjuntar: ${error?.message || error}`);
+      this.onDiagnostic({
+        code: 'cdp-sin-depurador',
+        key: `cdp-sin-depurador|${hostOf(target)}`,
+        severity: 'warn',
+        title: `${hostOf(target) || 'la pestaña'}: el depurador no se pudo adjuntar`,
+        detail: `${error?.message || error}. Con DevTools abierto en esa pestaña el navegador no puede observar el tráfico: cerralo y recargá.`,
+        meta: { host: hostOf(target) },
+      });
       return false;
     }
 
@@ -587,6 +606,17 @@ export class CdpObserver {
     // Un stream que la capa ya cerró está contado: no se vuelve a leer.
     if (pending.stream && this.engine?.layerEndedAfter?.(state.id, pending.since)) {
       this.stats.ignored += 1;
+      // No es un fallo, pero sí la explicación de por qué el texto no vino de
+      // acá: sin este aviso, «CDP no capturó» y «la capa llegó primero» se
+      // veían igual en el registro.
+      this.onDiagnostic({
+        code: 'response-capa',
+        key: `response-capa|${pending.host}`,
+        severity: 'info',
+        title: `${pending.host}: el stream lo cerró la capa de la página`,
+        detail: 'La página ya contó ese stream, así que el depurador no lo vuelve a leer: contarlo otra vez sería sumar dos veces la misma respuesta.',
+        meta: { host: pending.host, url: pending.url },
+      });
       return;
     }
 
@@ -662,6 +692,7 @@ export class CdpObserver {
       const prompt = request?.prompt || null;
       if (prompt) capture.prompt(prompt);
       let eventos = 0;
+      let primerEvento = null;
       for (const linea of cuerpo.split(/\r?\n/)) {
         const limpia = linea.trim();
         if (!limpia.startsWith('data:')) continue;
@@ -670,6 +701,7 @@ export class CdpObserver {
         const evento = safeJson(dato);
         if (!evento) continue;
         eventos += 1;
+        if (!primerEvento) primerEvento = evento;
         capture.add(evento);
       }
       if (!eventos) {
@@ -686,6 +718,21 @@ export class CdpObserver {
       }
       this.stats.bodies += 1;
       const listo = capture.take();
+      if (!listo) {
+        // El cuerpo se leyó y los eventos se parsearon, pero ninguno trajo
+        // texto del asistente. Es la forma silenciosa de perder una respuesta:
+        // el protocolo del sitio no es el que el adaptador espera. Se deja la
+        // forma del primer evento para poder corregirlo sin adivinar.
+        this.onDiagnostic({
+          code: 'response-sin-texto',
+          key: `response-sin-texto|${pending.host}`,
+          severity: 'warn',
+          title: `${pending.host}: el stream llegó y no se reconoció texto`,
+          detail: `${eventos} evento(s) y ningún texto del asistente. Forma del primer evento: ${shapeOf(primerEvento)}.`,
+          meta: { host: pending.host, url: pending.url, events: eventos, shape: shapeOf(primerEvento) },
+        });
+        return;
+      }
       this.#deliver(state, listo);
       return;
     }
@@ -710,7 +757,20 @@ export class CdpObserver {
     if (prompt) capture.prompt(prompt);
     const { added } = capture.add(json);
     if (!added) {
+      // Un JSON de la conversación que no se reconoce como texto: se deja la
+      // forma de sus claves para saber qué buscaba el perfil y qué trajo el
+      // sitio. Sin esto el cero no tenía causa.
       this.stats.ignored += 1;
+      if (request?.chat) {
+        this.onDiagnostic({
+          code: 'response-sin-texto',
+          key: `response-sin-texto|${pending.host}`,
+          severity: 'warn',
+          title: `${pending.host}: la respuesta llegó y no se reconoció texto`,
+          detail: `El cuerpo es JSON y el perfil del sitio no encontró el texto del asistente. Forma: ${shapeOf(json)}.`,
+          meta: { host: pending.host, url: pending.url, shape: shapeOf(json) },
+        });
+      }
       return;
     }
     this.stats.bodies += 1;
@@ -764,6 +824,25 @@ export class CdpObserver {
     }
     return Promise.resolve(api.sendCommand(method, params));
   }
+}
+
+/**
+ * Forma de un objeto para el registro: las claves, no el contenido.
+ *
+ * Se usa cuando una respuesta llegó y no se reconoció su texto. Con las claves
+ * alcanza para saber qué protocolo habló el sitio; el texto del usuario no
+ * necesita salir de la conversación para explicar un cero.
+ */
+function shapeOf(value, depth = 0) {
+  if (value === null || value === undefined) return String(value);
+  if (typeof value !== 'object') return typeof value;
+  if (depth > 1) return '…';
+  const keys = Array.isArray(value) ? [] : Object.keys(value).slice(0, 8);
+  const inside = keys
+    .slice(0, 8)
+    .map((key) => `${key}:${shapeOf(value[key], depth + 1)}`)
+    .join(', ');
+  return Array.isArray(value) ? `[${value.length}]` : `{${inside}}`;
 }
 
 /** JSON completo o `null`: media respuesta no se interpreta. */

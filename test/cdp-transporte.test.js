@@ -120,19 +120,28 @@ test('adjuntar dos veces no duplica; soltar libera el depurador', () => {
 });
 
 test('si el depurador no se puede adjuntar, el navegador sigue igual', () => {
-  const { observer, logs } = makeObserver();
+  const { observer, logs, diagnostics } = makeObserver();
   const tab = fakeTab(5, 'https://claude.ai/');
   tab.debugger.failAttach = 'Debugger is already attached to the target';
   assert.equal(observer.attach(tab), false);
   assert.equal(observer.status().failed, 1);
   assert.match(logs.join(' '), /no se pudo adjuntar/i);
+  // La consola no la ve nadie en la aplicación empaquetada: el motivo tiene que
+  // quedar en el registro del panel.
+  const aviso = diagnostics.find((item) => item.code === 'cdp-sin-depurador');
+  assert.ok(aviso, 'el motivo del fallo queda en el registro');
+  assert.match(aviso.detail, /DevTools/i, 'y dice cómo destrabarlo');
 });
 
-test('sin API de depurador el observador queda inerte', () => {
-  const { observer } = makeObserver();
+test('sin API de depurador el observador queda inerte y lo deja dicho', () => {
+  const { observer, diagnostics } = makeObserver();
   const tab = { id: 6, url: 'https://claude.ai/', getURL: () => 'https://claude.ai/', isDestroyed: () => false };
   assert.equal(observer.attach(tab), false);
   assert.equal(observer.status().failed, 1);
+  assert.ok(
+    diagnostics.some((item) => item.code === 'cdp-sin-depurador'),
+    'un cero por falta de depurador no puede quedar mudo',
+  );
 });
 
 test('sync adjunta y suelta según la URL de la pestaña', () => {
@@ -334,7 +343,7 @@ test('la capa cuenta el envío pero no cierra el stream: CDP lo lee igual', asyn
 });
 
 test('si la capa ya cerró ese stream, CDP no lo vuelve a leer', async () => {
-  const { observer, engine } = makeObserver();
+  const { observer, engine, diagnostics } = makeObserver();
   const tab = fakeTab(16, 'https://claude.ai/');
   observer.attach(tab);
 
@@ -356,6 +365,42 @@ test('si la capa ya cerró ese stream, CDP no lo vuelve a leer', async () => {
 
   assert.equal(engine.captures.length, 0, 'no se captura dos veces el mismo stream');
   assert.ok(!tab.debugger.commands.some((command) => command.method === 'Network.getResponseBody'));
+  // Y queda dicho que la respuesta la contó la capa: si no, «CDP no capturó» y
+  // «la capa llegó primero» se veían igual.
+  assert.ok(
+    diagnostics.some((item) => item.code === 'response-capa'),
+    'el registro distingue «lo contó la capa» de «el depurador no pudo»',
+  );
+});
+
+test('un stream con eventos que no traen texto deja dicho qué forma tenía', async () => {
+  const { observer, engine, diagnostics } = makeObserver();
+  const tab = fakeTab(18, 'https://chatgpt.com/');
+  observer.attach(tab);
+
+  // Sólo el eco del mensaje del usuario: el cuerpo se lee, hay eventos, y no
+  // hay una sola letra del asistente. Antes esto era un cero sin explicación.
+  const eco = JSON.stringify({
+    message: { author: { role: 'user' }, content: { content_type: 'text', parts: ['mi pregunta'] } },
+  });
+  tab.debugger.bodies.set('req-eco', `data: ${eco}\n\ndata: [DONE]\n\n`);
+  tab.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-eco',
+    type: 'Fetch',
+    request: { url: 'https://chatgpt.com/backend-api/f/conversation', method: 'POST' },
+  });
+  tab.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-eco',
+    type: 'Fetch',
+    response: { url: 'https://chatgpt.com/backend-api/f/conversation', status: 200, mimeType: 'text/event-stream' },
+  });
+  tab.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-eco' });
+  await settle();
+
+  assert.equal(engine.captures.length, 0, 'sin texto no se inventa una captura');
+  const aviso = diagnostics.find((item) => item.code === 'response-sin-texto');
+  assert.ok(aviso, 'el registro dice que el stream llegó y no se reconoció texto');
+  assert.match(aviso.detail, /message/, 'con la forma del evento, para poder corregirlo');
 });
 
 test('lo que no es JSON, no es XHR o no es de un proveedor se descarta', async () => {

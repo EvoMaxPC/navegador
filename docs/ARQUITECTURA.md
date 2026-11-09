@@ -241,6 +241,22 @@ modelo: CDP exige que la URL sea la del endpoint de chat del sitio
 un JSON de cuentas o de listas no se cuentan, aunque vengan del mismo dominio y
 sean un POST.
 
+**Un cero no se queda sin causa.** Cada rama que puede perder una respuesta deja
+un aviso en el registro, con el código que la identifica:
+
+| Código | Qué pasó |
+| --- | --- |
+| `response-tipo` | La respuesta de la conversación llegó con un tipo que el depurador no observa. |
+| `response-mime` | El MIME no es SSE ni JSON: el cuerpo no se interpreta. |
+| `response-sin-cuerpo` | El búfer del depurador ya no tenía el cuerpo. |
+| `response-vacio` | El depurador devolvió el cuerpo vacío en un stream. |
+| `response-formato` | El cuerpo no tenía eventos `data:` con JSON (deja una muestra). |
+| `response-base64` | El cuerpo vino codificado y se decodificó. |
+| `response-sin-texto` | El stream se leyó, hubo eventos y ninguno trajo texto del asistente: deja la **forma** del primer evento para corregir el adaptador. |
+| `response-capa` | El stream lo cerró la capa de la página: el depurador no lo relee. |
+| `cdp-sin-depurador` | El depurador no se pudo adjuntar (o no existe en este Electron). |
+| `incoming-network` | La respuesta se contó por el cierre de la red: sin texto, sin tokens de salida. |
+
 **Asociación.** El envío guarda su `messageId` en la petición observada. La
 respuesta a esa petición viaja con el mismo identificador y cierra **ese** turno;
 un socket, que no tiene URL de petición, se asocia al mensaje que está esperando
