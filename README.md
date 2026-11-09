@@ -28,7 +28,15 @@ dependencias en tiempo de ejecución.
   en [`docs/NAVEGADOR.md`](docs/NAVEGADOR.md).
 - **Mediación (etapa 0, completa):** motor saliente, centinela, filtro SSE,
   reparación, antibucles y EVO MEMORY.
+- **Aplicación de Windows (compila y arranca):** `npm run dist:win` genera
+  `nexo.exe` con icono y metadatos, dentro de un ZIP listo para repartir; el
+  ejecutable empaquetado se autodiagnostica con `npm run smoke`. GitHub Actions
+  compila en Windows real y deja el ZIP como artefacto. Ver
+  [`docs/EMPAQUETADO.md`](docs/EMPAQUETADO.md).
 - **Interceptación de red por CDP (etapa 4):** aprobada, todavía no implementada.
+
+Auditoría completa del código, con lo que se rompía y lo que se corrigió:
+[`docs/AUDITORIA.md`](docs/AUDITORIA.md).
 
 ## Probarlo en 30 segundos
 
@@ -43,13 +51,17 @@ npm run demo            # → http://localhost:3000/demo/
 npm start
 ```
 
+En Windows, `dist\Nexo-win32-x64\nexo.exe` después de `npm run dist:win`.
+
 La sala de pruebas muestra el antes y el después en paralelo: a la izquierda el
 texto que generó el modelo (con su bucle infinito), a la derecha lo que Nexo
 entregó. El modelo está simulado; la mediación es la de verdad — es el mismo
 código que corre dentro del navegador.
 
 ```bash
-npm test                # 89 pruebas, sin dependencias
+npm test                # 248 pruebas, sin dependencias
+npm run verify          # pruebas + bundle + checklist manual
+npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
 ```
 
 ---
@@ -216,8 +228,10 @@ src/main/        proceso principal: ventana, pestañas, ajustes, motor
 src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
-test/            195 pruebas con node:test
-docs/            arquitectura, navegador, adaptadores, privacidad, memoria y propuesta
+scripts/         verificación, icono, empaquetado para Windows y prueba de humo
+test/            248 pruebas con node:test (incluye un Electron falso para el arranque)
+docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
+.github/         flujo que compila la aplicación de Windows
 ```
 
 ## Privacidad

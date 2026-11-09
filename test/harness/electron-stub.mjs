@@ -40,6 +40,7 @@ export class FakeWebContents extends EventEmitter {
     this.zoomFactor = 1;
     this.sent = [];
     this.destroyed = false;
+    this.reloads = 0;
   }
 
   send(channel, payload) {
@@ -75,6 +76,13 @@ export class FakeWebContents extends EventEmitter {
 
   getZoomFactor() {
     return this.zoomFactor;
+  }
+
+  /** Simula una recarga pedida por el proceso principal. */
+  reload() {
+    this.reloads = (this.reloads || 0) + 1;
+    this.emit('did-finish-load');
+    return this;
   }
 
   /** Simula una navegación completa del usuario. */
@@ -141,6 +149,9 @@ export class FakeBrowserWindow extends EventEmitter {
   attachWebview(url = 'https://claude.ai/') {
     const contents = new FakeWebContents('webview', url);
     this.attachedWebviews.push(contents);
+    // Electron anuncia el webContents nuevo antes de adjuntarlo a la ventana; el
+    // proceso principal engancha ahí el endurecimiento y la recuperación.
+    app.emit('web-contents-created', {}, contents);
     this.webContents.emit('did-attach-webview', {}, contents);
     return contents;
   }

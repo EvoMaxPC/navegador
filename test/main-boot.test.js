@@ -11,6 +11,9 @@ import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
 
+// La ventana de recuperación de choques se acorta para poder medirla.
+process.env.NEXO_CRASH_WINDOW_MS = '600';
+
 register('./harness/loader.mjs', import.meta.url);
 
 const { journal } = await import('./harness/electron-stub.mjs');
@@ -199,4 +202,34 @@ test('la memoria EVO responde desde el proceso principal', async () => {
   assert.equal(typeof stats.active, 'number');
   const recalled = await callIpc('nexo:memory:recall', { query: 'nada' });
   assert.ok(Array.isArray(recalled));
+});
+
+test('una pestaña que se cae se recarga, pero no en bucle', async () => {
+  await settle();
+  const win = journal.windows[0];
+  const view = win.attachWebview('https://claude.ai/');
+  view.navigateTo('https://claude.ai/', 'Claude');
+
+  view.emit('render-process-gone', {}, { reason: 'crashed' });
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  assert.equal(view.reloads, 1, 'debe intentar recuperarla');
+
+  // Se vuelve a caer dentro de la ventana de gracia: no se insiste.
+  view.emit('render-process-gone', {}, { reason: 'crashed' });
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  assert.equal(view.reloads, 1, 'no debe recargar en bucle');
+
+  // Una salida limpia no es un choque.
+  const otro = win.attachWebview('https://chat.openai.com/');
+  otro.emit('render-process-gone', {}, { reason: 'clean-exit' });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(otro.reloads, 0, 'cerrar una pestaña no es un choque');
+
+  // Si la página se sostiene el tiempo de gracia, un choque nuevo vuelve a
+  // tener derecho a su recarga.
+  otro.navigateTo('https://chat.openai.com/', 'ChatGPT');
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  otro.emit('render-process-gone', {}, { reason: 'oom' });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(otro.reloads, 1, 'tras cargar bien, se vuelve a intentar');
 });

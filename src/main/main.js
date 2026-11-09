@@ -66,6 +66,13 @@ let profile = null;
 let saveTimer = null;
 /** Relación entre descargas de Chromium y entradas del perfil. */
 const downloadItems = new Map();
+/**
+ * Recuperación de pestañas caídas: intentos por pestaña y temporizador que los
+ * olvida cuando la página demuestra que se sostiene.
+ */
+const crashRecovery = new Map();
+/** Cuánto tiene que aguantar una página cargada para olvidar el choque previo. */
+const CRASH_WINDOW_MS = Number(process.env.NEXO_CRASH_WINDOW_MS) || 5000;
 let downloadSeq = 0;
 
 /**
@@ -625,6 +632,37 @@ app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() !== 'webview') return;
   contents.on('will-navigate', (event, url) => {
     if (!/^https?:\/\//i.test(url)) event.preventDefault();
+  });
+
+  // Una pestaña que se cae (falta de memoria, choque del renderizador) se
+  // recarga, pero una sola vez por choque seguido: un bucle de recargas sobre
+  // una página que rompe el proceso de render deja la aplicación inusable.
+  contents.on('render-process-gone', (_event, details) => {
+    if (details?.reason === 'clean-exit') return;
+    const entry = crashRecovery.get(contents.id) || { attempts: 0, timer: null };
+    entry.attempts += 1;
+    console.error(`[nexo] la pestaña se cayó (${details?.reason || 'desconocido'})`);
+    crashRecovery.set(contents.id, entry);
+    if (entry.attempts > 1 || contents.isDestroyed?.()) return;
+    setTimeout(() => {
+      if (!contents.isDestroyed?.()) contents.reload();
+    }, 400);
+  });
+
+  // Cargar no alcanza: la página tiene que sostenerse un rato para que el
+  // próximo choque vuelva a tener derecho a una recarga.
+  contents.on('did-finish-load', () => {
+    const entry = crashRecovery.get(contents.id);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => crashRecovery.delete(contents.id), CRASH_WINDOW_MS);
+    if (entry.timer.unref) entry.timer.unref();
+  });
+
+  contents.on('destroyed', () => {
+    const entry = crashRecovery.get(contents.id);
+    clearTimeout(entry?.timer);
+    crashRecovery.delete(contents.id);
   });
 });
 

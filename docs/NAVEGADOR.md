@@ -126,10 +126,19 @@ npm test
 
 - `test/nav-stores.test.js` — 34 pruebas de URL, historial, marcadores, descargas,
   sesión, permisos, zoom, atajos y perfil completo.
-- `test/shell-contract.test.js` — 8 pruebas de contrato entre HTML, interfaz,
+- `test/main-boot.test.js` — 14 pruebas que importan el proceso principal real
+  contra un Electron falso: arranque de la ventana, esquema `nexo://` con control
+  de ruta, menú, permisos de la partición, historial, marcadores, zoom, descargas,
+  sesión, sugerencias, borrado de datos, memoria y recuperación de una pestaña
+  caída.
+- `test/shell-contract.test.js` — 9 pruebas de contrato entre HTML, interfaz,
   preload y proceso principal: identificadores huérfanos, canales IPC sin
   handler, métodos del puente inexistentes y permisos concedidos sin política.
 
 La prueba de contrato existe porque el error más probable de esta etapa no es de
 lógica: es un `id` que cambió de nombre o un canal IPC que nadie escucha. Con la
 ventana cerrada, eso no se ve; con estas pruebas, falla en consola.
+
+El navegador también se compila y se prueba empaquetado: ver
+[`EMPAQUETADO.md`](EMPAQUETADO.md) (`npm run dist:win`, `npm run smoke`) y
+[`AUDITORIA.md`](AUDITORIA.md) para lo que se corrigió en la última pasada.
