@@ -59,35 +59,7 @@ jobs:
         run: npm run dist:win
 
       - name: Prueba de humo del ejecutable
-        shell: pwsh
-        run: |
-          $exe = Join-Path $PWD 'dist\Nexo-win32-x64\nexo.exe'
-          if (-not (Test-Path $exe)) { throw "no se generó $exe" }
-          $env:ELECTRON_ENABLE_LOGGING = '1'
-          $env:NEXO_SMOKE_OUT = Join-Path $PWD 'ci-humo.txt'
-          # GitHub Actions corre pwsh con ErrorActionPreference=Stop y, desde
-          # PowerShell 7.4, un código distinto de cero de un proceso nativo es
-          # error terminante: el paso moría en esta línea, antes de leer nada.
-          $PSNativeCommandUseErrorActionPreference = $false
-          & $exe --smoke *> salida-humo.txt
-          $codigo = $LASTEXITCODE
-          if (Test-Path ci-humo.txt) {
-            Get-Content ci-humo.txt
-          } else {
-            "sin informe: el ejecutable no llegó a escribirlo" | Out-File -Encoding utf8 ci-humo.txt
-          }
-          $ruta = Join-Path $PWD 'ci-humo.txt'
-          $extra = "código de salida: $codigo`n"
-          if (Test-Path salida-humo.txt) {
-            $extra += "===== salida del ejecutable =====`n" + (Get-Content salida-humo.txt -Raw) + "`n"
-          }
-          try { [System.IO.File]::AppendAllText($ruta, $extra) } catch { Write-Warning $_.Exception.Message }
-
-          # El veredicto es el informe: Electron puede salir con un código
-          # distinto por el apagado de Chromium, aunque la app haya arrancado.
-          if (-not (Select-String -Path $ruta -Pattern 'arrancó y funciona' -Quiet)) {
-            throw "la prueba de humo no pasó (código $codigo)"
-          }
+        run: node scripts/humo.mjs
 
       - name: Resumen
         shell: pwsh

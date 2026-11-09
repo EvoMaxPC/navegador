@@ -17,6 +17,7 @@
     "test:watch": "node --test --watch",
     "verify": "node scripts/verificar.mjs",
     "make:icon": "node scripts/make-icon.mjs",
+    "smoke": "node scripts/humo.mjs",
     "dist:win": "npm run build:inject && npm run make:icon && node scripts/empaquetar.mjs"
   },
   "devDependencies": {
