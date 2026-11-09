@@ -161,11 +161,12 @@ function wrapResponse(response) {
       language: state.language,
       host: CONFIG.host,
       onStop: (info) => {
-        bridge.event('stream-stop', { site: site.id, ...info });
+        bridge.event('stream-stop', { site: site.id, host: CONFIG.host, ...info });
       },
       onEnd: (info) => {
         bridge.event('stream-end', {
           site: site.id,
+          host: CONFIG.host,
           stopped: info.stopped,
           code: info.code,
           truncated: info.truncated,

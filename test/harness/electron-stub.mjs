@@ -31,10 +31,72 @@ export const journal = {
 
 let nextId = 10;
 
+/**
+ * Depurador falso: imita la API de `webContents.debugger` (el CDP de Electron).
+ *
+ * Guarda los comandos enviados y permite inyectar eventos del protocolo con
+ * `emitEvent(method, params)`, que es lo que hace Chromium cuando hay tráfico.
+ * `failAttach` reproduce el caso «ya hay un depurador adjunto».
+ */
+export class FakeDebugger extends EventEmitter {
+  constructor(contents = null) {
+    super();
+    this.contents = contents;
+    this.attached = false;
+    this.attachedVersion = null;
+    this.commands = [];
+    this.bodies = new Map();
+    this.failAttach = null;
+    this.failCommand = null;
+    this.rejectBodyFor = new Set();
+  }
+
+  attach(version) {
+    if (this.failAttach) throw new Error(this.failAttach);
+    if (this.attached) throw new Error('Debugger is already attached to the target');
+    this.attached = true;
+    this.attachedVersion = version;
+    return this;
+  }
+
+  isAttached() {
+    return this.attached;
+  }
+
+  detach() {
+    if (!this.attached) throw new Error('Debugger is not attached to the target');
+    this.attached = false;
+    this.emit('detach', {}, 'target closed');
+  }
+
+  async sendCommand(method, params = {}) {
+    this.commands.push({ method, params });
+    if (this.failCommand && this.failCommand.method === method) {
+      throw new Error(this.failCommand.message || 'fallo simulado');
+    }
+    if (method === 'Network.getResponseBody') {
+      if (this.rejectBodyFor.has(params.requestId)) {
+        throw new Error('No resource with given identifier found');
+      }
+      const body = this.bodies.get(params.requestId);
+      if (body === undefined) throw new Error('No resource with given identifier found');
+      return typeof body === 'string' ? { body, base64Encoded: false } : body;
+    }
+    return {};
+  }
+
+  /** Evento del protocolo, como lo entrega Chromium. */
+  emitEvent(method, params = {}) {
+    this.emit('message', {}, method, params);
+    return this;
+  }
+}
+
 export class FakeWebContents extends EventEmitter {
   constructor(type = 'window', url = 'https://claude.ai/') {
     super();
     this.id = (nextId += 1);
+    this.debugger = new FakeDebugger(this);
     this.type = type;
     this.url = url;
     this.title = 'Título de prueba';
@@ -86,8 +148,15 @@ export class FakeWebContents extends EventEmitter {
     return this;
   }
 
+  /** Inicio de navegación (el proceso principal decide si observar el sitio). */
+  startNavigation(url, isMainFrame = true) {
+    this.emit('did-start-navigation', {}, url, false, isMainFrame);
+    return this;
+  }
+
   /** Simula una navegación completa del usuario. */
   navigateTo(url, title = 'Página') {
+    this.startNavigation(url);
     this.url = url;
     this.title = title;
     this.emit('did-navigate', {}, url);

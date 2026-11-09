@@ -13,6 +13,7 @@ import { dirname, extname, join, normalize, sep } from 'node:path';
 import { Store } from './store.js';
 import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
+import { CdpObserver } from './cdp.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
@@ -78,6 +79,12 @@ if (isSmoke && smokeOut) {
 let win = null;
 let store = null;
 let engine = null;
+/**
+ * Observación CDP: frames de WebSocket y respuestas JSON que el enganche de
+ * `fetch` no alcanza. Es sólo lectura —no reescribe tráfico— y si no está
+ * disponible, el navegador funciona igual.
+ */
+let cdp = null;
 let memory = null;
 let profile = null;
 /** Guardado diferido: navegar no debe escribir en disco en cada clic. */
@@ -219,6 +226,7 @@ function createWindow() {
     }
   }
   win.on('closed', () => {
+    cdp?.releaseAll();
     win = null;
   });
 
@@ -263,6 +271,16 @@ function createWindow() {
       applyZoom(contents);
     });
 
+    // CDP: observar los canales que el enganche de `fetch` no ve (frames de
+    // WebSocket y respuestas JSON sin streaming). Se adjunta sólo a los sitios
+    // con perfil conocido y se suelta si la pestaña navega a otro lado.
+    cdp?.sync(contents);
+    contents.on('did-start-navigation', (_e, url, _inPage, isMainFrame) => {
+      if (!isMainFrame) return;
+      if (cdp && CdpObserver.wants(url)) cdp.attach(contents, url);
+      else cdp?.release(contents);
+    });
+
     // Atajos del navegador aunque la página tenga el foco: los aceleradores del
     // menú no siempre ganan contra una webview, y Ctrl+F se lo come el sitio.
     contents.on('before-input-event', (event, input) => {
@@ -276,6 +294,7 @@ function createWindow() {
     });
 
     contents.on('destroyed', () => {
+      cdp?.release(contents);
       engine?.dropTab(contents.id);
       if (profile) profile.saveAll();
     });
@@ -321,7 +340,21 @@ function registerIpc() {
     store.clearLog();
     return [];
   });
-  ipcMain.handle('nexo:stats', () => ({ ...engine.stats(), log: store.log.length }));
+  // `cdp` son los contadores del motor (turnos observados y descartados);
+  // `cdpObserver` es el estado del transporte. Van separados a propósito: uno
+  // cuenta lo que se registró y el otro lo que se vio en el cable.
+  ipcMain.handle('nexo:stats', () => ({
+    ...engine.stats(),
+    log: store.log.length,
+    cdpObserver: cdp?.status() || null,
+  }));
+
+  // Estado de la observación CDP. La interfaz todavía no lo pide; existe para
+  // diagnóstico, para el informe y para las pruebas de contrato.
+  ipcMain.handle('nexo:cdp:stats', () => ({
+    observer: cdp?.status() || { enabled: false, tabs: 0 },
+    engine: engine ? engine.stats().cdp : null,
+  }));
 
   /* ---------------- EVO MEMORY ---------------- */
   ipcMain.handle('nexo:memory:stats', () => ({ ...engine.memoryStats(), file: memory?.file || null }));
@@ -662,6 +695,16 @@ app.whenReady().then(async () => {
     onEvent: (entry) => broadcast('nexo:event', { type: 'intervention', payload: entry }),
   });
   mark('motor');
+  cdp = new CdpObserver({
+    engine,
+    log: (message) => console.log('[cdp]', message),
+    // Sin depurador en este arranque (prueba de humo, CI sin WebContents
+    // completo) la observación queda apagada y nada más cambia.
+    enabled: process.env.NEXO_CDP !== '0',
+    // Apagar un sitio en Ajustes apaga también su observación: no se mira el
+    // tráfico de un sitio que el usuario decidió dejar en paz.
+    isAllowed: (host) => engine.isEnabledFor(host),
+  });
   registerProtocol();
   registerIpc();
   configureSession();

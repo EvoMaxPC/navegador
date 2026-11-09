@@ -69,7 +69,7 @@ entregó. El modelo está simulado; la mediación es la de verdad — es el mism
 código que corre dentro del navegador.
 
 ```bash
-npm test                # 290 pruebas, sin dependencias
+npm test                # 336 pruebas, sin dependencias
 npm run bench           # rendimiento medido: tabla antes/después
 npm run verify          # pruebas + bundle + checklist manual
 npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
@@ -177,13 +177,34 @@ Detalle, fórmulas y límites honestos: [`docs/EVO-MEMORY.md`](docs/EVO-MEMORY.m
 
 ---
 
+## 6. Observación CDP: los canales que el enganche no ve
+
+Hay dos canales que no pasan por `fetch` ni por un stream: los **frames de
+WebSocket** y las **respuestas JSON completas**. El depurador de Electron (CDP)
+los observa desde el proceso principal, los lee con los mismos adaptadores del
+sitio y los entrega al motor: el centinela analiza el texto, el turno entra en el
+historial y en EVO MEMORY, `responseEngine` avisa si hubo negativa, y el libro de
+intervenciones lo cuenta.
+
+**Observar no es mediar.** Ese texto ya llegó al sitio, así que no se corta ni se
+reescribe: un bucle detectado allí se registra como «observado, no se pudo
+cortar», con `savedChars: 0`. Los SSE quedan fuera de CDP a propósito: de esos ya
+se ocupa la página, y mirarlos también contaría el turno dos veces.
+
+Si el depurador no está disponible, la capa queda inerte y el navegador se
+comporta igual que antes. Detalle y límites: [`docs/CDP.md`](docs/CDP.md).
+
+---
+
 ## Cómo se engancha a cada sitio
 
-| Capa | Dónde vive | Depende de |
-|---|---|---|
-| Petición | `fetch` del mundo principal | patrón de URL del sitio |
-| Respuesta | `TransformStream` sobre el cuerpo | formato SSE |
-| Continuación | adaptador DOM | selectores del cuadro de texto |
+| Capa | Dónde vive | Depende de | ¿Media? |
+|---|---|---|---|
+| Petición | `fetch` del mundo principal | patrón de URL del sitio | sí |
+| Respuesta SSE | `TransformStream` sobre el cuerpo | formato SSE | sí |
+| Continuación | adaptador DOM | selectores del cuadro de texto | sí |
+| WebSocket | depurador CDP (proceso principal) | frames JSON del sitio | no, sólo observa |
+| JSON sin SSE | depurador CDP (proceso principal) | cuerpo JSON del sitio | no, sólo observa |
 
 El enganche de red es la base: sobrevive a los rediseños del sitio. El adaptador DOM
 solo se usa para la continuación automática y es lo primero que se rompe cuando un
@@ -213,6 +234,9 @@ cómo añadir uno.
   petición, el motor deja pasar el mensaje sin tocar (nunca rompe la petición).
 - No está probado contra todos los sitios: `docs/SITIOS.md` marca el estado de cada
   uno.
+- Lo que llega por WebSocket o como JSON completo **no se puede corregir**: CDP lo
+  observa y lo registra, pero cuando lo ve ya está en pantalla. Ver
+  [`docs/CDP.md`](docs/CDP.md).
 - La memoria no agranda el modelo ni esquiva los límites del proveedor: aprovecha
   mejor el presupuesto que ya tenés. La recuperación semántica es TF-IDF más 21
   grupos conceptuales curados, no un modelo denso: un sinónimo fuera de esos
@@ -229,18 +253,19 @@ src/core/        motor isomorfo, sin dependencias (Node y navegador)
   analysis.js      periodicidad, tartamudeo, truncamiento
   streamSentinel.js búfer + sonda + corte
   streamFilter.js  reescritura de SSE
+  cdp.js           lectura de frames WebSocket y cuerpos JSON (observación)
   promptEngine.js  intervención saliente
   responseEngine.js reparación entrante
   compaction.js    tarjeta de memoria
   guard.js         orquestador por conversación
 src/inject/      capa inyectada en el mundo principal de la página
 src/preload/     puentes (pestañas y shell)
-src/main/        proceso principal: ventana, pestañas, ajustes, motor
+src/main/        proceso principal: ventana, pestañas, ajustes, motor y capa CDP
 src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
 scripts/         verificación, icono, empaquetado para Windows y prueba de humo
-test/            290 pruebas con node:test (incluye un Electron falso para el arranque)
+test/            336 pruebas con node:test (incluye un Electron falso para el arranque)
 docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
 .github/         flujo que compila la aplicación de Windows
 ```

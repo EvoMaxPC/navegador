@@ -180,6 +180,48 @@ export class ConversationGuard {
   }
 
   /**
+   * Agrega una entrada al libro de intervenciones.
+   *
+   * Lo usan los caminos que no pasan por `preparePrompt`/`finalizeResponse`
+   * (por ejemplo la observación por CDP), para que sus avisos salgan por el
+   * mismo canal y lleguen a la interfaz como cualquier otro.
+   */
+  note(entry) {
+    return this.#emit(entry);
+  }
+
+  /**
+   * Registra un turno **observado**, no mediado.
+   *
+   * Hay respuestas que llegan por canales que la capa de la página no toca
+   * (frames de WebSocket, cuerpos JSON sin streaming). Esas respuestas ya se
+   * mostraron tal cual: no se recortaron ni se repararon. Lo único honesto es
+   * guardarlas en el historial y en EVO MEMORY, para que el contexto de los
+   * próximos turnos sea el real, y no emitir ningún evento que insinúe una
+   * intervención que no ocurrió.
+   */
+  observeTurn({ prompt = null, answer = null, meta = {} } = {}) {
+    const recorded = [];
+    const remember = (role, content) => {
+      this.history.push({ role, content, tokens: estimateTokens(content) });
+      if (this.memory) {
+        this.memory.remember({ role, content }, { conversationId: this.conversationId, url: this.host, ...meta });
+      }
+    };
+
+    if (typeof prompt === 'string' && prompt.trim()) {
+      remember('user', prompt.trim());
+      this.turns += 1;
+      recorded.push('user');
+    }
+    if (typeof answer === 'string' && answer.trim()) {
+      remember('assistant', answer.trim());
+      recorded.push('assistant');
+    }
+    return { recorded, turns: this.turns };
+  }
+
+  /**
    * Abre la recepción de una respuesta.
    * @returns {ConversationTurn}
    */

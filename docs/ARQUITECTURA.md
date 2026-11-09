@@ -1,19 +1,23 @@
 # Arquitectura
 
-Tres ideas ordenan todo el proyecto:
+Cuatro ideas ordenan todo el proyecto:
 
 1. **El motor es isomorfo.** `src/core/` no importa nada de Electron, ni del DOM,
    ni de Node. Se ejecuta igual en el proceso principal, en la sala de pruebas del
    navegador y en los tests. Se compila una sola vez (esbuild) y se inyecta como
    IIFE en el mundo principal de cada página.
-2. **Dos mundos, un puente.** El preload corre aislado y es el único con
+2. **Observar todo, mediar lo que se puede.** La mediación (reescribir la
+   petición, filtrar el stream) vive en la página. La observación (frames de
+   WebSocket, cuerpos JSON) vive en el proceso principal con el depurador CDP.
+   Lo observado nunca se presenta como mediado.
+3. **Dos mundos, un puente.** El preload corre aislado y es el único con
    privilegios. El código que engancha `fetch` corre en el mundo de la página; se
    comunican con `postMessage` y el preload traduce a IPC. La configuración del
    sitio llega por `sendSync('nexo:config-sync')` en el arranque del documento: el
    enganche tiene que estar puesto **antes** de que la página guarde su propia
    referencia a `window.fetch`, así que una espera asíncrona o un
    `DOMContentLoaded` llegan tarde.
-3. **Nunca romper la petición del usuario.** Todo fallo del motor degrada a «dejar
+4. **Nunca romper la petición del usuario.** Todo fallo del motor degrada a «dejar
    pasar el mensaje tal cual». No hay ninguna ruta en la que una excepción del
    análisis impida enviar o recibir.
 
@@ -102,6 +106,18 @@ usuario y estados que no son texto), `claude` (`content_block_delta` y el
   **antes** del evento de cierre, y `[DONE]` siempre queda último.
 - Un cuerpo que no parece SSE (`looksLikeStream`) pasa intacto.
 
+### `src/core/cdp.js` y `src/main/cdp.js`
+
+Los dos canales que el enganche de `fetch` no alcanza: **frames de WebSocket** y
+**respuestas JSON completas**. `src/core/cdp.js` es la parte isomorfa —convierte
+frames y cuerpos en texto, reutilizando `streamAdapters.js` y `extractDeltas()`—
+y `src/main/cdp.js` es el transporte: adjunta `webContents.debugger`, escucha
+`Network.*`, pide los cuerpos y entrega cada turno a `engine.onCdpCapture()`.
+
+Reglas: sólo hosts con perfil, sólo texto (nada binario), los SSE se excluyen para
+no contar dos veces lo que ya media la página, y cualquier fallo del depurador
+deja la capa inerte sin tocar la navegación. Detalle: [`CDP.md`](CDP.md).
+
 ### `src/core/promptEngine.js`
 
 Reglas puras + ensamblado explícito. El reporte incluye `blocks` (qué se inyectó y
@@ -148,6 +164,13 @@ libro de intervenciones. `ConversationTurn` envuelve al centinela y decide al ce
 8. `onEnd` → IPC → reparación, decisión de continuación, actualización del historial.
 9. Si la continuación automática está habilitada, `submitContinuation` escribe el
    prompt en el cuadro de texto y pulsa enviar.
+
+En paralelo, y sin tocar nada de lo anterior, el proceso principal observa por CDP
+lo que no pasa por `fetch` (frames de WebSocket y cuerpos JSON). Ese camino
+**no media**: analiza el texto con el mismo centinela, lo guarda en el historial y
+en EVO MEMORY, y sólo emite un aviso cuando hay un bucle, un corte o una negativa,
+siempre dicho como observación. Las huellas de lo ya contado se comparten entre
+los dos caminos, así que un mismo turno no se registra dos veces.
 
 ---
 
