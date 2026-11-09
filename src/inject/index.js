@@ -20,7 +20,7 @@
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
-import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
+import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
 import { estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
@@ -474,66 +474,120 @@ const MAX_DPU_RESPONSE_BYTES = 12_000_000;
  */
 async function captureChatGptDpuResponse(response, capture = {}, generation = null) {
   let reader = null;
+  let observer = null;
+  let lastText = '';
+  let finished = false;
+  const prompt = capture.promptText || '';
+  const { promptText: _promptText, ...metadata } = capture;
+
+  const readVisible = () => extractChatGptVisibleAnswer(document, prompt);
+  const publish = (candidate = readVisible()) => {
+    const text = String(candidate || '').slice(0, MAX_CAPTURE_CHARS);
+    if (!text || text === lastText || finished) return;
+    lastText = text;
+    bridge.event('stream-progress', {
+      ...metadata,
+      site: 'chatgpt',
+      host: CONFIG.host || location.hostname,
+      text,
+      cumulative: true,
+      deliveredChars: text.length,
+    });
+  };
+  const finish = (outcome, interrupted = false) => {
+    if (finished) return;
+    publish();
+    finished = true;
+    observer?.disconnect?.();
+    const text = lastText;
+    if (text) {
+      bridge.event('stream-end', {
+        ...metadata,
+        site: 'chatgpt',
+        host: CONFIG.host || location.hostname,
+        source: 'dpu-dom',
+        outcome,
+        stoppedByUser: Boolean(generation?.stoppedByUser),
+        finished: !interrupted,
+        interrupted,
+        stopped: false,
+        truncated: interrupted,
+        deliveredChars: text.length,
+        droppedChars: 0,
+        chars: text.length,
+        tokens: estimateTokens(text),
+        clipped: false,
+        text,
+        dropped: '',
+      });
+    } else {
+      bridge.event('turn-result', {
+        messageId: capture.messageId,
+        site: 'chatgpt',
+        host: CONFIG.host || location.hostname,
+        outcome: generation?.stoppedByUser ? 'cancelled' : (outcome === 'completed' ? 'unknown' : outcome),
+        stoppedByUser: Boolean(generation?.stoppedByUser),
+      });
+      bridge.event('error', {
+        stage: 'dpu-capture',
+        message: 'No se pudo extraer texto visible asociado al prompt de esta respuesta.',
+      });
+    }
+  };
+
   try {
+    // El observador se instala antes de devolver el Response al sitio. Así cada
+    // actualización real del DOM alimenta el contador mientras ChatGPT escribe.
+    if (typeof MutationObserver !== 'undefined' && document.body) {
+      observer = new MutationObserver(() => publish());
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    }
     if (!response?.body || typeof response.clone !== 'function') {
       throw new Error('el cuerpo DPU no está disponible para lectura');
     }
-    const copy = response.clone();
-    reader = copy.body?.getReader?.();
+    reader = response.clone().body?.getReader?.();
     if (!reader) throw new Error('no se pudo abrir una copia del stream DPU');
 
-    let bytes = 0, readError = null;
+    let bytes = 0;
+    let readError = null;
     try {
       while (true) {
         const chunk = await reader.read();
         if (chunk.done) break;
         bytes += Number(chunk.value?.byteLength) || 0;
+        publish();
         if (bytes > MAX_DPU_RESPONSE_BYTES) {
           void reader.cancel().catch(() => {});
           throw new Error(`respuesta DPU supera el límite de lectura (${bytes} bytes)`);
         }
       }
-    } catch (error) { readError = error; }
-
-    // EOF o AbortError no garantizan que Chromium ya haya aplicado los templates.
-    // En un aborto también se tokeniza el parcial visible, nunca el prompt.
-    const answer = await waitForChatGptDpuAnswer(document, capture.promptText || '', generation?.dpuBefore, {
-      isCurrent: () => !generation || state.response === generation,
-    });
-    if (!answer) {
-      throw new Error(`no se pudo confirmar texto DPU del prompt actual (${bytes} bytes; ${readError?.message || 'sin respuesta nueva tras esperar el render'})`);
+    } catch (error) {
+      readError = error;
     }
-    if (readError) bridge.event('error', { stage: 'dpu-interrupted', message: String(readError?.message || readError).slice(0, 300) });
 
-    const clipped = answer.length > MAX_CAPTURE_CHARS;
-    const { promptText: _promptText, ...metadata } = capture;
-    bridge.event('stream-end', {
-      ...metadata,
-      site: 'chatgpt',
-      host: CONFIG.host || location.hostname,
-      source: 'dpu',
-      outcome: generation?.stoppedByUser ? 'cancelled' : readError ? 'unknown' : 'completed',
-      stoppedByUser: Boolean(generation?.stoppedByUser),
-      finished: !readError,
-      interrupted: Boolean(readError),
-      stopped: false,
-      truncated: Boolean(readError),
-      deliveredChars: answer.length,
-      droppedChars: 0,
-      chars: answer.length,
-      tokens: estimateTokens(answer),
-      clipped,
-      text: clipped ? answer.slice(0, MAX_CAPTURE_CHARS) : answer,
-      dropped: '',
+    // Espera sólo a que el DOM refleje el contenido que ya llegó. Si el
+    // transporte se abortó, conserva y cierra el parcial en vez de descartarlo.
+    const answer = await waitForChatGptDpuAnswer(document, prompt, generation?.dpuBefore, {
+      isCurrent: () => !generation || state.response === generation,
+      timeout: readError ? 1200 : 5000,
     });
+    publish(answer || readVisible());
+    if (!lastText) {
+      throw new Error(`no se pudo confirmar texto DPU del prompt actual (${bytes} bytes; ${readError?.message || 'sin respuesta nueva en el DOM'})`);
+    }
+    if (readError) {
+      bridge.event('error', { stage: 'dpu-interrupted', message: String(readError?.message || readError).slice(0, 300) });
+    }
+    finish(generation?.stoppedByUser ? 'cancelled' : readError ? 'unknown' : 'completed', Boolean(readError));
   } catch (error) {
-    bridge.event('turn-result', { messageId: capture.messageId, site: 'chatgpt', host: CONFIG.host || location.hostname,
-      outcome: generation?.stoppedByUser ? 'cancelled' : 'unknown', stoppedByUser: Boolean(generation?.stoppedByUser) });
+    publish(readVisible());
+    finish(generation?.stoppedByUser ? 'cancelled' : 'unknown', true);
     bridge.event('error', {
       stage: 'dpu-capture',
       message: String(error?.message || error).slice(0, 300),
     });
   } finally {
+    observer?.disconnect?.();
     if (state.response === generation) state.response = null;
     try { reader?.releaseLock?.(); } catch { /* stream ya cerrado */ }
   }
