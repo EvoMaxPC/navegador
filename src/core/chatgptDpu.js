@@ -89,3 +89,40 @@ export function extractChatGptDpuAnswer(bodyText, prompt = '') {
 
   return region.slice(markerIndex + marker.length).trim();
 }
+
+/**
+ * Lee la respuesta visible del DOM autenticado de ChatGPT.
+ * Sólo acepta el último mensaje del asistente si aparece después del último
+ * mensaje del usuario y éste corresponde al prompt que acaba de enviarse.
+ * Así nunca reutiliza la respuesta anterior cuando el stream no trae texto.
+ */
+export function extractChatGptAssistantDomText(documentRef, prompt = '') {
+  if (!documentRef?.querySelectorAll) return '';
+  let assistants;
+  let users;
+  try {
+    assistants = [...documentRef.querySelectorAll('[data-message-author-role="assistant"]')];
+    users = [...documentRef.querySelectorAll('[data-message-author-role="user"]')];
+  } catch {
+    return '';
+  }
+  const assistant = assistants.at(-1);
+  const user = users.at(-1);
+  if (!assistant || !user || typeof user.compareDocumentPosition !== 'function') return '';
+
+  // DOCUMENT_POSITION_FOLLOWING = 4: el asistente está después del usuario.
+  if (!(user.compareDocumentPosition(assistant) & 4)) return '';
+
+  const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
+  const expected = normalize(prompt);
+  const currentPrompt = normalize(user.innerText || user.textContent);
+  if (expected && (!currentPrompt || !currentPrompt.includes(expected))) return '';
+
+  let content = assistant;
+  try {
+    content = assistant.querySelector?.('.markdown, .prose, [data-message-content]') || assistant;
+  } catch {
+    content = assistant;
+  }
+  return String(content.innerText || content.textContent || '').trim();
+}
