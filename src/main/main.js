@@ -1081,7 +1081,7 @@ function noteUserMessageFromNetwork(details = {}) {
       url: shortPath(url),
       source: 'network',
       chars: text.length,
-      tokens: text ? countGptTokens(text, model) : 0,
+      tokens: text ? countTokensForProvider(text, model, site.id) : 0,
       conversationId: null,
     },
     ts: Date.now(),
