@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { isResponseRequest, detectSite } from '../src/core/sites.js';
-import { extractChatGptAssistantDomText, extractChatGptDpuAnswer, isChatGptDpuMime } from '../src/core/chatgptDpu.js';
+import { extractChatGptAssistantDomText, extractChatGptDpuAnswer, extractChatGptVisibleAnswer, isChatGptDpuMime } from '../src/core/chatgptDpu.js';
 
 test('reconoce el MIME DPU del ChatGPT sin iniciar sesión', () => {
   assert.equal(isChatGptDpuMime('text/vnd.openai.web-mobile-partial+html'), true);
