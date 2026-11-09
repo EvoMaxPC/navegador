@@ -58,6 +58,23 @@ test('conversación completa y mensajes cortos persisten tras reabrir sin destru
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('respuesta final de ChatGPT se guarda literalmente como artefacto recuperable', () => {
+  const memory = new EvoMemory();
+  const partial = memory.captureConversation({ conversationId: '/c/respuesta', url: 'https://chatgpt.com/c/respuesta',
+    streaming: true, turns: [{ id: 'a1', role: 'assistant', content: 'Respuesta parcial' }] });
+  assert.equal(partial.assistantCaptures.length, 0, 'no archiva como final una respuesta en generación');
+
+  const answer = 'La respuesta completa de ChatGPT debe quedar guardada literalmente, incluso si la destilación no extrae hechos.';
+  const final = memory.captureConversation({ conversationId: '/c/respuesta', url: 'https://chatgpt.com/c/respuesta',
+    streaming: false, turns: [{ id: 'a1', role: 'assistant', content: answer }] });
+  assert.deepEqual(final.assistantCaptures, [{ id: 'a1', content: answer }]);
+  assert.ok(memory.list().some((item) => item.kind === 'artifact' && item.text === `Respuesta de ChatGPT capturada: ${answer}`));
+
+  const repeated = memory.captureConversation({ conversationId: '/c/respuesta', url: 'https://chatgpt.com/c/respuesta',
+    streaming: false, turns: [{ id: 'a1', role: 'assistant', content: answer }] });
+  assert.equal(repeated.assistantCaptures.length, 0, 'un snapshot repetido no vuelve a emitir la respuesta');
+});
+
 test('parcial, revisión final y repetición actualizan el mismo mensaje sin perder turnos de otra conversación', () => {
   const memory = new EvoMemory();
   const capture = (id, text, streaming) => memory.captureConversation({ conversationId: id, url: 'https://chatgpt.com', streaming,
