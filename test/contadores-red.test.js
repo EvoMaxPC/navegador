@@ -298,7 +298,6 @@ test('un envío salido de un worker (sin pestaña identificada) igual cierra su 
 test('una respuesta HTTP 2xx cierra el turno aunque la pestaña no venga en el evento', async () => {
   const view = await abrir('https://chatgpt.com/c/red-respuesta-red');
   const antes = await stats();
-
   peticionRed({
     url: 'https://chatgpt.com/backend-api/f/conversation',
     cuerpo: cuerpoChatGPT('respuesta por red'),
@@ -386,6 +385,51 @@ test('CDP lee el texto y los tokens del stream unauth-mweb de ChatGPT', async ()
   assert.equal(fin.responses, antes.responses + 1, 'CDP cuenta la respuesta');
   assert.equal(fin.turns, antes.turns + 1, 'CDP cierra el turno');
   assert.ok(fin.outputTokens > antes.outputTokens, 'se calculan tokens a partir del texto real');
+});
+
+test('CDP conserva unauth-mweb/updates cuando Chromium lo clasifica como Other', async () => {
+  const view = await abrir('https://chatgpt.com/c/red-unauth-mweb-other');
+  const antes = await stats();
+  journal.ipcListeners.get('nexo:event')(
+    { sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' } },
+    {
+      type: 'outgoing',
+      payload: {
+        messageId: 'm-unauth-mweb-other',
+        source: 'request',
+        host: 'chatgpt.com',
+        site: 'chatgpt',
+        chars: 4,
+        tokens: 1,
+        promptHash: 'prompt-unauth-mweb-other',
+        textFound: true,
+      },
+    },
+  );
+
+  const url = 'https://chatgpt.com/unauth-mweb/conversation/updates';
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-unauth-mweb-other',
+    type: 'Other',
+    request: { url, method: 'POST', postData: '{}' },
+  });
+  view.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-unauth-mweb-other',
+    type: 'Other',
+    response: { url, status: 200, mimeType: 'text/event-stream' },
+  });
+  view.debugger.bodies.set(
+    'req-unauth-mweb-other',
+    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta desde recurso Other.'] } } })}\\n\\ndata: [DONE]\\n\\n`,
+  );
+  view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-unauth-mweb-other' });
+  await settle(80);
+
+  const fin = await stats();
+  assert.equal(fin.messages, antes.messages + 1, 'no crea otro mensaje de usuario');
+  assert.equal(fin.responses, antes.responses + 1, 'cuenta la respuesta aunque Chromium informe Other');
+  assert.equal(fin.turns, antes.turns + 1, 'cierra el turno');
+  assert.ok(fin.outputTokens > antes.outputTokens, 'cuenta tokens de la respuesta');
 });
 
 test('ChatGPT unauth-mweb conversation/updates cuenta la respuesta sin contar otro mensaje', async () => {
