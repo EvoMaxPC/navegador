@@ -579,6 +579,15 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
       deltaPaths: site.deltaPaths,
       language: state.language,
       host: CONFIG.host,
+      onText: (info) => {
+        bridge.event('stream-progress', {
+          ...capture,
+          site: site.id,
+          host: CONFIG.host,
+          text: info.text,
+          deliveredChars: info.deliveredChars,
+        });
+      },
       onStop: (info) => {
         bridge.event('stream-stop', { ...capture, site: site.id, host: CONFIG.host, ...info });
       },
