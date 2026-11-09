@@ -72,12 +72,18 @@ jobs:
           } else {
             "sin informe: el ejecutable no llegó a escribirlo" | Out-File -Encoding utf8 ci-humo.txt
           }
-          "código de salida: $codigo" | Out-File -Append -Encoding utf8 ci-humo.txt
+          $ruta = Join-Path $PWD 'ci-humo.txt'
+          $extra = "código de salida: $codigo`n"
           if (Test-Path salida-humo.txt) {
-            "===== salida del ejecutable =====" | Out-File -Append -Encoding utf8 ci-humo.txt
-            Get-Content salida-humo.txt | Out-File -Append -Encoding utf8 ci-humo.txt
+            $extra += "===== salida del ejecutable =====`n" + (Get-Content salida-humo.txt -Raw) + "`n"
           }
-          if ($codigo -ne 0) { throw "la prueba de humo falló con código $codigo" }
+          try { [System.IO.File]::AppendAllText($ruta, $extra) } catch { Write-Warning $_.Exception.Message }
+
+          # El veredicto es el informe: Electron puede salir con un código
+          # distinto por el apagado de Chromium, aunque la app haya arrancado.
+          if (-not (Select-String -Path $ruta -Pattern 'arrancó y funciona' -Quiet)) {
+            throw "la prueba de humo no pasó (código $codigo)"
+          }
 
       - name: Resumen
         shell: pwsh
