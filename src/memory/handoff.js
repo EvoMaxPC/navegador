@@ -114,7 +114,7 @@ export function handoffToMarkdown(packet, language = 'es') {
  * @returns {{added: number, merged: number, superseded: number}}
  */
 export function importHandoff(store, packet, { projectId = null } = {}) {
-  const result = { added: 0, merged: 0, superseded: 0 };
+  const result = { added: 0, merged: 0, superseded: 0, ignored: 0 };
   if (!packet || !packet.sections) return result;
 
   for (const [kind, list] of Object.entries(packet.sections)) {
@@ -131,6 +131,9 @@ export function importHandoff(store, packet, { projectId = null } = {}) {
       if (outcome.action === 'created') result.added += 1;
       else if (outcome.action === 'merged') result.merged += 1;
       else if (outcome.action === 'superseded') result.superseded += 1;
+      // Un registro cifrado no entra: se informa cuántos quedaron fuera para
+      // que no parezca que el paquete se importó completo.
+      else if (outcome.action === 'ignored') result.ignored += 1;
     }
   }
   return result;

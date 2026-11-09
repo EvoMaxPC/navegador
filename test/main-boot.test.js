@@ -527,3 +527,27 @@ test('la capa anuncia que quedó instalada', async () => {
   assert.equal(entrada.severity, 'info');
   assert.match(entrada.title, /claude\.ai/);
 });
+
+test('la memoria no acepta registros cifrados y lo informa por IPC', async () => {
+  await settle();
+  const token = 'gAAAAABm3k9Xy8Kq1Zr7Tb2LmN4pQ6rS8tU0vW2xY4zA6bC8dE0fG2hI4jK6lM8nO0pQ2';
+
+  const resultado = await callIpc('nexo:memory:import', {
+    projectId: 'default',
+    sections: {
+      episode: [{ text: `Se respondió: ${token}` }],
+      decision: [{ text: 'Se decidió no guardar registros cifrados en la memoria.' }],
+    },
+  });
+  assert.equal(resultado.ignored, 1, 'el registro cifrado se descarta y se cuenta');
+  assert.equal(resultado.added, 1, 'lo legible entra');
+
+  const stats = await callIpc('nexo:memory:stats');
+  assert.equal(stats.encrypted, 0, 'no queda ninguno ilegible en el expediente');
+  assert.equal(typeof stats.byKindAll, 'object', 'se informa el desglose completo aparte');
+
+  const lista = await callIpc('nexo:memory:list');
+  const legible = lista.find((item) => item.text.includes('no guardar registros cifrados'));
+  assert.ok(legible, 'la memoria legible está en el listado del panel');
+  assert.equal(legible.readable, true, 'y el panel sabe que se puede leer');
+});

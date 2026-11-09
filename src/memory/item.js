@@ -42,6 +42,32 @@ export function nextId(prefix = 'm') {
 
 const clamp01 = (n) => Math.min(1, Math.max(0, n));
 
+/**
+ * ¿El texto es un bloque cifrado o codificado en vez de lenguaje?
+ *
+ * Un registro así no es una memoria: es un dato que no se puede leer ni usar
+ * para responder. Reconocerlo permite no guardarlo a futuro y no mostrarlo como
+ * si fuera texto normal, sin tocar lo que ya esté guardado.
+ *
+ * El caso que lo motivó es una memoria importada con tokens Fernet (`gAAAAA…`,
+ * el formato de `cryptography.fernet` de Python): el panel mostraba el token
+ * crudo, indistinguible de basura.
+ */
+export function looksEncrypted(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  // Firma de un token Fernet (versión 0x80 en base64url). Se busca en cualquier
+  // posición: un resumen puede traerlo precedido de su etiqueta («Se respondió:»).
+  if (/gAAAAA[A-Za-z0-9_\-+/=]{20,}/.test(value)) return true;
+  if (/\s/.test(value)) return false;
+  if (value.length < 32) return false;
+  // Cualquier otro blob: un solo «alfabeto» de token, sin espacios ni palabras.
+  if (!/^[A-Za-z0-9_\-+/=.:]+$/.test(value)) return false;
+  const upper = (value.match(/[A-Z]/g) || []).length;
+  const digits = (value.match(/\d/g) || []).length;
+  return upper / value.length >= 0.2 && digits / value.length >= 0.04;
+}
+
 /** Huella normalizada del contenido (para deduplicar sin colisiones semánticas). */
 export function fingerprintOf(text) {
   return indexTerms(text).slice(0, 40).join(' ');
@@ -190,6 +216,9 @@ export function toPublic(item) {
     kind: item.kind,
     kindLabel: (KIND_META[item.kind] || KIND_META.fact).label,
     text: item.text,
+    // `false` cuando el texto guardado no es lenguaje (un bloque cifrado de un
+    // paquete importado): el panel lo dice en vez de escupir el token.
+    readable: !looksEncrypted(item.text),
     tokens: item.tokens,
     projectId: item.projectId,
     conversationId: item.conversationId,

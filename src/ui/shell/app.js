@@ -769,6 +769,7 @@ const MEM = {
   tokens: document.getElementById('memTokens'),
   saved: document.getElementById('memSaved'),
   legend: document.getElementById('memLegend'),
+  context: document.getElementById('memContext'),
   list: document.getElementById('memoryList'),
   searchForm: document.getElementById('memSearchForm'),
   search: document.getElementById('memSearch'),
@@ -790,7 +791,7 @@ const MEM_KIND_LABEL = {
   fact: 'dato',
   entity: 'entidad',
   artifact: 'código',
-  episode: 'episodio',
+  episode: 'episodios (resúmenes)',
   question: 'pregunta',
 };
 
@@ -805,13 +806,18 @@ function renderMemoryItems(entries) {
     .map((item) => {
       const kind = MEM_KIND_LABEL[item.kind] || item.kind;
       const score = typeof item.score === 'number' ? `<span class="mem-score">${item.score.toFixed(3)}</span>` : '';
+      // Un registro que no se puede leer se muestra como tal: el token crudo en
+      // el panel no dice nada y parece un fallo del navegador.
+      const texto = item.readable === false
+        ? '<span class="mem-locked">Registro cifrado — no se puede leer. Vino así en un paquete importado; no se borra.</span>'
+        : escapeHtml(item.text);
       return `<li class="${item.pinned ? 'pinned' : ''}" data-id="${escapeHtml(item.id)}">
         <div class="mem-head">
           <span class="mem-kind">${escapeHtml(kind)}</span>
           ${item.pinned ? '<span class="mem-kind">fijada</span>' : ''}
           ${score}
         </div>
-        <div class="mem-text">${escapeHtml(item.text)}</div>
+        <div class="mem-text">${texto}</div>
         <div class="mem-meta">
           <button data-action="pin" data-id="${escapeHtml(item.id)}">${item.pinned ? 'soltar' : 'fijar'}</button>
           <button data-action="forget" data-id="${escapeHtml(item.id)}">olvidar</button>
@@ -830,10 +836,21 @@ async function refreshMemory() {
     MEM.items.textContent = String(memState.stats.active ?? 0);
     MEM.tokens.textContent = String(memState.stats.tokens ?? 0);
     MEM.saved.textContent = `${memState.stats.savedPct ?? 0} %`;
-    MEM.legend.innerHTML = Object.entries(memState.stats.byKind || {})
+    const leyenda = Object.entries(memState.stats.byKind || {})
       .filter(([, count]) => count > 0)
-      .map(([kind, count]) => `<span>${escapeHtml(MEM_KIND_LABEL[kind] || kind)}: ${count}</span>`)
-      .join(' · ');
+      .map(([kind, count]) => `<span>${escapeHtml(MEM_KIND_LABEL[kind] || kind)}: ${count}</span>`);
+    if (memState.stats.encrypted > 0) {
+      leyenda.push(`<span>cifradas, sin leer: ${memState.stats.encrypted}</span>`);
+    }
+    MEM.legend.innerHTML = leyenda.join(' · ');
+    // Los tokens guardados y los que viajan en el contexto son dos cosas: la
+    // memoria entera no se envía, se envía la parte que el motor elige.
+    if (MEM.context) {
+      const usados = Number(memState.stats.lastUsed || 0);
+      MEM.context.textContent = usados
+        ? `Contexto del último envío: ${usados} tokens de ${memState.stats.tokens} guardados.`
+        : `Contexto: todavía no se envió nada. Hay ${memState.stats.tokens} tokens guardados en ${memState.stats.active} memorias.`;
+    }
     MEM.file.textContent = memState.stats.file ? `Archivo: ${memState.stats.file}` : '';
     renderMemoryItems(memState.items.slice(0, 40));
   } catch {
@@ -889,7 +906,9 @@ MEM.importBtn.addEventListener('click', async () => {
     packet = { markdown: raw, items: parsePacketText(raw) };
   }
   const result = await nexo.memory.import(packet);
-  MEM.packet.value = `Importadas ${result.added}, fusionadas ${result.merged}.`;
+  MEM.packet.value =
+    `Importadas ${result.added}, fusionadas ${result.merged}.` +
+    (result.ignored ? ` Sin leer (cifradas): ${result.ignored}.` : '');
   await refreshMemory();
 });
 

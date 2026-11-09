@@ -223,6 +223,8 @@ test('el markdown incluye fecha de generación y aviso de verdad de referencia',
 
 test('importar un paquete vacío no rompe nada', () => {
   const store = new MemoryStore({ now: clock });
-  assert.deepEqual(importHandoff(store, null), { added: 0, merged: 0, superseded: 0 });
-  assert.deepEqual(importHandoff(store, { sections: {} }), { added: 0, merged: 0, superseded: 0 });
+  // `ignored` cuenta lo que el paquete traía pero no se puede usar (cifrado o
+  // ilegible): se informa en vez de tragárselo en silencio.
+  assert.deepEqual(importHandoff(store, null), { added: 0, merged: 0, superseded: 0, ignored: 0 });
+  assert.deepEqual(importHandoff(store, { sections: {} }), { added: 0, merged: 0, superseded: 0, ignored: 0 });
 });

@@ -16,6 +16,7 @@ import {
   createItem,
   isActive,
   KIND_META,
+  looksEncrypted,
   mergeInto,
   reviveItem,
   salienceOf,
@@ -100,6 +101,14 @@ export class MemoryStore {
 
     if (!item.text || item.text.length < 12) {
       return { item, action: 'ignored', conflicts: [] };
+    }
+
+    // Un bloque cifrado no es una memoria: no se puede leer, no se puede
+    // recuperar y sólo ensucia el panel. Se descarta el alta (lo ya guardado no
+    // se toca: si un expediente viejo los tiene, siguen ahí y se muestran como
+    // cifrados).
+    if (looksEncrypted(item.text)) {
+      return { item, action: 'ignored', reason: 'ilegible', conflicts: [] };
     }
 
     // 1) ¿Ya existe algo esencialmente igual?
@@ -237,16 +246,23 @@ export class MemoryStore {
 
   /** Estadísticas para el panel. */
   stats(now = this.now()) {
+    // `byKind` cuenta sólo lo vigente: la leyenda del panel va al lado de
+    // «memorias» y tiene que sumar exactamente eso. Lo reemplazado se informa
+    // aparte, para no descuadrar la cuenta con registros que ya no se usan.
     const byKind = {};
+    const byKindAll = {};
     let tokens = 0;
     let active = 0;
     let superseded = 0;
+    let encrypted = 0;
     const projects = new Set();
     for (const item of this.items.values()) {
-      byKind[item.kind] = (byKind[item.kind] || 0) + 1;
+      byKindAll[item.kind] = (byKindAll[item.kind] || 0) + 1;
       projects.add(item.projectId);
+      if (looksEncrypted(item.text)) encrypted += 1;
       if (isActive(item)) {
         active += 1;
+        byKind[item.kind] = (byKind[item.kind] || 0) + 1;
         tokens += item.tokens;
       } else {
         superseded += 1;
@@ -259,6 +275,10 @@ export class MemoryStore {
       tokens,
       projects: projects.size,
       byKind,
+      byKindAll,
+      // Cuántos registros guardados no se pueden leer (llegaron cifrados de un
+      // paquete importado). No se borran: se informan.
+      encrypted,
       top: this.all()
         .map((item) => ({ id: item.id, kind: item.kind, text: item.text, salience: Number(salienceOf(item, now).toFixed(3)) }))
         .sort((a, b) => b.salience - a.salience)

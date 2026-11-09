@@ -264,7 +264,9 @@ Reglas que sostienen la cuenta:
   el conteo del tokenizador del proveedor. La interfaz lo dice con un asterisco.
 
 El detalle de la corrección de los contadores —causa, criterio de identidad y
-qué queda por validar— está en [`CONTADORES.md`](CONTADORES.md).
+qué queda por validar— está en [`CONTADORES.md`](CONTADORES.md). Lo que la
+pestaña Memoria guarda, qué significa cada número y qué se hace con un registro
+cifrado está en [`MEMORIA.md`](MEMORIA.md).
 
 ### Cuando los contadores no suben: la línea de captura
 

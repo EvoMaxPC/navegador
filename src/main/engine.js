@@ -12,6 +12,7 @@ import { settingsForHost } from '../core/settings.js';
 import { StreamSentinel } from '../core/streamSentinel.js';
 import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
 import { estimateTokens, fingerprint } from '../core/text.js';
+import { looksEncrypted } from '../memory/item.js';
 
 /** Cómo se llama cada canal en los textos que ve el usuario. */
 /**
@@ -859,6 +860,8 @@ export class Engine {
       id: entry.item.id,
       kind: entry.item.kind,
       text: entry.item.text,
+      // La búsqueda también marca lo ilegible: si no, buscar mostraba el token.
+      readable: !looksEncrypted(entry.item.text),
       score: Number(entry.score.toFixed(3)),
       parts: entry.parts,
       pinned: Boolean(entry.item.pinned),

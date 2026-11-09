@@ -20,7 +20,7 @@
 
 import { estimateTokens, excerpt } from '../core/text.js';
 import { buildMemoryCard } from '../core/compaction.js';
-import { isActive, KIND_META, salienceOf } from './item.js';
+import { isActive, KIND_META, looksEncrypted, salienceOf } from './item.js';
 import { indexTerms, termJaccard } from './lexicon.js';
 import { retrieve } from './rank.js';
 
@@ -107,7 +107,7 @@ export function compileContext(input) {
   /* ---------------- 2. recuperación de memoria ---------------- */
 
   const workingTerms = indexTerms(working.map((t) => t.content).join(' '));
-  const retrieved = store
+  const recuperadas = store
     ? retrieve(store, {
         query,
         projectId,
@@ -117,6 +117,10 @@ export function compileContext(input) {
         minScore: 0.05,
       })
     : [];
+  // Un registro cifrado no se puede leer ni usar para responder: incluirlo en
+  // el contexto gasta tokens en basura y arruina la respuesta. No se borra del
+  // expediente; simplemente no viaja.
+  const retrieved = recuperadas.filter((entry) => !looksEncrypted(entry.item?.text));
 
   /* ---------------- 3. presupuestos con redistribución ---------------- */
 
@@ -125,20 +129,26 @@ export function compileContext(input) {
 
   /* ---------------- 4. capas de memoria ---------------- */
 
+  // Ninguna capa manda texto que no se pueda leer: ni fijado, ni de proyecto, ni
+  // episodios. Si un expediente viejo tiene registros cifrados, se quedan ahí y
+  // no gastan presupuesto del contexto.
+  const legible = (item) => !looksEncrypted(item.text);
+
   const pinnedItems = store
-    ? store.all({ projectId, includeSuperseded: false }).filter((item) => item.pinned)
+    ? store.all({ projectId, includeSuperseded: false }).filter((item) => item.pinned && legible(item))
     : [];
 
   const projectItems = store
     ? store
         .all({ projectId, includeSuperseded: false, kinds: ['goal', 'decision', 'constraint', 'preference'] })
-        .filter((item) => !item.pinned)
+        .filter((item) => !item.pinned && legible(item))
         .sort((a, b) => salienceOf(b, now) - salienceOf(a, now))
     : [];
 
   const episodeItems = store
     ? store
         .all({ projectId, includeSuperseded: false, kinds: ['episode'] })
+        .filter(legible)
         .sort((a, b) => b.createdAt - a.createdAt)
     : [];
 

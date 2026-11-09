@@ -96,7 +96,7 @@
       <section class="panel-view" data-panel="memory">
         <div class="stats">
           <div class="stat"><b id="memItems">0</b><span>memorias</span></div>
-          <div class="stat"><b id="memTokens">0</b><span>tokens en contexto</span></div>
+          <div class="stat"><b id="memTokens">0</b><span>tokens guardados</span></div>
           <div class="stat"><b id="memSaved">0 %</b><span>menos que pegar todo</span></div>
         </div>
 
@@ -104,11 +104,14 @@
           <input id="memSearch" type="text" spellcheck="false" placeholder="Buscar en la memoria del proyecto…" />
         </form>
 
+        <p class="note" id="memContext">Contexto del último envío: 0 tokens.</p>
         <div class="mem-legend" id="memLegend"></div>
         <ul class="memory-list" id="memoryList"></ul>
 
         <div class="panel-head"><h2>Continuidad</h2></div>
         <p class="note">
+          Las memorias son lo que EVO destiló de la conversación (hechos, decisiones y
+          resúmenes llamados «episodios») — no un registro de mensajes ni de respuestas.
           El paquete de continuidad es un texto plano con lo esencial del proyecto. Pegalo al
           empezar una conversación en cualquier IA y seguís donde estabas.
         </p>
@@ -239,7 +242,7 @@
       <section class="panel-view" data-panel="about">
         <div class="about">
           <h2>Nexo</h2>
-          <p class="version" id="version">v0.1.7</p>
+          <p class="version" id="version">v0.1.8</p>
           <p>
             Navegador basado en Chromium que se sienta entre vos y los chatbots: reescribe el
             mensaje antes de enviarlo y filtra la respuesta antes de mostrarla.
