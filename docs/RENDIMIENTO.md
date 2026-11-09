@@ -221,11 +221,20 @@ inicio del proceso):
 | **primer pintado de la ventana** | **868–1 044** |
 
 Ese último número no es nuestro: entre que la interfaz termina su trabajo y
-Chromium pinta el primer cuadro hay cientos de milisegundos, y el runner es una
-máquina virtual **sin aceleración por hardware** (el informe de humo ahora
-publica el estado de la GPU justamente para poder descartarlo). El proceso
-principal, en cambio, tarda 23–36 ms hasta `ready` y 81–115 ms hasta tener la
-ventana.
+Chromium pinta el primer cuadro hay cientos de milisegundos. La causa está
+medida, no supuesta: el informe publica el estado de la GPU y el runner de
+Windows informa
+
+```
+gpu: composición disabled_software, webgl unavailable_software,
+     rasterizado disabled_software
+```
+
+Es decir, una máquina virtual **sin aceleración por hardware**, donde todo el
+primer cuadro se rasteriza por software. En una PC normal ese tramo es mucho más
+corto. Lo que sí depende de nosotros: el proceso principal tarda 20–37 ms hasta
+`ready` y 81–115 ms hasta tener la ventana, y la interfaz está lista entre 4 y 30
+ms después.
 
 Dos lecciones que quedaron en el código:
 
