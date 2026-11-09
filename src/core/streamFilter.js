@@ -43,7 +43,7 @@ const encoder = new TextEncoder();
  *   language?: string,
  *   host?: string|null,
  *   onStop?: (info: object) => void,
- *   onEnd?: (info: object) => void,
+ *   onText?: (info: { text: string, deliveredChars: number }) => void,\n *   onEnd?: (info: object) => void,
  *   onError?: (info: { stage: string, message: string }) => void
  * }} opts
  * @returns {TransformStream<Uint8Array, Uint8Array>}
@@ -76,7 +76,7 @@ export function createStreamFilter(opts = {}) {
   };
   const pendingChunks = [];
   let plainText = '';
-  let lineText = '';
+  let lineText = '';\n  let liveDeliveredChars = 0;\n  const reportText = (text) => {\n    if (!text) return;\n    liveDeliveredChars += text.length;\n    opts.onText?.({ text, deliveredChars: liveDeliveredChars });\n  };
 
   const consumeLines = (final = false) => {
     const lines = buffered.split('\n');
@@ -218,7 +218,7 @@ export function createStreamFilter(opts = {}) {
 
     const delta = segments.map((segment) => segment.newText).join('');
     const result = sentinel.push(delta);
-    const values = distribute(segments, result.emit);
+    const values = distribute(segments, result.emit);\n    reportText(result.emit);
     adapter.write(json, segments, values, evt.event);
 
     if (result.stopped) reportStop();
@@ -261,7 +261,7 @@ export function createStreamFilter(opts = {}) {
         format = /^[{[]/.test(head) ? 'ndjson' : /^(?:data|event|id|retry):|^:/.test(head) ? 'sse' : 'text';
         if (format !== 'sse') for (const raw of pendingChunks) controller.enqueue(raw);
         pendingChunks.length = 0;
-        if (format === 'text') { plainText += buffered; buffered = ''; return; }
+        if (format === 'text') { plainText += buffered; reportText(buffered); buffered = ''; return; }
         if (format === 'ndjson') {
           consumeLines();
           if (protocolEnded) finishCapture();
@@ -295,7 +295,7 @@ export function createStreamFilter(opts = {}) {
         format = /^[{[]/.test(head) ? 'ndjson' : /^(?:data|event|id|retry):|^:/.test(head) ? 'sse' : 'text';
         if (format !== 'sse') for (const raw of pendingChunks) controller.enqueue(raw);
         pendingChunks.length = 0;
-        if (format === 'text') plainText += buffered;
+        if (format === 'text') { plainText += buffered; reportText(buffered); }
       }
       if (format !== 'sse') { finishCapture(); return; }
       let out = '';
