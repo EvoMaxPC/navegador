@@ -21,6 +21,9 @@
     "smoke": "node scripts/humo.mjs",
     "dist:win": "npm run build:inject && npm run make:icon && node scripts/empaquetar.mjs"
   },
+  "dependencies": {
+    "gpt-tokenizer": "4.1.0"
+  },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
     "electron": "^45.2.3",
