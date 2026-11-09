@@ -96,6 +96,12 @@ export class Engine {
     /** Última señal de vida de la capa de la página, por pestaña. */
     this.layerSeen = new Map();
     /**
+     * Cuándo cerró la capa un stream en cada pestaña. Es lo que decide si CDP
+     * puede leer el SSE de una respuesta sin arriesgar contarla dos veces: que
+     * la capa haya contado el envío no prueba que haya capturado la respuesta.
+     */
+    this.layerEnded = new Map();
+    /**
      * Textos ya contados como respuesta, por pestaña. Permite reconocer la misma
      * respuesta entregada en pedazos: mientras crece, no es otra respuesta.
      */
@@ -378,6 +384,8 @@ export class Engine {
    * actualiza el historial de la conversación.
    */
   onStreamEnd(webContentsId, payload) {
+    // La capa cerró un stream: desde acá, esa respuesta ya la contó ella.
+    this.layerEnded.set(webContentsId, Date.now());
     // Se anota lo que ya contó este camino ANTES de mirar el guard: si CDP ve el
     // mismo texto por otro canal, no se vuelve a registrar.
     const host = payload?.host || this.guards.get(webContentsId)?.host || safeHost(payload?.url) || 'desconocido';
@@ -486,6 +494,20 @@ export class Engine {
   hasRecentLayer(webContentsId, withinMs = 180_000) {
     const at = this.layerSeen.get(webContentsId);
     return Boolean(at && Date.now() - at < withinMs);
+  }
+
+  /**
+   * ¿La capa cerró un stream en esta pestaña después de que empezara la
+   * petición `sinceMs`?
+   *
+   * Es la pregunta que hay que hacer y no «¿la capa está viva?». Una capa que
+   * contó el envío pero nunca cerró el stream deja la respuesta sin contar: en
+   * ese caso CDP tiene que leerla. Si la cerró, la respuesta ya está contada y
+   * leer el cuerpo desde CDP sólo serviría para volver a contarla.
+   */
+  layerEndedAfter(webContentsId, sinceMs = 0) {
+    const at = this.layerEnded.get(webContentsId);
+    return Boolean(at && at >= Number(sinceMs || 0));
   }
 
   /**
@@ -699,6 +721,7 @@ export class Engine {
     this.lastSend.delete(webContentsId);
     this.recentTexts.delete(webContentsId);
     this.layerSeen.delete(webContentsId);
+    this.layerEnded.delete(webContentsId);
     for (const key of [...this.messageAliases.keys()]) {
       if (key.startsWith(`${webContentsId}|`)) this.messageAliases.delete(key);
     }

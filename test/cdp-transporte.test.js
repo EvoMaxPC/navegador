@@ -53,6 +53,12 @@ function fakeEngine() {
       const at = engine.layerSeen.get(id);
       return Boolean(at && Date.now() - at < 180_000);
     },
+    // Cuándo cerró la capa un stream: es lo que decide si CDP lo relee.
+    layerEnded: new Map(),
+    layerEndedAfter(id, sinceMs = 0) {
+      const at = engine.layerEnded.get(id);
+      return Boolean(at && at >= Number(sinceMs || 0));
+    },
     onCdpCapture(tabId, capture) {
       this.captures.push({ tabId, capture });
       return { ok: true, duplicate: false };
@@ -292,23 +298,57 @@ test('respuesta JSON sin SSE: se pide el cuerpo y se entrega como captura', asyn
   );
 });
 
-test('con la capa activa, el SSE no se procesa por CDP: ya lo captura la página', async () => {
+test('la capa cuenta el envío pero no cierra el stream: CDP lo lee igual', async () => {
   const { observer, engine } = makeObserver();
   const tab = fakeTab(14, 'https://claude.ai/');
   observer.attach(tab);
-  // La capa de la página se anunció: es ella la que lee el stream.
+  // La capa cuenta un envío y después se calla. Que la capa esté viva no dice
+  // nada de la contestación: si CDP se retirara, la respuesta no la contaría
+  // nadie.
   engine.layerSeen = new Map([[tab.id, Date.now()]]);
 
+  tab.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-2',
+    type: 'XHR',
+    request: { url: 'https://claude.ai/api/organizations/org-1/chat_conversations/conv-1/completion', method: 'POST' },
+  });
   tab.debugger.bodies.set('req-2', 'data: {"type":"content_block_delta"}\n\n');
   tab.debugger.emitEvent('Network.responseReceived', {
     requestId: 'req-2',
     type: 'XHR',
-    response: { url: 'https://claude.ai/api/x/completion', status: 200, mimeType: 'text/event-stream' },
+    response: { url: 'https://claude.ai/api/organizations/org-1/chat_conversations/conv-1/completion', status: 200, mimeType: 'text/event-stream' },
   });
   tab.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-2' });
   await settle();
 
-  assert.equal(engine.captures.length, 0);
+  assert.ok(
+    tab.debugger.commands.some((command) => command.method === 'Network.getResponseBody'),
+    'se pide el cuerpo: la capa no cerró ese stream',
+  );
+});
+
+test('si la capa ya cerró ese stream, CDP no lo vuelve a leer', async () => {
+  const { observer, engine } = makeObserver();
+  const tab = fakeTab(16, 'https://claude.ai/');
+  observer.attach(tab);
+
+  tab.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-capa',
+    type: 'XHR',
+    request: { url: 'https://claude.ai/api/organizations/org-1/chat_conversations/conv-1/completion', method: 'POST' },
+  });
+  tab.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-capa',
+    type: 'XHR',
+    response: { url: 'https://claude.ai/api/organizations/org-1/chat_conversations/conv-1/completion', status: 200, mimeType: 'text/event-stream' },
+  });
+  // La capa cerró el stream de esta petición: la respuesta ya está contada.
+  engine.layerEnded = new Map([[tab.id, Date.now()]]);
+  tab.debugger.bodies.set('req-capa', 'data: {"delta":{"text":"ya contada"}}\n\n');
+  tab.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-capa' });
+  await settle();
+
+  assert.equal(engine.captures.length, 0, 'no se captura dos veces el mismo stream');
   assert.ok(!tab.debugger.commands.some((command) => command.method === 'Network.getResponseBody'));
 });
 
@@ -419,6 +459,12 @@ function fakeEngineConFallos() {
     hasRecentLayer(id) {
       const at = engine.layerSeen.get(id);
       return Boolean(at && Date.now() - at < 180_000);
+    },
+    // Cuándo cerró la capa un stream: es lo que decide si CDP lo relee.
+    layerEnded: new Map(),
+    layerEndedAfter(id, sinceMs = 0) {
+      const at = engine.layerEnded.get(id);
+      return Boolean(at && at >= Number(sinceMs || 0));
     },
     onCdpCapture(tabId, capture) {
       engine.captures.push({ tabId, capture });

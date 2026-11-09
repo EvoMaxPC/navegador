@@ -302,14 +302,14 @@ test('si la capa no está activa, CDP lee el SSE completo y cuenta una respuesta
   assert.ok(fin.outputTokens > antes.outputTokens, 'con tokens de salida');
 });
 
-test('con la capa activa, CDP no vuelve a leer el mismo stream', async () => {
+test('con la capa viva pero sin cierre de stream, CDP rescata la respuesta', async () => {
   const view = await abrir('https://chatgpt.com/c/conv-con-capa');
   const emitir = journal.ipcListeners.get('nexo:event');
   const sender = { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' };
 
-  // La capa cuenta un envío: eso la deja viva y dueña del stream. Anunciarse
-  // (`ready`) no alcanza: una capa instalada que no ve las peticiones del sitio
-  // no puede quedarse con la respuesta o no la cuenta nadie.
+  // La capa cuenta un envío: está viva. Pero contar el envío no es capturar la
+  // contestación, y en esta prueba la capa no informa ningún cierre de stream.
+  // Si CDP se retirara, la respuesta no la contaría nadie.
   emitir(
     { sender },
     {
@@ -329,6 +329,11 @@ test('con la capa activa, CDP no vuelve a leer el mismo stream', async () => {
   await settle(10);
 
   const antes = await stats();
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-stream-capado',
+    type: 'XHR',
+    request: { url: 'https://chatgpt.com/backend-api/f/conversation', method: 'POST' },
+  });
   view.debugger.emitEvent('Network.responseReceived', {
     requestId: 'req-stream-capado',
     type: 'XHR',
@@ -339,7 +344,44 @@ test('con la capa activa, CDP no vuelve a leer el mismo stream', async () => {
   await settle(50);
 
   const despues = await stats();
-  assert.equal(despues.responses, antes.responses, 'el stream lo cuenta la página, no CDP');
+  assert.equal(despues.responses, antes.responses + 1, 'la respuesta se cuenta una sola vez, por CDP');
+});
+
+test('si la capa cerró ese stream, CDP no vuelve a contar la misma respuesta', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-capa-cerrada');
+  const texto = 'Respuesta que la capa capturó entera y cerró con su stream.';
+  const antes = await stats();
+
+  // La capa cierra el stream: la respuesta ya está contada por ella.
+  await callIpc('nexo:stream-end', {
+    site: 'chatgpt',
+    host: 'chatgpt.com',
+    stopped: false,
+    text: texto,
+    deliveredChars: texto.length,
+    droppedChars: 0,
+  }, view.id);
+  await settle(20);
+
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-stream-doble',
+    type: 'XHR',
+    request: { url: 'https://chatgpt.com/backend-api/f/conversation', method: 'POST' },
+  });
+  view.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-stream-doble',
+    type: 'XHR',
+    response: { url: 'https://chatgpt.com/backend-api/f/conversation', status: 200, mimeType: 'text/event-stream' },
+  });
+  view.debugger.bodies.set(
+    'req-stream-doble',
+    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: [texto] } } })}\n\n`,
+  );
+  view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-stream-doble' });
+  await settle(50);
+
+  const despues = await stats();
+  assert.equal(despues.responses, antes.responses + 1, 'una respuesta, la de la capa');
 });
 
 /* ------------------------------------------------------------------ */

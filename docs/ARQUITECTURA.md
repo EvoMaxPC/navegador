@@ -217,9 +217,13 @@ mensajes.
 La salida (respuesta) se captura por:
 
 - el **stream SSE** que envuelve la capa de la página;
-- el mismo **SSE leído por CDP** cuando la capa no está capturando de verdad (que
-  se anuncie no alcanza: si corre y no ve las peticiones del sitio, la respuesta
-  no la contaría nadie);
+- el mismo **SSE leído por CDP** siempre que la capa **no haya cerrado ese
+  stream**. Que la capa esté viva —que haya contado el envío— no prueba que vaya
+  a capturar la contestación: si se calla, la respuesta no la contaría nadie.
+  Lo que decide es un hecho, no una sospecha: si la capa informó el cierre de un
+  stream en esa pestaña después de que saliera la petición, CDP no lo vuelve a
+  leer; si no lo informó, lo lee y el motor descarta el duplicado por
+  `messageId` y, en su defecto, por el texto;
 - **CDP**, con los frames de WebSocket, los cuerpos JSON de una petición propia
   del sitio y —cuando la capa no está viva en esa pestaña— el cuerpo completo del
   SSE, que el depurador entrega al terminar.

@@ -337,6 +337,8 @@ export class CdpObserver {
        * de cuentas, listas y metadatos, que no son respuestas del modelo.
        */
       chat: isMediable(site, url, method),
+      /** Cuándo se vio salir la petición: acota qué cierre de la capa cuenta. */
+      at: Date.now(),
       send: false,
       prompt: null,
       messageId: null,
@@ -485,13 +487,10 @@ export class CdpObserver {
       this.stats.ignored += 1;
       return;
     }
-    // El stream lo captura la capa de la página mientras está viva; leerlo acá
-    // sería contarlo dos veces. Si la capa no está activa en esta pestaña, el
-    // stream es el único camino que queda y CDP lo lee al terminar.
-    if (stream && this.engine?.hasRecentLayer?.(state.id)) {
-      this.stats.ignored += 1;
-      return;
-    }
+    // El stream se lee desde CDP aunque la capa esté viva, salvo que la capa
+    // haya cerrado ESE stream (se decide al terminar la carga, cuando ya se
+    // sabe). Que la capa cuente el envío no garantiza que capture la
+    // contestación: si se calla, la respuesta se perdería.
     if (response.status && (response.status < 200 || response.status > 299)) {
       // Un 403 en `/backend-api/conversation` es exactamente el motivo por el que
       // la interfaz del sitio dice «no se pudo conectar».
@@ -514,6 +513,9 @@ export class CdpObserver {
       site: detectSite(host),
       status: Number(response.status) || 200,
       stream,
+      // Instante en que salió la petición: sólo un cierre de la capa posterior
+      // a esto cuenta como «la respuesta ya la contó ella».
+      since: Number(origen?.at) || Date.now(),
     });
   }
 
@@ -532,6 +534,12 @@ export class CdpObserver {
       return;
     };
     if (!this.contentAllowed(pending.host)) {
+      this.stats.ignored += 1;
+      return;
+    }
+
+    // Un stream que la capa ya cerró está contado: no se vuelve a leer.
+    if (pending.stream && this.engine?.layerEndedAfter?.(state.id, pending.since)) {
       this.stats.ignored += 1;
       return;
     }

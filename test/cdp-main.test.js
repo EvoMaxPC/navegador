@@ -169,11 +169,12 @@ test('un bucle observado se registra como observación, no como corte', async ()
   assert.equal(entrada.meta.observed, true);
 });
 
-test('con la capa activa, los SSE no pasan por CDP: no se pide su cuerpo', async () => {
+test('la capa cuenta el envío pero no cierra el stream: CDP igual lee el SSE', async () => {
   const view = await abrirPestana('https://claude.ai/chat/cdp-6');
-  // La capa no sólo se anuncia: cuenta un envío. Eso es lo que la da por viva y
-  // deja el stream en sus manos (anunciarse no alcanza: una capa que corre y no
-  // ve las peticiones del sitio no puede quedarse con la respuesta).
+  // La capa cuenta un envío (no sólo se anuncia) y después se calla: no informa
+  // ningún cierre de stream. Si CDP se retirara por «la capa está viva», la
+  // respuesta no la contaría nadie. Contar el envío no prueba nada sobre la
+  // contestación.
   journal.ipcListeners.get('nexo:event')(
     { sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://claude.ai/chat/cdp-6' } },
     {
@@ -190,20 +191,75 @@ test('con la capa activa, los SSE no pasan por CDP: no se pide su cuerpo', async
       },
     },
   );
-  await settle(10);
+  await settle();
 
-  view.debugger.bodies.set('req-cdp-6', 'data: {"type":"content_block_delta"}\n\n');
+  const antes = await callIpc('nexo:stats', {});
+  const RESP = 'La respuesta que la capa no capturó y que CDP tiene que rescatar sin contarla dos veces.';
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-cdp-6',
+    type: 'XHR',
+    request: { url: 'https://claude.ai/api/organizations/org-1/chat_conversations/conv-1/completion', method: 'POST' },
+  });
+  view.debugger.bodies.set(
+    'req-cdp-6',
+    `data: ${JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: RESP } })}\n\n`,
+  );
   view.debugger.emitEvent('Network.responseReceived', {
     requestId: 'req-cdp-6',
     type: 'XHR',
-    response: { url: 'https://claude.ai/api/x/completion', status: 200, mimeType: 'text/event-stream' },
+    response: { url: 'https://claude.ai/api/organizations/org-1/chat_conversations/conv-1/completion', status: 200, mimeType: 'text/event-stream' },
   });
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-cdp-6' });
   await settle();
+
   assert.ok(
-    !view.debugger.commands.some((command) => command.params?.requestId === 'req-cdp-6'),
-    'no se pide el cuerpo de un stream que la página ya captura',
+    view.debugger.commands.some(
+      (command) => command.method === 'Network.getResponseBody' && command.params?.requestId === 'req-cdp-6',
+    ),
+    'se pide el cuerpo del stream: si la capa no lo cerró, es el único camino',
   );
+  const despues = await callIpc('nexo:stats', {});
+  assert.equal(despues.responses, antes.responses + 1, 'la respuesta se cuenta una sola vez');
+});
+
+test('si la capa ya cerró ese stream, CDP no pide su cuerpo', async () => {
+  const view = await abrirPestana('https://claude.ai/chat/cdp-7');
+  const antes = await callIpc('nexo:stats', {});
+  const RESP = 'Respuesta que la capa sí capturó de punta a punta y cerró como stream.';
+
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-cdp-7',
+    type: 'XHR',
+    request: { url: 'https://claude.ai/api/organizations/org-1/chat_conversations/conv-1/completion', method: 'POST' },
+  });
+  view.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-cdp-7',
+    type: 'XHR',
+    response: { url: 'https://claude.ai/api/organizations/org-1/chat_conversations/conv-1/completion', status: 200, mimeType: 'text/event-stream' },
+  });
+  // La capa cierra el stream de esta petición: la respuesta ya está contada.
+  await callIpc('nexo:stream-end', {
+    site: 'claude',
+    host: 'claude.ai',
+    stopped: false,
+    text: RESP,
+    deliveredChars: RESP.length,
+    droppedChars: 0,
+  }, view.id);
+  await settle();
+
+  view.debugger.bodies.set('req-cdp-7', `data: ${JSON.stringify({ delta: { text: RESP } })}\n\n`);
+  view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-cdp-7' });
+  await settle();
+
+  assert.ok(
+    !view.debugger.commands.some(
+      (command) => command.method === 'Network.getResponseBody' && command.params?.requestId === 'req-cdp-7',
+    ),
+    'no se vuelve a leer un stream que la capa ya cerró',
+  );
+  const despues = await callIpc('nexo:stats', {});
+  assert.equal(despues.responses, antes.responses + 1, 'una respuesta, la de la capa');
 });
 
 test('una negativa del modelo queda registrada con su sugerencia', async () => {
@@ -237,7 +293,7 @@ test('un turno ya contado por el camino HTTP/SSE no se cuenta otra vez por CDP',
   view.debugger.emitEvent('Network.responseReceived', {
     requestId: 'req-doble',
     type: 'XHR',
-    response: { url: 'https://claude.ai/api/x/completion', status: 200, mimeType: 'application/json' },
+    response: { url: 'https://claude.ai/api/organizations/org-1/chat_conversations/conv-1/completion', status: 200, mimeType: 'application/json' },
   });
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-doble' });
   await settle();
