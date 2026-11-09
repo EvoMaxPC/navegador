@@ -170,8 +170,8 @@ reproducciones del código con grabaciones y transportes/DOM controlados.
 - `test/chatgpt-dpu.test.js`: roles sin etiquetas traducidas, prompt repetido,
   bloqueo de respuesta vieja/ajena y espera de una respuesta nueva idéntica.
 
-`npm run verify`: **545 pruebas, 544 aprobadas, 1 omitida, 0 fallos**. Bundle
-**47.3 kB / 16.9 kB gzip**, 10 módulos; no se rebajaron límites de rendimiento.
+`npm run verify`: **551 pruebas, 550 aprobadas, 1 omitida, 0 fallos**. Bundle
+**47.5 kB / 17.0 kB gzip**, 10 módulos; no se rebajaron límites de rendimiento.
 
 Sigue faltando comprobar una respuesta propia en ChatGPT dentro de NEXO real:
 no hay acceso a ChatGPT ni navegador gráfico ejecutable en este sandbox. Si la
@@ -202,5 +202,23 @@ concurrente se unificó con la del helper probado.
 Las pruebas adicionales de la integración comprueban recuperación autenticada
 tardía hasta UI, conservación de un único contador de respuesta y rechazo de
 texto previo; se conservaron los dos tests concurrentes recibidos. La verificación
-completa integrada es la indicada arriba: 545 pruebas, sin fallos. El transporte
+completa integrada es la indicada arriba: 551 pruebas, sin fallos. El transporte
 sigue siendo replay/simulado, no una sesión de ChatGPT en vivo.
+
+
+### Actualización incremental integrada
+
+También se preservaron los cambios remotos `fd5f97d` a `9762ed7`: los fragmentos
+entregados viajan por preload al contador BPE y refrescan la UI antes del cierre.
+Se corrigieron dos saltos de línea literales que impedían compilar el filtro,
+y se notificó también el texto retenido que el centinela libera al cerrar un
+bloque, así como los fragmentos sucesivos de texto plano. La grabación de thinking
+reproduce la pérdida de esos fragmentos si no se notifican.
+
+Al cerrar se retira el aporte provisional y se reconcilia por la deduplicación
+existente. Así CDP primero no duplica ni respuestas ni tokens, y un cierre con un
+prefijo recortado conserva el texto real acumulado. La marca de red sin texto se
+mantiene hasta esa reconciliación. Pruebas explícitas cubren BPE entre fragmentos,
+cierre recortado y red antes del streaming; las de Stop ahora comparan contra el
+conteo inmediatamente anterior al clic, que ya incluye el texto recibido en vivo.
+Verificación final: **551 pruebas, 550 aprobadas, 1 omitida, 0 fallos**.

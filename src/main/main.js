@@ -510,6 +510,14 @@ function registerIpc() {
     broadcast('nexo:stats-changed', engine.stats());
     return result;
   });
+  ipcMain.handle('nexo:stream-progress', (event, payload) => {
+    if (event.sender?.getType?.() !== 'webview' || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { skipped: 'progreso-invalido' };
+    }
+    const result = engine.onStreamProgress(event.sender.id, payload);
+    broadcast('nexo:stats-changed', engine.stats());
+    return result;
+  });
   ipcMain.handle('nexo:stream-end', (event, payload) => {
     // Texto tardío del mismo turno: reutilizar la absorción/deduplicación que
     // ya atiende CDP, sin volver a finalizar la memoria del guardián.

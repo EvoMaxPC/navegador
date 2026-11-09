@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { isResponseRequest, detectSite } from '../src/core/sites.js';
-import { extractChatGptDpuAnswer, isChatGptDpuMime } from '../src/core/chatgptDpu.js';
+import { extractChatGptAssistantDomText, extractChatGptDpuAnswer, isChatGptDpuMime } from '../src/core/chatgptDpu.js';
 
 test('reconoce el MIME DPU del ChatGPT sin iniciar sesión', () => {
   assert.equal(isChatGptDpuMime('text/vnd.openai.web-mobile-partial+html'), true);
@@ -118,4 +118,61 @@ test('lector autenticado comparte la normalización de saltos y espacios del lec
   const { extractChatGptAssistantDomText } = await import('../src/core/chatgptDpu.js');
   const nodes = [roleNode('user', 'una pregunta\ncon dos líneas'), roleNode('assistant', 'Respuesta actual.')];
   assert.equal(extractChatGptAssistantDomText({ querySelectorAll: () => nodes }, 'una pregunta con dos líneas'), 'Respuesta actual.');
+});
+
+function fakeMessage(text, position) {
+  return {
+    innerText: text,
+    textContent: text,
+    compareDocumentPosition(other) {
+      return position < other.position ? 4 : 2;
+    },
+    position,
+    querySelector() { return null; },
+  };
+}
+
+test('recupera la respuesta autenticada visible después del prompt actual', () => {
+  const user = fakeMessage('¿Cuánto es 2 + 2?', 1);
+  const assistant = fakeMessage('4', 2);
+  const doc = {
+    querySelectorAll(selector) {
+      if (selector === '[data-message-author-role]') {
+        user.getAttribute = () => 'user'; assistant.getAttribute = () => 'assistant';
+        return [user, assistant].sort((a, b) => a.position - b.position);
+      }
+      return selector.includes('assistant') ? [assistant] : [user];
+    },
+  };
+  assert.equal(extractChatGptAssistantDomText(doc, '¿Cuánto es 2 + 2?'), '4');
+});
+
+test('no reutiliza una respuesta anterior si el usuario ya envió otro prompt', () => {
+  const assistant = fakeMessage('respuesta vieja', 1);
+  const user = fakeMessage('pregunta nueva', 2);
+  const doc = {
+    querySelectorAll(selector) {
+      if (selector === '[data-message-author-role]') {
+        user.getAttribute = () => 'user'; assistant.getAttribute = () => 'assistant';
+        return [user, assistant].sort((a, b) => a.position - b.position);
+      }
+      return selector.includes('assistant') ? [assistant] : [user];
+    },
+  };
+  assert.equal(extractChatGptAssistantDomText(doc, 'pregunta nueva'), '');
+});
+
+test('rechaza texto visible que no corresponde al prompt enviado', () => {
+  const user = fakeMessage('otra pregunta', 1);
+  const assistant = fakeMessage('respuesta', 2);
+  const doc = {
+    querySelectorAll(selector) {
+      if (selector === '[data-message-author-role]') {
+        user.getAttribute = () => 'user'; assistant.getAttribute = () => 'assistant';
+        return [user, assistant].sort((a, b) => a.position - b.position);
+      }
+      return selector.includes('assistant') ? [assistant] : [user];
+    },
+  };
+  assert.equal(extractChatGptAssistantDomText(doc, 'prompt esperado'), '');
 });

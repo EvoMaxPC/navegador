@@ -43,6 +43,7 @@ const encoder = new TextEncoder();
  *   language?: string,
  *   host?: string|null,
  *   onStop?: (info: object) => void,
+ *   onText?: (info: { text: string, deliveredChars: number }) => void,
  *   onEnd?: (info: object) => void,
  *   onError?: (info: { stage: string, message: string }) => void
  * }} opts
@@ -77,6 +78,12 @@ export function createStreamFilter(opts = {}) {
   const pendingChunks = [];
   let plainText = '';
   let lineText = '';
+  let liveDeliveredChars = 0;
+  const reportText = (text) => {
+    if (!text) return;
+    liveDeliveredChars += text.length;
+    opts.onText?.({ text, deliveredChars: liveDeliveredChars });
+  };
 
   const consumeLines = (final = false) => {
     const lines = buffered.split('\n');
@@ -86,7 +93,9 @@ export function createStreamFilter(opts = {}) {
       if (!json) continue;
       observeOutcome(json);
       const plan = adapter.read(json);
-      lineText += (plan.segments || []).map((segment) => segment.newText).join('');
+      const delta = (plan.segments || []).map((segment) => segment.newText).join('');
+      lineText += delta;
+      reportText(delta);
       if (chatgpt && json.type === 'end') protocolEnded = true;
     }
   };
@@ -175,6 +184,7 @@ export function createStreamFilter(opts = {}) {
   /** Entrega lo retenido sin cerrar el turno (antes de un evento de cierre). */
   const flushPending = () => {
     const text = sentinel.release();
+    reportText(text);
     return text ? pendingEvent(text) : '';
   };
 
@@ -219,6 +229,7 @@ export function createStreamFilter(opts = {}) {
     const delta = segments.map((segment) => segment.newText).join('');
     const result = sentinel.push(delta);
     const values = distribute(segments, result.emit);
+    reportText(result.emit);
     adapter.write(json, segments, values, evt.event);
 
     if (result.stopped) reportStop();
@@ -261,7 +272,7 @@ export function createStreamFilter(opts = {}) {
         format = /^[{[]/.test(head) ? 'ndjson' : /^(?:data|event|id|retry):|^:/.test(head) ? 'sse' : 'text';
         if (format !== 'sse') for (const raw of pendingChunks) controller.enqueue(raw);
         pendingChunks.length = 0;
-        if (format === 'text') { plainText += buffered; buffered = ''; return; }
+        if (format === 'text') { plainText += buffered; reportText(buffered); buffered = ''; return; }
         if (format === 'ndjson') {
           consumeLines();
           if (protocolEnded) finishCapture();
@@ -275,6 +286,7 @@ export function createStreamFilter(opts = {}) {
       } else if (format === 'text') {
         controller.enqueue(chunk);
         plainText += decoded;
+        reportText(decoded);
         buffered = '';
         return;
       }
@@ -295,7 +307,7 @@ export function createStreamFilter(opts = {}) {
         format = /^[{[]/.test(head) ? 'ndjson' : /^(?:data|event|id|retry):|^:/.test(head) ? 'sse' : 'text';
         if (format !== 'sse') for (const raw of pendingChunks) controller.enqueue(raw);
         pendingChunks.length = 0;
-        if (format === 'text') plainText += buffered;
+        if (format === 'text') { plainText += buffered; reportText(buffered); }
       }
       if (format !== 'sse') { finishCapture(); return; }
       let out = '';

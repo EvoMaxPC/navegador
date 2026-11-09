@@ -121,6 +121,8 @@ export class Engine {
      * tokens para siempre.
      */
     this.layerEndedText = new Map();
+    /** Captura acumulada en vivo por pestaña para contabilizar tokens incrementalmente. */
+    this.streamProgress = new Map();
     /**
      * Respuestas ya contadas sin poder leer su texto, por pestaña:
      * `{at, messageId, host}`. Si el texto aparece después —CDP suele llegar más
@@ -352,11 +354,52 @@ export class Engine {
     return this.onTurnResult(webContentsId, { ...pending, outcome: 'unknown' });
   }
 
+  /** Fragmento nuevo de una respuesta: actualiza tokens sin esperar al cierre. */
+  onStreamProgress(webContentsId, payload = {}) {
+    const fragment = String(payload.text || '');
+    if (!fragment) return { ok: true, skipped: 'empty' };
+    const now = Date.now();
+    const pending = this.#pendingTurn(webContentsId, now);
+    const messageId = String(payload.messageId || pending?.entry?.messageId || '');
+    const previous = this.streamProgress.get(webContentsId);
+    if (previous && messageId && previous.messageId && previous.messageId !== messageId) {
+      this.streamProgress.delete(webContentsId);
+    }
+    const current = this.streamProgress.get(webContentsId) || {
+      messageId, text: '', tokens: 0, model: payload.model || '', host: payload.host || '',
+    };
+    current.text += fragment;
+    current.messageId ||= messageId;
+    current.model ||= payload.model || '';
+    current.host ||= payload.host || '';
+    // La tokenización BPE puede fusionar tokens al llegar el siguiente fragmento;
+    // aplicar también deltas negativos mantiene el total exacto en tiempo real.
+    const totalTokens = this.#outputTokens(current.text, current.model, current.host);
+    const increment = totalTokens - current.tokens;
+    if (increment) this.counters.outputTokens = Math.max(0, this.counters.outputTokens + increment);
+    current.tokens = totalTokens;
+    current.at = now;
+    this.streamProgress.set(webContentsId, current);
+    return { ok: true, chars: current.text.length, tokens: current.tokens, added: increment };
+  }
+
   /**
    * Respuesta cerrada. Cuenta una sola vez, asocia el turno y distingue una
    * respuesta completa de una cortada.
    */
   #countResponse(webContentsId, payload = {}) {
+    const live = this.streamProgress.get(webContentsId);
+    if (live && (!payload.messageId || !live.messageId || payload.messageId === live.messageId)) {
+      // Retirar el aporte provisional y dejar que la deduplicación existente
+      // reconcilie el texto completo contra CDP/red. Un cierre recortado no
+      // puede perder los caracteres reales ya entregados en vivo.
+      this.counters.outputTokens -= live.tokens;
+      this.streamProgress.delete(webContentsId);
+      const finalText = String(payload.text || '');
+      payload = { ...payload,
+        text: live.text.startsWith(finalText) ? live.text : finalText,
+        model: payload.model || live.model, host: payload.host || live.host };
+    }
     const messageId = String(payload.messageId || '');
     const now = Date.now();
     const textoPayload = String(payload.text || '');

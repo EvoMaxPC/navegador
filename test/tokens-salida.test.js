@@ -40,6 +40,19 @@ function callIpc(channel, payload, senderId = 1) {
 
 const stats = () => callIpc('nexo:stats');
 
+function progreso(view, messageId, text) {
+  const handler = journal.ipcHandlers.get('nexo:stream-progress');
+  assert.ok(handler, 'existe el canal de progreso en vivo');
+  return handler({
+    sender: { id: view.id, getType: () => 'webview' },
+  }, {
+    messageId,
+    site: 'chatgpt',
+    host: 'chatgpt.com',
+    text,
+  });
+}
+
 const cuerpoChatGPT = (texto) =>
   JSON.stringify({
     action: 'next',
@@ -364,4 +377,64 @@ test('11. eventos SSE de control sin texto no producen tokens ficticios', async 
   const fin = await stats();
   assert.equal(fin.responses, antes.responses + 1);
   assert.equal(fin.outputTokens, antes.outputTokens);
+});
+
+test('12. los tokens de salida se actualizan en tiempo real y el cierre no los duplica', async () => {
+  const view = await abrir('https://chatgpt.com/c/tk-live');
+  const antes = await stats();
+  const messageId = 'tk-live-1';
+  const parte1 = 'La respuesta empieza en vivo';
+  const parte2 = ' y continúa con más contenido hasta terminar correctamente.';
+
+  enviar(view, 'pregunta para captura en vivo');
+  await settle(20);
+
+  progreso(view, messageId, parte1);
+  const durante1 = await stats();
+  assert.equal(durante1.outputTokens, antes.outputTokens + countGptTokens(parte1),
+    'el contador suma los tokens mientras llega el primer fragmento');
+
+  progreso(view, messageId, parte2);
+  const completo = parte1 + parte2;
+  const durante2 = await stats();
+  assert.equal(durante2.outputTokens, antes.outputTokens + countGptTokens(completo),
+    'el contador se actualiza con el texto acumulado, sin duplicar');
+
+  capaStreamEnd(view, completo, { messageId });
+  const final = await stats();
+  assert.equal(final.responses, antes.responses + 1, 'el +1 de respuesta se registra al cerrar');
+  assert.equal(final.outputTokens, durante2.outputTokens, 'el cierre no vuelve a sumar los tokens ya contados en vivo');
+});
+
+test('13. el cierre recortado conserva todo el texto entregado y BPE entre fragmentos', async () => {
+  const view = await abrir('https://chatgpt.com/c/tk-clipped');
+  const antes = await stats(), messageId = 'tk-clipped';
+  enviar(view, 'prueba de prefijo');
+  await settle(20);
+  const parts = ['a', 'b', 'c', ' una respuesta completa de control.'];
+  let full = '';
+  for (const part of parts) {
+    full += part;
+    progreso(view, messageId, part);
+    assert.equal((await stats()).outputTokens, antes.outputTokens + countGptTokens(full));
+  }
+  capaStreamEnd(view, full.slice(0, 3), { messageId });
+  assert.equal((await stats()).outputTokens, antes.outputTokens + countGptTokens(full));
+  assert.equal((await stats()).responses, antes.responses + 1);
+});
+
+test('14. red primero y texto en vivo después finalizan una sola respuesta', async () => {
+  const view = await abrir('https://chatgpt.com/c/tk-network-live');
+  const antes = await stats(), messageId = 'tk-network-live';
+  enviar(view, 'prueba de orden red');
+  await settle(20);
+  completarRed(view);
+  await settle(200);
+  assert.equal((await stats()).responses, antes.responses + 1);
+  const text = 'Texto real entregado después de la notificación de red.';
+  progreso(view, messageId, text);
+  capaStreamEnd(view, text, { messageId });
+  const fin = await stats();
+  assert.equal(fin.responses, antes.responses + 1);
+  assert.equal(fin.outputTokens, antes.outputTokens + countGptTokens(text));
 });

@@ -121,6 +121,12 @@ window.addEventListener('message', async (event) => {
       await ipcRenderer.invoke('nexo:turn-result', payload).catch((error) => console.warn('[nexo] resultado no notificado:', error.message));
       return;
     }
+    if (type === 'stream-progress') {
+      await ipcRenderer.invoke('nexo:stream-progress', payload).catch((error) => {
+        console.warn('[nexo] progreso de tokens no notificado:', error.message);
+      });
+      return;
+    }
     if (type === 'stream-end') {
       const action = await ipcRenderer.invoke('nexo:stream-end', payload).catch(() => null);
       if (action?.nextAction && payload?.stopped) {

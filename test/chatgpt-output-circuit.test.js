@@ -423,13 +423,15 @@ test('resultados: Stop confirmado actualiza UI antes del aborto; no se confunde 
   const reading = response.text().catch((error) => { assert.equal(error.name, 'AbortError'); });
   try {
     await pause(60);
+    const during = stats().outputTokens;
+    assert.ok(during > before.outputTokens, 'ya se contabilizó texto real en vivo');
     page.stop(false);
     await pause();
     assert.deepEqual(outcomeDelta(before), [0, 0, 0], 'un clic programático no confirma Stop');
     page.stop();
     await pause();
     assert.deepEqual(outcomeDelta(before), [1, 0, 0]);
-    assert.equal(stats().outputTokens, before.outputTokens, 'clasificar Stop no modifica los tokens');
+    assert.equal(stats().outputTokens, during, 'clasificar Stop no modifica los tokens');
     assertOutcomeUi();
   } finally { release(); await reading; await pause(50); }
   assert.deepEqual(outcomeDelta(before), [1, 0, 0]);
@@ -620,12 +622,14 @@ for (const attributes of [
     const reading = response.text().catch((error) => assert.equal(error.name, 'AbortError'));
     try {
       await pause(50);
+      const during = stats().outputTokens;
+      assert.ok(during > before.outputTokens);
       page.stop(true, attributes);
       page.stop(true, attributes);
       await pause();
       assert.deepEqual(outcomeDelta(before), [1, 0, 0]);
       assertOutcomeUi();
-      assert.equal(stats().outputTokens, before.outputTokens, 'el clic no modifica tokens');
+      assert.equal(stats().outputTokens, during, 'el clic no modifica tokens');
     } finally { release(); await reading; await pause(50); }
     assert.deepEqual(outcomeDelta(before), [1, 0, 0], 'el aborto no vuelve a sumar');
     await replayCdp(view, fixture('aborted.sse'));
