@@ -466,6 +466,7 @@ function registerIpc() {
     // La capa de la página sólo pide mediación cuando ya reconoció una petición
     // de chat. Si el motor la descarta, es un dato: significa que el sitio no se
     // está mediando. Antes, ese silencio se veía como «0 turnos» y nada más.
+    broadcast('nexo:stats-changed', engine.stats());
     if (result?.skipped === 'fuera-de-alcance') {
       const host = hostOf(String(payload?.url || '')) || String(payload?.site || 'sitio');
       noteDiagnostic({
@@ -479,7 +480,28 @@ function registerIpc() {
     }
     return result;
   });
-  ipcMain.handle('nexo:stream-end', (event, payload) => engine.onStreamEnd(event.sender.id, payload));
+  ipcMain.handle('nexo:stream-end', (event, payload) => {
+    const result = engine.onStreamEnd(event.sender.id, payload);
+    const chars = Number(payload?.deliveredChars) || 0;
+    if (chars > 0) {
+      const host = String(payload?.host || payload?.site || 'el sitio');
+      const entry = {
+        kind: 'receiving',
+        code: 'incoming',
+        severity: 'info',
+        title: `Respuesta recibida en ${host}`,
+        detail: payload?.stopped
+          ? `Se cortó un bucle antes de mostrarlo (${payload?.droppedChars || 0} caracteres descartados).`
+          : `${chars} caracteres llegaron a la pantalla.`,
+        meta: { host, site: payload?.site || null, deliveredChars: chars, stopped: Boolean(payload?.stopped) },
+        ts: Date.now(),
+      };
+      if (store) store.pushLog(entry);
+      broadcast('nexo:event', { type: 'intervention', payload: entry });
+    }
+    broadcast('nexo:stats-changed', engine.stats());
+    return result;
+  });
   ipcMain.handle('nexo:stream-stop', (event, payload) => engine.onStreamStop(event.sender.id, payload));
 
   ipcMain.handle('nexo:settings:get', () => store.settings);
@@ -567,7 +589,30 @@ function registerIpc() {
         detail: `${clean.payload.stage || 'capa'}: ${String(clean.payload.message || '').slice(0, 200)}`,
         meta: { stage: clean.payload.stage || '', message: String(clean.payload.message || '').slice(0, 400) },
       });
+      return;
     }
+
+    // Un envío reconocido se anota siempre, se haya mediado o no: es la prueba
+    // de que el mensaje salió, y hasta ahora el panel sólo veía el caso en el
+    // que el motor inyectaba algo.
+    if (clean.type === 'outgoing') {
+      const host = String(clean.payload.host || clean.payload.site || 'el sitio');
+      const entry = {
+        kind: 'sending',
+        code: 'outgoing',
+        severity: 'info',
+        title: `Mensaje enviado en ${host}`,
+        detail: clean.payload.mediated
+          ? 'El texto salió mediado por el motor.'
+          : 'El texto salió sin cambios: el motor no modificó este mensaje.',
+        meta: { host, site: clean.payload.site || null, url: clean.payload.url || '', mediated: Boolean(clean.payload.mediated) },
+        ts: Date.now(),
+      };
+      if (store) store.pushLog(entry);
+      broadcast('nexo:event', { type: 'intervention', payload: entry });
+      return;
+    }
+
     broadcast('nexo:event', clean);
   });
 

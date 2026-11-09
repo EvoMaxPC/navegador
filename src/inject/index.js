@@ -52,7 +52,10 @@ const bridge = (() => {
   });
 
   return {
-    request(type, payload, timeout = 5000) {
+    // El envío del sitio espera esta respuesta. Dos segundos alcanzan de sobra
+    // para un motor en proceso; esperar cinco retrasaba el mensaje y hacía
+    // parecer que el botón de enviar no respondía.
+    request(type, payload, timeout = 2000) {
       const id = `n${Date.now().toString(36)}-${(seq += 1)}`;
       return new Promise((resolve, reject) => {
         const entry = { resolve, reject, timer: null };
@@ -235,12 +238,28 @@ if (!window.__NEXO_HOOKED__) {
   const nativeFetch = window.fetch.bind(window);
 
   window.fetch = async function nexoFetch(input, init) {
+    const url = absoluteUrl(urlOf(input));
+    const method = methodOf(input, init);
+    // ¿La capa reconoce esta petición como un envío de chat? Se evalúa acá para
+    // poder informarlo salga o no la mediación: si el envío no se registra, el
+    // panel no puede decir si el mensaje salió.
+    const chat = shouldMediate(url, method);
+
     // 1) Preparar: no envía nada. Cualquier fallo → petición original.
     let plan = null;
     try {
       plan = await planRequest(input, init);
     } catch (error) {
       bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
+    }
+    if (chat) {
+      bridge.event('outgoing', {
+        site: site.id,
+        host: CONFIG.host,
+        url: url.slice(0, 200),
+        mediated: Boolean(plan),
+        reason: plan ? null : 'sin-cambio',
+      });
     }
     if (!plan) return nativeFetch(input, init);
 
@@ -253,6 +272,15 @@ if (!window.__NEXO_HOOKED__) {
       response = await nativeFetch(plan.input, plan.init);
     } finally {
       state.active -= 1;
+    }
+
+    // Un rechazo del proveedor (403, 429…) se informa con su código: es el dato
+    // que explica «no se pudo conectar» sin abrir las herramientas del sitio.
+    if (response.ok === false) {
+      bridge.event('error', {
+        stage: 'http',
+        message: `${response.status} ${method} ${url.slice(0, 160)}`,
+      });
     }
 
     // 3) Envolver la respuesta. Si el filtro fallara, se entrega la original sin

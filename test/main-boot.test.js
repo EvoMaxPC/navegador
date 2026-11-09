@@ -472,3 +472,41 @@ test('si el motor descarta una petición de chat, queda anotado', async () => {
   assert.ok(entrada, 'el descarte deja rastro en el registro');
   assert.match(entrada.title, /ejemplo\.com/);
 });
+
+test('cada mensaje enviado y cada respuesta quedan registrados', async () => {
+  const { journal: j } = await import('./harness/electron-stub.mjs');
+  const listener = j.ipcListeners.get('nexo:event');
+  assert.ok(listener, 'hay canal de eventos de la capa');
+  const sender = { getType: () => 'webview', getURL: () => 'https://chatgpt.com/c/abc' };
+
+  listener({ sender }, { type: 'outgoing', payload: { site: 'chatgpt', host: 'chatgpt.com', url: 'https://chatgpt.com/backend-api/conversation', mediated: true } });
+
+  let log = await callIpc('nexo:log');
+  const envio = log.find((entry) => entry.code === 'outgoing');
+  assert.ok(envio, 'el envío queda en el registro');
+  assert.equal(envio.kind, 'sending');
+  assert.match(envio.title, /Mensaje enviado en chatgpt\.com/);
+  assert.equal(envio.meta.mediated, true);
+
+  // Un envío que el motor no modificó también se registra: lo que importa es
+  // saber que el mensaje salió.
+  listener({ sender }, { type: 'outgoing', payload: { site: 'claude', host: 'claude.ai', mediated: false } });
+  log = await callIpc('nexo:log');
+  const sinCambio = log.filter((entry) => entry.code === 'outgoing');
+  assert.equal(sinCambio.length, 2);
+  assert.match(sinCambio[0].detail, /sin cambios/);
+
+  const cierre = await callIpc('nexo:stream-end', {
+    site: 'chatgpt',
+    host: 'chatgpt.com',
+    text: 'respuesta',
+    deliveredChars: 40,
+    stopped: false,
+  }, 91);
+  assert.ok(cierre);
+  log = await callIpc('nexo:log');
+  const respuesta = log.find((entry) => entry.code === 'incoming');
+  assert.ok(respuesta, 'la respuesta queda en el registro');
+  assert.equal(respuesta.kind, 'receiving');
+  assert.match(respuesta.detail, /40 caracteres/);
+});

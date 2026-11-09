@@ -169,7 +169,7 @@ Tampoco hay actualizaciones automáticas: es una distribución manual.
   con los 62 archivos correctos y un ZIP que lectores independientes abren sin
   errores. Esto prueba el empaquetador, **no** el binario real.
 - **En GitHub Actions (Windows Server 2022, Electron 45.2.3 real):** instalación,
-  `npm run verify` (349 pruebas), empaquetado, la prueba de humo sobre el `.exe`
+  `npm run verify` (350 pruebas), empaquetado, la prueba de humo sobre el `.exe`
   empaquetado y publicación del ZIP de 161 MB. Ese es el archivo de la sección 1:
   el que se descarga y se ejecuta.
 

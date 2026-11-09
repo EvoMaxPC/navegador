@@ -1149,6 +1149,13 @@ nexo.on('nexo:event', (message) => {
   }
 });
 
+// Los contadores se refrescan también cuando el motor prepara un envío o cierra
+// una respuesta, no sólo cuando llega una intervención: un turno mediado sin
+// avisos dejaba el panel en cero.
+nexo.on?.('nexo:stats-changed', () => {
+  refreshStats();
+});
+
 nexo.on('nexo:settings-changed', (settings) => {
   fillSettings(settings);
   renderSitesList();

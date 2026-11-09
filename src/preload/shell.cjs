@@ -15,6 +15,7 @@ const ALLOWED_EVENTS = new Set([
   'nexo:bookmarks-changed',
   'nexo:downloads-changed',
   'nexo:download-done',
+  'nexo:stats-changed',
 ]);
 
 contextBridge.exposeInMainWorld('nexo', {
