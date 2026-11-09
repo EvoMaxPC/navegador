@@ -405,7 +405,8 @@ export class Engine {
     const textoPayload = String(payload.text || '');
     // El texto de una respuesta ya contada por la red: se suman los tokens y la
     // respuesta no se cuenta dos veces.
-    if (textoPayload.trim() && this.#absorbTokens(webContentsId, textoPayload, messageId || null, payload.model, payload.host)) {
+    if (!this.streamProgress.has(webContentsId) && textoPayload.trim() &&
+      this.#absorbTokens(webContentsId, textoPayload, messageId || null, payload.model, payload.host)) {
       return { ok: true, duplicate: true, tokens: true };
     }
     // La clave es el identificador del envío; si el sitio no lo diera (camino
@@ -480,6 +481,9 @@ export class Engine {
    * no está esperando y esto no hace nada.
    */
   onNetworkResponse(webContentsId, payload = {}) {
+    // Si ya hay fragmentos en vivo, el cierre del stream será quien registre
+    // la respuesta. El evento de red no debe adelantar otro +1 sin texto.
+    if (this.streamProgress.has(webContentsId)) return { ok: true, skipped: 'live-stream-in-progress' };
     const now = Date.now();
     const pendiente = payload.messageId
       ? [...this.awaiting.entries()]
