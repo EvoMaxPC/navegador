@@ -58,10 +58,10 @@ test('no reutiliza la respuesta previa cuando el usuario repite el mismo prompt'
     'respuesta anterior',
     'You said:',
     'misma pregunta',
-  ].join('\\n');
+  ].join('\n');
   assert.equal(extractChatGptDpuAnswer(pending, 'misma pregunta'), '');
 
-  const completed = `${pending}\\nChatGPT said:\\nrespuesta nueva`;
+  const completed = `${pending}\nChatGPT said:\nrespuesta nueva`;
   assert.equal(extractChatGptDpuAnswer(completed, 'misma pregunta'), 'respuesta nueva');
 });
 
