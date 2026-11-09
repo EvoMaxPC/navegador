@@ -146,7 +146,7 @@ function writeCaptureTrace(stage, data = {}) {
     memory: data.memory || null,
     code: data.code || null,
   };
-  appendFile(captureDiagnosticFile, JSON.stringify(safe) + '\\n', 'utf8').catch((error) =>
+  appendFile(captureDiagnosticFile, JSON.stringify(safe) + '\n', 'utf8').catch((error) =>
     console.warn('[nexo] no se pudo escribir diagnóstico de captura:', error?.message || error));
 }
 let profile = null;
