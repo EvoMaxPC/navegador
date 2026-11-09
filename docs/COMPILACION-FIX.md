@@ -33,4 +33,18 @@ No se modificaron la interfaz ni EVO MEMORY, ni se agregaron contadores.
 - La prueba omitida requiere un ZIP externo de Electron mediante `NEXO_ELECTRON_ZIP_DIR`.
 - Empaquetado local intentado con confianza TLS del sistema: bloqueado en la descarga del binario por la red del sandbox. No se desactivó TLS.
 
-La validación del ejecutable en Windows se realiza con el workflow `Compilar para Windows` de esta misma rama. El resultado se informa al terminar el run; la verificación local por sí sola no prueba ese ejecutable ni una conversación real en ChatGPT.
+## Verificación Windows completada
+
+El workflow [Compilar para Windows — run 42651499665](https://github.com/EvoMaxPC/navegador/actions/runs/42651499665)
+terminó con **success** el 2026-11-09, sobre el commit `e40cc1601ae8d9ebfeac9328bbd1c313eb04e562`.
+
+Pasaron instalación de dependencias, verificación automática, referencia de rendimiento,
+`npm run dist:win`, prueba de humo del ejecutable y publicación del ZIP.
+
+Artefacto: [Nexo-win32-x64](https://github.com/EvoMaxPC/navegador/actions/runs/42651499665/artifacts/13689642278),
+158138785 bytes, no expirado al entregar; retención de 30 días según el workflow.
+El ZIP de artefacto contiene `Nexo-0.1.13-win32-x64.zip`.
+
+Esto confirma el empaquetado y arranque en Windows, no una conversación real en ChatGPT.
+El problema local de acceso a los hosts de assets sigue siendo una limitación de red
+que no se evita desactivando TLS.

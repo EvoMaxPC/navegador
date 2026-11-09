@@ -10,6 +10,11 @@ metadatos del ejecutable y el código de la aplicación dentro de `resources/app
 
 Cada etiqueta `v*` compila en un runner de Windows y adjunta el ZIP a la release.
 
+La compilación corregida **0.1.13** está disponible como
+[artefacto Nexo-win32-x64](https://github.com/EvoMaxPC/navegador/actions/runs/42651499665/artifacts/13689642278),
+con empaquetado y prueba de humo Windows aprobados. Requiere sesión en GitHub y
+se conserva 30 días. Las releases anteriores siguen listadas abajo.
+
 | Versión | Archivo | Tamaño | sha256 |
 |---|---|---|---|
 | [v0.1.12](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.12) | `Nexo-0.1.12-win32-x64.zip` | 149 MB | ver el adjunto en la release |

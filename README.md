@@ -18,9 +18,10 @@ los dos sentidos**:
 Todo el análisis es **local y determinista**: sin modelos auxiliares ni nube. El conteo GPT usa el tokenizador BPE local
 `gpt-tokenizer`, incluido en la distribución.
 
-**[Descargar Nexo 0.1.12 para Windows](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.12)**
-— `Nexo-0.1.12-win32-x64.zip` (149 MB). Descomprimí y
-ejecutá `nexo.exe`. Sin firmar: Windows muestra SmartScreen la primera vez. Detalles
+**[Descargar la compilación corregida 0.1.13 para Windows](https://github.com/EvoMaxPC/navegador/actions/runs/42651499665/artifacts/13689642278)**
+— artefacto `Nexo-win32-x64` de GitHub Actions (requiere iniciar sesión; retención de 30 días).
+Extraé el ZIP interno `Nexo-0.1.13-win32-x64.zip` y ejecutá `nexo.exe`.
+Sin firmar: Windows muestra SmartScreen la primera vez. Detalles
 en [`docs/EMPAQUETADO.md`](docs/EMPAQUETADO.md).
 
 ---
