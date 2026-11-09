@@ -1000,7 +1000,7 @@ function noteUserMessageFromNetwork(details = {}) {
   // Regenerar o continuar no es un mensaje nuevo del usuario.
   // Regenerar es una petición de conversación, pero no un mensaje nuevo.
   if (typeof json?.action === 'string' && json.action && json.action !== 'next') {
-    return { seen: true, counted: false };
+    return { seen: true, counted: false, responseEligible: false };
   }
 
   const located = json ? locateUserText(json, site) : null;
