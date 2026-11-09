@@ -169,6 +169,7 @@ export class FakeBrowserWindow extends EventEmitter {
 
 export const app = Object.assign(new EventEmitter(), {
   name: 'Nexo',
+  getGPUFeatureStatus: () => ({ gpu_compositing: 'enabled', webgl: 'enabled', rasterization: 'enabled' }),
   commandLine: {
     appendSwitch(name, value) {
       journal.switches.push({ name, value });

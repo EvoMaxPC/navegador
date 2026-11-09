@@ -664,6 +664,17 @@ app.whenReady().then(async () => {
       checks: [{ name: 'prueba de humo', ok: false, detail: error?.message || String(error) }],
     }));
     smokeDone = true;
+    // El estado de la aceleración por hardware explica buena parte de los
+    // tiempos de pintado: en un servidor sin GPU, Chromium rasteriza por
+    // software y el primer cuadro tarda cientos de milisegundos.
+    try {
+      const gpu = app.getGPUFeatureStatus?.() || {};
+      absorbPerf({
+        gpu: `composición ${gpu.gpu_compositing || 'n/d'}, webgl ${gpu.webgl || 'n/d'}, rasterizado ${gpu.rasterization || 'n/d'}`,
+      });
+    } catch {
+      // Sin información de GPU se informa igual.
+    }
     const code = reportSmoke(smoke);
     if (smokeOut) {
       // `reportSmoke` ya escribió en consola; el archivo es la vía confiable.
