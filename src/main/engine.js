@@ -330,7 +330,7 @@ export class Engine {
       turns += s.turns;
       loops += s.loopsSeen;
     }
-    return { tabs: this.guards.size, turns, loops, cdp: { ...this.cdp } };
+    return { tabs: this.guards.size, turns, loops: loops + this.cdp.loops, cdp: { ...this.cdp } };
   }
 
   dropTab(webContentsId) {
