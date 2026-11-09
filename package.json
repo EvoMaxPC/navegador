@@ -14,7 +14,8 @@
     "dev": "npm run build:inject && electron . --dev",
     "demo": "node dev/serve.mjs",
     "test": "node --test",
-    "test:watch": "node --test --watch"
+    "test:watch": "node --test --watch",
+    "verify": "node scripts/verificar.mjs"
   },
   "dependencies": {},
   "devDependencies": {
