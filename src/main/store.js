@@ -49,6 +49,19 @@ export class Store {
     return this.data.settings;
   }
 
+  /**
+   * Reemplaza los ajustes por completo.
+   *
+   * `setSettings()` fusiona, que es lo correcto para un cambio puntual y lo
+   * incorrecto para «restablecer»: al fusionar, un sitio apagado seguía apagado
+   * después de restablecer, sin ningún aviso, y ese sitio no cuenta nada.
+   */
+  replaceSettings(next) {
+    this.data.settings = mergeSettings(DEFAULT_SETTINGS, next || {});
+    this.save();
+    return this.data.settings;
+  }
+
   pushLog(entry) {
     this.data.log.unshift(entry);
     if (this.data.log.length > this.maxLog) this.data.log.length = this.maxLog;

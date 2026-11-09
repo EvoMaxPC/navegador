@@ -241,6 +241,15 @@ modelo: CDP exige que la URL sea la del endpoint de chat del sitio
 un JSON de cuentas o de listas no se cuentan, aunque vengan del mismo dominio y
 sean un POST.
 
+**La conversación se reconoce por su cuerpo, no sólo por su ruta.** La ruta del
+endpoint de chat se compara por su forma —tiene que terminar en `/conversation`—
+en vez de exigir la exacta: un cambio de versión en el sitio dejaba «0 de
+conversación» con decenas de POST delante. Si ni la forma coincide, manda el
+cuerpo: un POST al proveedor cuyo JSON trae el mensaje del usuario con el esquema
+del sitio **es** la conversación, y desde ahí su respuesta se cuenta y se lee. La
+ruta real queda anotada (`chat-ruta`) para no volver a suponerla. Las rutas de
+preparación (`…/prepare`, `requestSkip`) llevan el mismo cuerpo y no se cuentan.
+
 **Un cero no se queda sin causa.** Cada rama que puede perder una respuesta deja
 un aviso en el registro, con el código que la identifica:
 
@@ -256,6 +265,8 @@ un aviso en el registro, con el código que la identifica:
 | `response-capa` | El stream lo cerró la capa de la página: el depurador no lo relee. |
 | `cdp-sin-depurador` | El depurador no se pudo adjuntar (o no existe en este Electron). |
 | `incoming-network` | La respuesta se contó por el cierre de la red: sin texto, sin tokens de salida. |
+| `chat-ruta` | El mensaje viaja por una ruta que el perfil no declara: se reconoció por el cuerpo y se cuenta igual. |
+| `chat-unmatched` | POST al proveedor fuera de la ruta conocida y sin mensaje en el cuerpo. |
 
 **Asociación.** El envío guarda su `messageId` en la petición observada. La
 respuesta a esa petición viaja con el mismo identificador y cierra **ese** turno;

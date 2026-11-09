@@ -15,6 +15,10 @@ import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
 
+// La respuesta contada desde la red espera a que la capa o CDP cuenten primero.
+// En la prueba ese margen se acorta para no esperar segundo y medio por caso.
+process.env.NEXO_NETRESP_MS = '100';
+
 register('./harness/loader.mjs', import.meta.url);
 
 const { journal } = await import('./harness/electron-stub.mjs');
@@ -36,7 +40,15 @@ const stats = () => callIpc('nexo:stats');
 const PARTITION = 'persist:nexo';
 
 /** Lanza una petición por el vigilante de red, como lo hace Chromium. */
-function peticionRed({ url, method = 'POST', cuerpo = null, webContentsId = 1, sinPestana = false, requestId = null }) {
+function peticionRed({
+  url,
+  method = 'POST',
+  cuerpo = null,
+  webContentsId = 1,
+  sinPestana = false,
+  requestId = null,
+  id = null,
+}) {
   const mano = journal.webRequest.before.get(PARTITION);
   assert.ok(mano, 'el vigilante de red está escuchando');
   const detalles = {
@@ -46,6 +58,7 @@ function peticionRed({ url, method = 'POST', cuerpo = null, webContentsId = 1, s
     uploadData: cuerpo ? [{ bytes: Buffer.from(cuerpo, 'utf8') }] : undefined,
     ...(requestId ? { id: requestId } : {}),
   };
+  if (id !== null) detalles.id = id;
   // Chromium no informa la pestaña cuando la petición sale de un worker.
   if (!sinPestana) detalles.webContentsId = webContentsId;
   let resultado = null;
@@ -61,6 +74,15 @@ function respuestaRed({ url = 'https://chatgpt.com/backend-api/f/conversation', 
   assert.ok(mano, 'el observador de respuestas está escuchando');
   const detalles = { url, method, statusCode, resourceType: 'xhr', ...(requestId ? { id: requestId } : {}) };
   if (!sinPestana) detalles.webContentsId = webContentsId;
+  mano.listener(detalles);
+}
+
+/** El cierre de una petición, como lo informa Chromium. */
+function completarRed({ url, webContentsId = 1, statusCode = 200, id = null }) {
+  const mano = journal.webRequest.completed.get(PARTITION);
+  assert.ok(mano, 'el vigilante mira las peticiones completadas');
+  const detalles = { url, method: 'POST', resourceType: 'xhr', statusCode, webContentsId };
+  if (id !== null) detalles.id = id;
   mano.listener(detalles);
 }
 
@@ -554,4 +576,83 @@ test('con el sitio apagado en Ajustes, el panel dice que llegó y no se contó',
   } finally {
     await callIpc('nexo:settings:reset');
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* la ruta cambió: manda el cuerpo, no el endpoint                     */
+/* ------------------------------------------------------------------ */
+
+test('una ruta de conversación con otra forma se reconoce y cuenta', async () => {
+  const view = await abrir('https://chatgpt.com/c/red-ruta-nueva');
+  const antes = await stats();
+
+  // El sitio estrena versión de endpoint: mismo cuerpo, otra ruta.
+  peticionRed({
+    url: 'https://chatgpt.com/backend-api/v2/conversation',
+    cuerpo: cuerpoChatGPT('pregunta en ruta nueva'),
+    webContentsId: view.id,
+  });
+  await settle(20);
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages + 1, 'el mensaje se cuenta');
+  assert.equal(despues.capture.chatRequests, antes.capture.chatRequests + 1, 'y el panel lo ve como conversación');
+});
+
+test('si la ruta no se parece a ninguna conocida, el cuerpo delata la conversación', async () => {
+  const view = await abrir('https://chatgpt.com/c/red-ruta-rara');
+  const antes = await stats();
+
+  // Ningún patrón de ruta: el cuerpo es de ChatGPT y trae el mensaje.
+  peticionRed({
+    id: 777,
+    url: 'https://chatgpt.com/uc/ea1e397-7694/enviar',
+    cuerpo: cuerpoChatGPT('pregunta por ruta desconocida'),
+    webContentsId: view.id,
+  });
+  await settle(20);
+
+  const trasEnviar = await stats();
+  assert.equal(trasEnviar.messages, antes.messages + 1, 'el mensaje se cuenta');
+
+  // Y su respuesta se cuenta también, por el identificador de la petición.
+  completarRed({ id: 777, url: 'https://chatgpt.com/uc/ea1e397-7694/enviar', webContentsId: view.id });
+  await settle(200);
+
+  const fin = await stats();
+  assert.equal(fin.responses, antes.responses + 1, '+1 respuestas de la IA');
+  assert.equal(fin.turns, antes.turns + 1, '+1 turnos completos');
+
+  const log = await callIpc('nexo:log');
+  const aviso = log.find((item) => item.code === 'chat-ruta');
+  assert.ok(aviso, 'la ruta real queda anotada');
+  assert.match(aviso.detail, /\/uc\/ea1e397-7694\/enviar/, 'con la ruta exacta que usó el sitio');
+});
+
+test('la ruta de preparación no cuenta un mensaje aunque traiga el cuerpo', async () => {
+  await abrir('https://chatgpt.com/c/red-prepare');
+  const antes = await stats();
+
+  peticionRed({
+    url: 'https://chatgpt.com/backend-api/f/conversation/prepare',
+    cuerpo: cuerpoChatGPT('hola'),
+  });
+  await settle(20);
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages, 'preparar no es enviar');
+});
+
+test('restablecer los ajustes vuelve a habilitar el sitio que se había apagado', async () => {
+  const ajustes = await callIpc('nexo:settings:get');
+  await callIpc('nexo:settings:set', {
+    ...ajustes,
+    sites: { ...(ajustes.sites || {}), chatgpt: { enabled: false } },
+  });
+  assert.equal((await callIpc('nexo:config', { host: 'chatgpt.com' })).enabled, false, 'queda apagado');
+
+  // Restablecer tiene que reemplazar, no fusionar: fusionando, el sitio seguía
+  // apagado y el panel mostraba ceros sin ninguna causa visible.
+  await callIpc('nexo:settings:reset');
+  assert.equal((await callIpc('nexo:config', { host: 'chatgpt.com' })).enabled, true, 'y queda habilitado');
 });

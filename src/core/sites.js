@@ -23,13 +23,18 @@ export const SITES = [
     composer: ['#prompt-textarea', 'div[contenteditable="true"][id^="prompt"]', 'textarea[data-id]'],
     sendButton: ['button[data-testid="send-button"]', 'button[aria-label*="Send"]', 'button[aria-label*="Enviar"]'],
     stopButton: ['button[data-testid="stop-button"]', 'button[aria-label*="Stop"]'],
-    // Sólo la petición que ENVÍA un mensaje: POST a `/backend-api/conversation`
-    // (o `/f/conversation`; `backend-anon` para sesiones sin cuenta). Las rutas
-    // que empiezan igual NO son mensajes y no deben tocarse: `/conversation/prepare`
-    // (se mediaría dos veces el mismo texto), `/conversations` (listado),
-    // `/conversation/<id>` (historial).
-    requestMatch: /\/backend-(api|anon)\/(f\/)?conversation\/?$/,
-    requestPath: /^\/backend-(api|anon)\/(f\/)?conversation\/?$/,
+    // Sólo la petición que ENVÍA un mensaje: POST a una ruta que **termine** en
+    // `/conversation` — `/backend-api/conversation`, `/backend-api/f/conversation`
+    // o la variante que el sitio estrene mañana (`/backend-api/v2/conversation`,
+    // `/uc/<id>/conversation`). Antes se exigía la ruta exacta y una versión
+    // nueva dejaba el panel en «0 de conversación» con decenas de POST delante.
+    // Sigue sin tocarse lo que no es el envío: `/conversations` (listado),
+    // `/conversation/<id>` (historial) y las rutas de preparación.
+    requestMatch: /(?:^|\/)(f\/)?conversation\/?$/,
+    requestPath: /(?:^|\/)(f\/)?conversation\/?$/,
+    // Preparar no es enviar: el cuerpo trae el mismo mensaje, pero la petición
+    // no es la conversación. Se nombra para no contarlo dos veces.
+    requestSkip: /\/(prepare|init|warmup)(\/|$)/i,
     postOnly: true,
     streamAdapter: 'chatgpt',
     body: {
@@ -256,16 +261,35 @@ export function isResponseRequest(profile, url = '', method = '') {
 export function isChatRequest(profile, url = '', method = '') {
   if (!profile?.requestMatch) return false;
   if (profile.postOnly && method && String(method).toUpperCase() !== 'POST') return false;
+  if (profile.requestSkip && isPreparationRequest(profile, url)) return false;
   if (profile.requestPath) {
-    let pathname = '';
-    try {
-      pathname = new URL(String(url), 'https://placeholder.invalid').pathname;
-    } catch {
-      return false;
-    }
+    const pathname = pathnameOf(url);
+    if (!pathname) return false;
     return profile.requestPath.test(pathname);
   }
   return profile.requestMatch.test(url);
+}
+
+/** Ruta de una URL —sólo el camino, sin dominio ni consulta— o cadena vacía. */
+function pathnameOf(url = '') {
+  try {
+    return new URL(String(url), 'https://placeholder.invalid').pathname;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * ¿La petición es un paso previo y no el envío?
+ *
+ * ChatGPT tiene rutas de preparación (`…/conversation/prepare`) cuyo cuerpo
+ * lleva el mismo mensaje del usuario. Contarlas como envío sumaría dos veces la
+ * misma pregunta.
+ */
+export function isPreparationRequest(profile, url = '') {
+  if (!profile?.requestSkip) return false;
+  const pathname = pathnameOf(url);
+  return Boolean(pathname) && profile.requestSkip.test(pathname);
 }
 
 /**

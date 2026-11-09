@@ -9,9 +9,9 @@ Cada sitio de IA se describe con un objeto en `src/core/sites.js`:
   hosts: ['chatgpt.com', 'chat.openai.com'],   // dominios cubiertos
   composer: ['#prompt-textarea', ...],         // cuadro de texto (continuación)
   sendButton: ['button[data-testid="send-button"]', ...],
-  requestMatch: /backend-api\/conversation/,   // petición de chat
-  requestPath: ['/backend-api/conversation',   // rutas exactas (sin consulta)
-                '/backend-api/f/conversation'],
+  requestMatch: /(?:^|\/)(f\/)?conversation\/?$/, // la ruta TERMINA en /conversation
+  requestPath:  /(?:^|\/)(f\/)?conversation\/?$/, // se compara el camino, sin consulta
+  requestSkip: /\/(prepare|init|warmup)(\/|$)/i,  // preparar no es enviar
   postOnly: true,                              // sólo POST
   streamAdapter: 'chatgpt',                    // lector del stream
   body: { kind: 'chatgpt-messages', strict: true }, // forma del cuerpo
@@ -36,6 +36,16 @@ consulta no importa) y el método. En ChatGPT además se exige que el cuerpo sea
 envío real: `action` distinto de `next` o sin mensaje nuevo (regenerar, continuar)
 no se reescribe, y nunca se rellena con otro campo del cuerpo. Con `strict: true`
 un cuerpo que no encaja deja de mediarse en vez de adivinar.
+
+**La ruta no es la única prueba.** Exigir una ruta exacta hacía que un cambio de
+endpoint dejara el panel en «0 de conversación» con decenas de POST delante: la
+pregunta y su respuesta se perdían porque nadie reconocía la petición. Por eso la
+ruta se compara por su **forma** (tiene que terminar en `/conversation`, admitiendo
+prefijos de versión) y, si ni así coincide, manda **el cuerpo**: un POST al
+proveedor cuyo JSON trae el mensaje del usuario con el esquema del sitio es la
+conversación, y su respuesta se cuenta y se lee igual. La ruta real se anota en el
+registro (`chat-ruta`) para no volver a adivinar. Quedan afuera, por nombre, las
+rutas de preparación (`requestSkip`): llevan el mismo cuerpo pero no son el envío.
 
 ## Estado
 

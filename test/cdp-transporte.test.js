@@ -472,6 +472,42 @@ test('un cuerpo en base64 se decodifica en vez de descartarse', async () => {
   );
 });
 
+test('una ruta que el perfil no declara se reconoce por su cuerpo y su SSE se lee', async () => {
+  const { observer, engine, diagnostics } = makeObserver();
+  const tab = fakeTab(19, 'https://chatgpt.com/');
+  observer.attach(tab);
+
+  const cuerpo = JSON.stringify({
+    action: 'next',
+    messages: [{ author: { role: 'user' }, content: { content_type: 'text', parts: ['pregunta por ruta nueva'] } }],
+  });
+  // Ni `/backend-api/conversation` ni `/f/conversation`: el sitio cambió de
+  // endpoint. Antes esa respuesta no la leía nadie.
+  tab.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-ruta',
+    type: 'Fetch',
+    request: { url: 'https://chatgpt.com/uc/abc/enviar', method: 'POST', postData: cuerpo },
+  });
+  tab.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-ruta',
+    type: 'Fetch',
+    response: { url: 'https://chatgpt.com/uc/abc/enviar', status: 200, mimeType: 'text/event-stream' },
+  });
+  tab.debugger.bodies.set(
+    'req-ruta',
+    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta en una ruta nueva.'] } } })}\n\n`,
+  );
+  tab.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-ruta' });
+  await settle();
+
+  assert.equal(engine.captures.length, 1, 'la respuesta se lee igual');
+  assert.match(engine.captures[0].capture.text, /ruta nueva/, 'con su texto');
+  assert.ok(
+    diagnostics.some((item) => item.code === 'chat-ruta'),
+    'y la ruta real queda anotada en el registro',
+  );
+});
+
 /* ------------------------------------------------------------------ */
 /* robustez                                                           */
 /* ------------------------------------------------------------------ */

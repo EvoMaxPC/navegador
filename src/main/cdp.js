@@ -30,7 +30,7 @@ import {
   promptOf,
   terminalOf,
 } from '../core/cdp.js';
-import { detectSite, isMediable, isResponseRequest, locateUserText } from '../core/sites.js';
+import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
 import { estimateTokens, fingerprint } from '../core/text.js';
 
 /** Versión del protocolo que expone Electron/Chromium. */
@@ -389,7 +389,12 @@ export class CdpObserver {
 
     // El cuerpo de la petición trae el mensaje del usuario. Leerlo acá es lo que
     // hace que la entrada se cuente aunque la capa de la página no esté activa.
-    if (entry.post && entry.sendRequest && this.contentAllowed(host)) {
+    // Se lee el cuerpo de cualquier POST del proveedor que pueda ser un envío,
+    // no sólo el de la ruta declarada: si el sitio cambió de endpoint, la ruta
+    // no lo delata pero el cuerpo sí, y sin esto la respuesta de esa petición no
+    // se leía nunca. El canal de respuestas (`entry.responseRequest`) no lleva
+    // el prompt: leerlo como envío sería inventar un mensaje del usuario.
+    if (entry.post && !entry.responseRequest && this.contentAllowed(host)) {
       this.#noteSend(state, params.requestId, String(request.postData || '')).catch((error) =>
         this.log(`CDP: al leer el envío: ${error?.message || error}`),
       );
@@ -435,8 +440,26 @@ export class CdpObserver {
     const text = located && typeof located.value === 'string' ? located.value.trim() : '';
     if (!text) return;
 
+    if (!entry.chat && isPreparationRequest(site, entry.url)) {
+      // Preparar no es enviar: mismo cuerpo, pero no es el mensaje.
+      return;
+    }
     entry.send = true;
     entry.prompt = text;
+    if (!entry.chat) {
+      // El cuerpo es el de un mensaje del usuario aunque la ruta no sea la que
+      // el perfil declara: la conversación cambió de endpoint. Desde acá la
+      // respuesta de esta petición se lee como cualquier otra.
+      entry.chat = true;
+      this.onDiagnostic({
+        code: 'chat-ruta',
+        key: `chat-ruta|${entry.host}|${pathOf(entry.url)}`,
+        severity: 'info',
+        title: `${entry.host}: el mensaje viaja por una ruta nueva`,
+        detail: `POST ${pathOf(entry.url)} — el perfil declara otra ruta, pero el cuerpo trae el mensaje del usuario: su respuesta se lee igual.`,
+        meta: { host: entry.host, path: pathOf(entry.url), site: site.id },
+      });
+    }
     const messageId = `cdp-${requestId}`;
     entry.messageId = messageId;
     if (!this.engine || typeof this.engine.onUserMessage !== 'function') return;
@@ -554,7 +577,10 @@ export class CdpObserver {
     // modelo. Un JSON de cuentas, de ajustes o de listas no lo es aunque venga
     // del mismo dominio y sea un POST.
     const origen = state.requests.get(requestId);
-    if (origen && !origen.chat) {
+    // Un GET (historial, listados) nunca es una respuesta del modelo. Un POST
+    // cuya ruta no está declarada se decide al terminar la carga, cuando ya se
+    // sabe si su cuerpo era el de un mensaje del usuario.
+    if (origen && !origen.chat && !origen.post) {
       this.stats.ignored += 1;
       return;
     }
@@ -602,7 +628,14 @@ export class CdpObserver {
     // sería sumar el historial como si la IA acabara de contestar.
     if (request && !request.post) {
       this.stats.ignored += 1;
-      return;    };
+      return;
+    }
+    // Un POST del proveedor que no es la conversación (telemetría, ajustes) no
+    // se lee: su cuerpo no es una respuesta del modelo.
+    if (request && !request.chat) {
+      this.stats.ignored += 1;
+      return;
+    }
     if (!this.contentAllowed(pending.host)) {
       this.stats.ignored += 1;
       return;
@@ -744,7 +777,18 @@ export class CdpObserver {
 
     const json = safeJson(cuerpo);
     if (!json) {
+      // Cuerpo leído, ni SSE ni JSON: sin este aviso el cero no tenía causa.
       this.stats.ignored += 1;
+      if (request?.chat) {
+        this.onDiagnostic({
+          code: 'response-formato',
+          key: `response-formato|${pending.host}`,
+          severity: 'warn',
+          title: `${pending.host}: la respuesta no es SSE ni JSON`,
+          detail: `Se leyeron ${cuerpo.length} caracteres que no forman un JSON completo. Muestra: ${cuerpo.slice(0, 120).replace(/\s+/g, ' ')}`,
+          meta: { host: pending.host, url: pending.url, bytes: cuerpo.length },
+        });
+      }
       return;
     }
 
@@ -828,6 +872,15 @@ export class CdpObserver {
       return Promise.reject(new Error('sin depurador'));
     }
     return Promise.resolve(api.sendCommand(method, params));
+  }
+}
+
+/** Ruta de una URL, sin dominio ni consulta: lo que se anota en el registro. */
+function pathOf(url) {
+  try {
+    return new URL(String(url)).pathname;
+  } catch {
+    return String(url || '').split('?')[0].slice(0, 120);
   }
 }
 

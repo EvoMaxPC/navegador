@@ -15,7 +15,7 @@ import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
 import { CdpObserver } from './cdp.js';
 import { isAiHost } from '../core/cdp.js';
-import { detectSite, isMediable, isResponseRequest, locateUserText } from '../core/sites.js';
+import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
@@ -541,7 +541,7 @@ function registerIpc() {
     return next;
   });
   ipcMain.handle('nexo:settings:reset', () => {
-    const next = store.setSettings(DEFAULT_SETTINGS);
+    const next = store.replaceSettings(DEFAULT_SETTINGS);
     engine.refresh();
     broadcast('nexo:settings-changed', next);
     return next;
@@ -946,7 +946,7 @@ function noteUserMessageFromNetwork(details = {}) {
   // `seen` es «era una petición de conversación», `counted` es «además sumó el
   // mensaje». Van separados para que el panel distinga «no llega nada» de
   // «llega y algo lo frena» — que es lo que hasta ahora no dejaba rastro.
-  const no = { seen: false, counted: false };
+  const no = { seen: false, counted: false, conversation: false };
   if (!engine) return no;
   const url = String(details.url || '');
   const host = hostOf(url);
@@ -955,23 +955,60 @@ function noteUserMessageFromNetwork(details = {}) {
   if (method !== 'POST') return no;
   const site = detectSite(host);
   capture.posts += 1;
-  const responseOnly = isResponseRequest(site, url, method);
-  if (!isMediable(site, url, method)) {
-    // El canal /conversation/updates lleva la respuesta, no el prompt. Se
-    // reconoce como tráfico conversacional, pero nunca se analiza como envío.
-    if (responseOnly) return { seen: true, counted: false };
-    // Un POST al proveedor que no es la ruta que conocemos: si el sitio cambió
-    // el endpoint, el mensaje no se cuenta y no hay rastro de por qué. Se
-    // anota la ruta real una vez cada 30 s por endpoint, sin contarla.
+  // El canal de respuestas (`/conversation/updates` en el cliente sin cuenta)
+  // no lleva el prompt: se reconoce como tráfico de conversación para contar y
+  // leer su respuesta, pero nunca se analiza como envío.
+  if (isResponseRequest(site, url, method)) {
+    return { seen: true, counted: false, conversation: true };
+  }
+  const webContentsId = Number(details.webContentsId);
+  const tabId = Number.isFinite(webContentsId) ? webContentsId : -1;
+  const cuerpo = uploadText(details.uploadData);
+  let json = null;
+  if (cuerpo) {
+    try {
+      json = JSON.parse(cuerpo);
+    } catch {
+      json = null;
+    }
+  }
+
+  // La ruta declarada por el perfil no es la única prueba de que esto sea una
+  // conversación: el cuerpo lo es. Un sitio puede cambiar de endpoint sin
+  // avisar, y entonces ni la pregunta ni su respuesta se reconocían —el panel
+  // mostraba «0 de conversación» con decenas de POST delante—. La forma del
+  // cuerpo manda; la ruta se anota como evidencia.
+  const rutaConocida = isMediable(site, url, method);
+  const located = json ? locateUserText(json, site) : null;
+  const textoCuerpo = located && typeof located.value === 'string' ? located.value.trim() : '';
+  if (!rutaConocida) {
+    if (!textoCuerpo || isPreparationRequest(site, url)) {
+      // Un POST al proveedor que no es la ruta que conocemos y cuyo cuerpo no
+      // trae un mensaje del usuario: se anota la ruta real, sin contarla.
+      noteDiagnostic({
+        code: 'chat-unmatched',
+        key: `chat-unmatched|${host}|${shortPath(url)}`,
+        severity: 'info',
+        title: `${host}: petición POST fuera de la ruta conocida`,
+        detail: `POST ${shortPath(url)} — no coincide con el patrón de conversación del perfil ${site.id}.`,
+        meta: { host, site: site.id, url: shortPath(url), method },
+      });
+      return no;
+    }
     noteDiagnostic({
-      code: 'chat-unmatched',
-      key: `chat-unmatched|${host}|${shortPath(url)}`,
+      code: 'chat-ruta',
+      key: `chat-ruta|${host}|${shortPath(url)}`,
       severity: 'info',
-      title: `${host}: petición POST fuera de la ruta conocida`,
-      detail: `POST ${shortPath(url)} — no coincide con el patrón de conversación del perfil ${site.id}.`,
+      title: `${host}: el mensaje viaja por una ruta nueva`,
+      detail: `POST ${shortPath(url)} — el perfil ${site.id} declara otra ruta, pero el cuerpo trae el mensaje del usuario: se cuenta igual y se lee su respuesta.`,
       meta: { host, site: site.id, url: shortPath(url), method },
     });
-    return no;
+    // Si en esa pestaña ya hay un mensaje esperando respuesta, el envío lo contó
+    // otro camino (la capa o el gesto): contarlo otra vez sería sumar dos veces
+    // la misma pregunta. La petición igual queda marcada como conversación, así
+    // su respuesta se cuenta y se lee.
+    const esperando = engine.currentSendId(tabId);
+    if (esperando) return { seen: true, counted: false, conversation: true };
   }
 
   if (!engine.isEnabledFor(host)) {
@@ -986,29 +1023,16 @@ function noteUserMessageFromNetwork(details = {}) {
       detail: 'La petición de conversación llegó, pero el sitio está desactivado: no se cuenta ni se media.',
       meta: { host, site: site.id, url: shortPath(url) },
     });
-    return { seen: true, counted: false };
-  }
-
-  const webContentsId = Number(details.webContentsId);
-  const tabId = Number.isFinite(webContentsId) ? webContentsId : -1;
-  const cuerpo = uploadText(details.uploadData);
-  let json = null;
-  if (cuerpo) {
-    try {
-      json = JSON.parse(cuerpo);
-    } catch {
-      json = null;
-    }
+    return { seen: true, counted: false, conversation: true };
   }
 
   // Regenerar o continuar no es un mensaje nuevo del usuario.
   // Regenerar es una petición de conversación, pero no un mensaje nuevo.
   if (typeof json?.action === 'string' && json.action && json.action !== 'next') {
-    return { seen: true, counted: false, responseEligible: false };
+    return { seen: true, counted: false, conversation: true, responseEligible: false };
   }
 
-  const located = json ? locateUserText(json, site) : null;
-  const text = located && typeof located.value === 'string' ? located.value.trim() : '';
+  const text = textoCuerpo;
 
   if (!text) {
     // Petición de conversación sin texto legible: el mensaje se cuenta igual
@@ -1039,7 +1063,7 @@ function noteUserMessageFromNetwork(details = {}) {
     promptHash: text ? fingerprint(text) : '',
     textFound: Boolean(text),
   });
-  if (counted?.duplicate) return { seen: true, counted: false };
+  if (counted?.duplicate) return { seen: true, counted: false, conversation: true };
 
   const entry = {
     kind: 'sending',
@@ -1063,7 +1087,7 @@ function noteUserMessageFromNetwork(details = {}) {
   if (store) store.pushLog(entry);
   broadcast('nexo:event', { type: 'intervention', payload: entry });
   broadcast('nexo:stats-changed', engine.stats());
-  return { seen: true, counted: true };
+  return { seen: true, counted: true, conversation: true };
 }
 
 function watchProviderNetwork(s) {
@@ -1086,6 +1110,25 @@ function watchProviderNetwork(s) {
   capture.watcher = true;
   capture.since = Date.now();
 
+  /**
+   * Peticiones que ya se reconocieron como conversación, por identificador de
+   * Chromium.
+   *
+   * `onCompleted` las necesita para saber que **esa** petición era la
+   * conversación. Sin esto habría que volver a adivinar la ruta, que es
+   * justamente lo que fallaba cuando el sitio cambió de endpoint.
+   */
+  const conversaciones = new Set();
+  const MAX_CONVERSACIONES = 200;
+  const recordarConversacion = (details) => {
+    const id = details?.id;
+    if (id === undefined || id === null) return;
+    conversaciones.add(id);
+    if (conversaciones.size > MAX_CONVERSACIONES) {
+      conversaciones.delete(conversaciones.values().next().value);
+    }
+  };
+
   s.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details = {}, callback) => {
     capture.requests += 1;
     capture.lastRequestAt = Date.now();
@@ -1093,6 +1136,7 @@ function watchProviderNetwork(s) {
       const note = noteUserMessageFromNetwork(details);
       if (note?.seen) capture.chatRequests += 1;
       if (note?.counted) capture.counted += 1;
+      if (note?.conversation) recordarConversacion(details);
       const url = String(details.url || '');
       const host = hostOf(url);
       const requestId = String(details.id || '');
@@ -1136,17 +1180,32 @@ function watchProviderNetwork(s) {
     const host = hostOf(url);
     if (!isAiHost(host)) return;
     const method = String(details.method || 'GET').toUpperCase();
-    if (method === 'POST' && (isMediable(detectSite(host), url, method) || isResponseRequest(detectSite(host), url, method))) {
+    // La petición es de conversación si la ruta es la declarada, si es el canal
+    // de respuestas del sitio, o si el envío se reconoció por su cuerpo al
+    // salir (ruta nueva). Cuatro formas de decir lo mismo: es esta petición.
+    const id = details.id;
+    const yaReconocida = id !== undefined && id !== null && conversaciones.has(id);
+    if (id !== undefined && id !== null) conversaciones.delete(id);
+    const site = detectSite(host);
+    if (
+      method === 'POST' &&
+      (yaReconocida ||
+        Boolean(asociada) ||
+        isMediable(site, url, method) ||
+        isResponseRequest(site, url, method))
+    ) {
       const status = Number(details.statusCode) || 0;
       if (status >= 200 && status < 300 && engine.isEnabledFor(host)) {
-        const rawId = Number(details.webContentsId);
-        const tabId = asociada?.tabId ?? (Number.isFinite(rawId) ? rawId : -1);
+        const wcId = Number(details.webContentsId);
+        const tabId = asociada?.tabId ?? (Number.isFinite(wcId) ? wcId : -1);
         const esperaba = asociada?.messageId || engine.currentSendId(tabId);
         if (esperaba) {
           setTimeout(() => {
             try {
               // Si en el medio llegó otra pregunta, este cierre ya no es suyo.
-              if (engine.currentSendId(tabId) !== esperaba) return;
+              // Cuando el cierre viene correlacionado por identificador de
+              // petición, esa correlación ya resolvió el turno.
+              if (!asociada && engine.currentSendId(tabId) !== esperaba) return;
               const contada = engine.onNetworkResponse(tabId, { host, url, messageId: esperaba });
               if (!contada?.counted) return;
               const entry = {
