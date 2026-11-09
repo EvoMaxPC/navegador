@@ -31,7 +31,7 @@ import {
   terminalOf,
 } from '../core/cdp.js';
 import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
-import { estimateTokens, fingerprint } from '../core/text.js';
+import { countGptTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 /** Versión del protocolo que expone Electron/Chromium. */
 const CDP_VERSION = '1.3';
@@ -436,6 +436,7 @@ export class CdpObserver {
     if (typeof json?.action === 'string' && json.action && json.action !== 'next') return;
 
     const site = detectSite(entry.host);
+    const model = gptModelFromRequest(json);
     const located = locateUserText(json, site);
     const text = located && typeof located.value === 'string' ? located.value.trim() : '';
     if (!text) return;
@@ -446,6 +447,7 @@ export class CdpObserver {
     }
     entry.send = true;
     entry.prompt = text;
+    entry.model = model;
     if (!entry.chat) {
       // El cuerpo es el de un mensaje del usuario aunque la ruta no sea la que
       // el perfil declara: la conversación cambió de endpoint. Desde acá la
@@ -471,7 +473,7 @@ export class CdpObserver {
         host: entry.host,
         url: entry.url,
         chars: text.length,
-        tokens: estimateTokens(text),
+        tokens: countGptTokens(text, model),
         promptHash: fingerprint(text),
         textFound: true,
       });
@@ -485,7 +487,7 @@ export class CdpObserver {
         site: site.id,
         url: entry.url,
         chars: text.length,
-        tokens: estimateTokens(text),
+        tokens: countGptTokens(text, model),
         promptHash: fingerprint(text),
       });
     } catch (error) {
@@ -756,6 +758,7 @@ export class CdpObserver {
       }
       this.stats.bodies += 1;
       const listo = capture.take();
+      if (listo) listo.model = request?.model || '';
       if (!listo) {
         // El cuerpo se leyó y los eventos se parsearon, pero ninguno trajo
         // texto del asistente. Es la forma silenciosa de perder una respuesta:
@@ -805,6 +808,7 @@ export class CdpObserver {
     const prompt = request?.prompt || promptOf(json);
     if (prompt) capture.prompt(prompt);
     const { added } = capture.add(json);
+    capture.model = request?.model || '';
     if (!added) {
       // Un JSON de la conversación que no se reconoce como texto: se deja la
       // forma de sus claves para saber qué buscaba el perfil y qué trajo el
