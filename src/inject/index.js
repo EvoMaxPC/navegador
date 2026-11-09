@@ -554,6 +554,7 @@ if (!window.__NEXO_HOOKED__) {
         conversationId: conversationIdOf(),
         mediated: Boolean(prepared.mediated),
         promptChars: prepared.promptChars || 0,
+        model: prepared.model || '',
       });
     } catch (error) {
       bridge.event('error', { stage: 'stream', message: String(error?.message || error) });
