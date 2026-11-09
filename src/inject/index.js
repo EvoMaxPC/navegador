@@ -594,12 +594,15 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
 }
 
 function wrapResponse(response, capture = {}, generation = null, promptText = '') {
-  if (!response || !response.body || !looksLikeStream(response.headers)) return response;
+  const mime = String(response?.headers?.get?.('content-type') || '');
+  const jsonUpdates = site.id === 'chatgpt' &&
+    isResponseRequest(site, capture.url || '', 'POST') &&
+    /application\\/json/i.test(mime);
+  if (!response || !response.body || (!looksLikeStream(response.headers) && !jsonUpdates)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
-  const mime = String(response.headers?.get?.('content-type') || '');
   const filter = createStreamFilter({
-      format: site.id === 'chatgpt' && /ndjson|jsonl/i.test(mime) ? 'ndjson'
+      format: site.id === 'chatgpt' && /ndjson|jsonl|application\\/json/i.test(mime) ? 'ndjson'
         : site.id === 'chatgpt' && /text\/plain/i.test(mime) ? 'auto' : 'sse',
       settings: state.settings,
       adapter: site.streamAdapter || null,
