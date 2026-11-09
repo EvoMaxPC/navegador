@@ -73,3 +73,21 @@ Falta ejecutar la compilación entregada en Windows, hacer una pregunta real, es
 También siguen siendo límites explícitos los casos donde ni la inyección recibe texto ni CDP conserva el cuerpo (por ejemplo un aborto sólo observado desde CDP), y el límite previo de 200 000 caracteres del payload inyectado. No se eliminó esa protección ni se inventan tokens para esos casos.
 
 **No se declara cumplido el criterio de finalización en vivo.**
+
+## 7. Entrega y compilación Windows
+
+Código de la corrección: `a55ae4ce99ce27bcc10a8e0068b78dea42fc328d`, publicado en
+`arena/4678aef7-navegador`.
+
+[CI Windows 42659319061](https://github.com/EvoMaxPC/navegador/actions/runs/42659319061)
+terminó **success**: instalación, verificación, benchmark, empaquetado y prueba de
+humo del ejecutable. Esto verifica el arranque de la shell empaquetada; no abre
+una conversación real con ChatGPT.
+
+[Artefacto Windows Nexo-win32-x64](https://github.com/EvoMaxPC/navegador/actions/runs/42659319061/artifacts/13694225101):
+158 141 104 bytes, digest del artefacto comunicado por GitHub
+`sha256:290b92ce1fbbb897c9fe6fad14fe3a4c32f7c080f1d3d89a07f9d2f089ca43ce`.
+El digest corresponde al contenedor del artefacto, no se presenta como hash del
+ZIP interno. La descarga de logs desde el host externo de Actions está bloqueada
+en este entorno; los resultados de cada paso y los metadatos del artefacto se
+confirmaron mediante la API de GitHub. No se probó el ejecutable localmente.
