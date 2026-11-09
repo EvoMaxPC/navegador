@@ -303,7 +303,10 @@ export class Engine {
 
     this.counters.responses += 1;
     this.counters.activity += 1;
-    const tokens = Number.isFinite(Number(payload.tokens)) ? Math.max(0, Number(payload.tokens)) : merge.tokens;
+    // El proceso principal es la fuente de verdad. No aceptar un 0 enviado
+    // por el preload: si su tokenizador no pudo contar, ese cero anulaba
+    // silenciosamente el recuento que #mergeResponse ya calculó con el texto.
+    const tokens = merge.tokens;
     this.counters.outputTokens += tokens;
     if (payload.stopped) this.counters.loopsCut += 1;
 
