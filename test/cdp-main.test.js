@@ -334,6 +334,12 @@ test('ChatGPT sigue observado para EVO MEMORY aunque la mediación esté apagada
   });
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-memory-passive' });
   await settle();
+  const stats = await callIpc('nexo:stats', {});
+  assert.equal(stats.responses, 1, 'la respuesta pasiva también se contabiliza');
+  assert.ok(stats.outputTokens > 0, 'se calculan tokens de salida desde el texto capturado');
+  assert.equal(stats.tabs, 0, 'la observación pasiva no crea un guardián de mediación');
+  assert.equal(stats.mediatedInterventions, 0, 'la captura no interviene en el prompt ni en la respuesta');
+
   const artifacts = await callIpc('nexo:memory:list', {});
   assert.ok(artifacts.some((item) => item.kind === 'artifact' && item.text.includes(respuesta)),
     'la respuesta real observada por CDP se guarda literalmente en EVO MEMORY');
