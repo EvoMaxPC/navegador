@@ -99,6 +99,7 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
   const domListeners = new Map();
   const document = { body: { innerText: bodyText }, querySelector: () => null, querySelectorAll: () => [],
     addEventListener(name, handler) { domListeners.set(name, handler); } };
+  page.document = document;
   page.stop = (isTrusted = true, attributes = { 'data-testid': 'stop-button' }) => {
     // DOM mínimo: compara atributos reales del botón, sin copiar los selectores
     // de producción. El target puede ser el icono hijo del botón.
@@ -552,6 +553,22 @@ test('integración remota DPU: conserva captura de texto y clasifica un único t
   assertOutcomeUi();
 });
 
+test('integración remota DPU: espera el renderizado tardío del DOM y suma tokens de salida', async () => {
+  const view = await openTab(), before = stats();
+  const answer = 'Respuesta DPU aplicada tarde al documento.';
+  const page = pageFor(view, '<template>DPU</template>', { mime: dpuMime,
+    bodyText: 'You said:\\nPregunta DPU\\nAplicando respuesta...' });
+  const response = await requestDpu(page);
+  setTimeout(() => {
+    page.document.body.innerText = `You said:\\nPregunta DPU\\nChatGPT said:\\n${answer}`;
+  }, 350);
+  assert.equal(await response.text(), '<template>DPU</template>', 'el transporte original permanece intacto');
+  await pause(500);
+  assert.equal(stats().responses, before.responses + 1);
+  assert.equal(stats().outputTokens, before.outputTokens + countGptTokens(answer));
+  assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+});
+
 test('integración remota DPU: Stop y cierre posterior no crean otro resultado', async () => {
   const view = await openTab(), before = stats();
   let release;
@@ -575,7 +592,7 @@ test('integración remota DPU: sin respuesta verificable en DOM queda desconocid
   const page = pageFor(view, '<template>DPU sin respuesta</template>', { mime: dpuMime });
   const response = await requestDpu(page);
   await response.text();
-  await pause(260);
+  await pause(5_200);
   assert.deepEqual(outcomeDelta(before), [0, 0, 1]);
   assert.equal(stats().outputTokens, before.outputTokens, 'no inventa tokens si falta la respuesta');
   assertOutcomeUi();
