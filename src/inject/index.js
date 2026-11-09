@@ -20,7 +20,7 @@
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isMediable, locateUserText, patchUserText } from '../core/sites.js';
-import { estimateTokens, fingerprint } from '../core/text.js';
+import { countGptTokens, estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
@@ -200,6 +200,7 @@ function anunciarEnvio(datos = {}) {
     textFound: datos.textFound !== false,
     chars: Math.max(0, Number(datos.chars) || 0),
     tokens: Math.max(0, Number(datos.tokens) || 0),
+    model: String(datos.model || ''),
     // Huella del texto enviado: permite reconocer el mismo envío cuando lo
     // anuncia también la observación CDP, sin mandar el texto por el puente.
     promptHash: datos.promptHash || (datos.texto ? fingerprint(datos.texto) : ''),
@@ -277,7 +278,7 @@ function gestoDeEnvio(razon) {
     id: nuevoMessageId(),
     at: ahora,
     chars: texto.length,
-    tokens: estimateTokens(texto),
+    tokens: countGptTokens(texto),
     promptHash: fingerprint(texto),
     razon,
     timer: null,
@@ -369,7 +370,8 @@ async function planRequest(input, init) {
     chat: true,
     send: true,
     promptChars: prompt.length,
-    promptTokens: estimateTokens(prompt),
+    promptTokens: countGptTokens(prompt, gptModelFromRequest(parsed)),
+    model: gptModelFromRequest(parsed),
     promptHash: fingerprint(prompt),
     url,
   };
@@ -439,7 +441,7 @@ function wrapResponse(response, capture = {}) {
           deliveredChars: info.deliveredChars,
           droppedChars: info.droppedChars,
           chars: text.length,
-          tokens: estimateTokens(text),
+          tokens: countGptTokens(text, capture.model),
           clipped: recortado,
           text: recortado ? text.slice(0, MAX_CAPTURE_CHARS) : text,
           dropped: info.dropped.slice(0, 600),
@@ -508,7 +510,8 @@ if (!window.__NEXO_HOOKED__) {
           source: 'request',
           mediated: prepared.mediated,
           chars,
-          tokens: prepared.promptTokens || gesto?.tokens || 0,
+          tokens: prepared.promptTokens ?? gesto?.tokens ?? 0,
+          model: prepared.model || '',
           promptHash: prepared.promptHash || gesto?.promptHash || '',
           textFound: Boolean(prepared.promptChars),
           url,
