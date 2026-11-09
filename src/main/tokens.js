@@ -9,8 +9,8 @@ export function countTokensForProvider(text, model = '', provider = '') {
   return estimateTokens(text);
 }
 
-/** Salida IA: estimación directa sobre el texto real, sin tokenizador. */
+/** Diagnóstico temporal: mostrar palabras recibidas para comprobar el flujo de captura. */
 export function countOutputTokens(text) {
   if (typeof text !== 'string' || !text.trim()) return 0;
-  return estimateTokens(text);
+  return (text.match(/[\\p{L}\\p{N}_]+/gu) || []).length;
 }
