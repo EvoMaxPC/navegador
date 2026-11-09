@@ -39,6 +39,43 @@ export function isChatGptDpuMime(mimeType = '') {
  * Exige que el prompt actual aparezca antes del marcador de respuesta: así no
  * vuelve a contar una respuesta anterior si el servidor devuelve un error DPU.
  */
+/**
+ * Extrae texto visible incluso cuando el cliente DPU no renderiza encabezados
+ * como "ChatGPT said". La asociación se hace con la última aparición del prompt.
+ */
+export function extractChatGptVisibleAnswer(documentRef, prompt = '') {
+  const fromAssistant = extractChatGptAssistantDomText(documentRef, prompt);
+  if (fromAssistant) return fromAssistant;
+
+  const body = String(documentRef?.body?.innerText || documentRef?.body?.textContent || '');
+  const labelled = extractChatGptDpuAnswer(body, prompt);
+  if (labelled) return labelled;
+
+  const expected = String(prompt || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+  if (!expected) return '';
+  const normalized = body.replace(/\s+/g, ' ').trim();
+  const lower = normalized.toLocaleLowerCase();
+  const promptIndex = lower.lastIndexOf(expected);
+  if (promptIndex < 0) return '';
+
+  let answer = normalized.slice(promptIndex + expected.length).trim();
+  for (const marker of FOOTER_MARKERS) {
+    const index = answer.toLocaleLowerCase().indexOf(marker.toLocaleLowerCase());
+    if (index >= 0) answer = answer.slice(0, index).trim();
+  }
+  for (const marker of USER_MARKERS) {
+    const index = answer.toLocaleLowerCase().indexOf(marker.toLocaleLowerCase());
+    if (index >= 0) answer = answer.slice(0, index).trim();
+  }
+  for (const marker of ANSWER_MARKERS) {
+    if (answer.toLocaleLowerCase().startsWith(marker.toLocaleLowerCase())) {
+      answer = answer.slice(marker.length).trim();
+      break;
+    }
+  }
+  return answer;
+}
+
 export function extractChatGptDpuAnswer(bodyText, prompt = '') {
   const body = String(bodyText || '').replace(/\r\n?/g, '\n');
   if (!body.trim()) return '';
