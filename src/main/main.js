@@ -145,7 +145,6 @@ function writeCaptureTrace(stage, data = {}) {
     duplicate: data.duplicate ?? null,
     memory: data.memory || null,
     code: data.code || null,
-    detail: data.detail || null,
   };
   appendFile(captureDiagnosticFile, JSON.stringify(safe) + '\\n', 'utf8').catch((error) =>
     console.warn('[nexo] no se pudo escribir diagnóstico de captura:', error?.message || error));
@@ -1520,9 +1519,9 @@ app.whenReady().then(async () => {
     onEvent: (id, event) => {
       try {
         if (event?.type === 'send') {
-          if (event.duplicate) return;
           writeCaptureTrace('request-detected', { host: event.host, site: event.site, url: event.url,
-            source: 'cdp', chars: event.chars, messageId: event.messageId });
+            source: 'cdp', chars: event.chars, messageId: event.messageId, duplicate: Boolean(event.duplicate) });
+          if (event.duplicate) return;
           const entry = {
             kind: 'sending',
             code: 'outgoing-cdp',
