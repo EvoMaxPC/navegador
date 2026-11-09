@@ -320,6 +320,13 @@ export class CdpObserver {
   #frame(state, params, direction) {
     const socket = state.sockets.get(params.requestId);
     if (!socket) return;
+    // Revalidar en cada frame: si el usuario desactiva EVO MEMORY mientras la
+    // pestaña sigue abierta, no se continúa leyendo el contenido del socket.
+    if (!this.contentAllowed(socket.host)) {
+      state.sockets.delete(params.requestId);
+      this.stats.ignored += 1;
+      return;
+    }
     const frame = params.response || params;
     // Sólo texto: los frames binarios vienen en base64 y no son conversación.
     const opcode = Number(frame?.opcode ?? 1);
