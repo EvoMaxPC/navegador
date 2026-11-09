@@ -9,7 +9,7 @@ export function countTokensForProvider(text, model = '', provider = '') {
   return estimateTokens(text);
 }
 
-/** Salida IA: estimación por palabras del texto real, sin tokenizador. */
+/** Salida IA: una unidad estimada por palabra capturada, sin tokenizador. */
 export function countOutputTokens(text) {
   return estimateOutputTokens(text);
 }

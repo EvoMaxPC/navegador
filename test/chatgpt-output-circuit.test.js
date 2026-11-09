@@ -770,13 +770,13 @@ test('DPU en vivo: ignora DOM anterior, actualiza estimación con nodos nuevos y
     nodes = [...old, node('user', 'Test'), assistant];
     page.mutate();
     await pause(30);
-    assert.equal(stats().outputTokens - before.outputTokens, 3);
+    assert.equal(stats().outputTokens - before.outputTokens, 2);
     assistant.innerText += ' completa.';
     page.mutate();
     await pause(30);
-    assert.equal(stats().outputTokens - before.outputTokens, 4);
+    assert.equal(stats().outputTokens - before.outputTokens, 3);
     assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
   } finally { release(); await reading; await pause(300); }
   assert.equal(stats().responses - before.responses, 1);
-  assert.equal(stats().outputTokens - before.outputTokens, 4);
+  assert.equal(stats().outputTokens - before.outputTokens, 3);
 });

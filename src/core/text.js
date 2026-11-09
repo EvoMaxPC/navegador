@@ -154,7 +154,7 @@ export function estimateTokens(text) {
 }
 
 /**
- * Salida IA estimada por palabras: aproximadamente 4 tokens por cada 3 palabras.
+ * Salida IA estimada por palabras: una unidad por cada palabra capturada.
  * No usa diccionarios BPE ni la longitud de los caracteres. Puntuación sola no
  * cuenta; números y palabras Unicode sí. Se aplica al texto acumulado para que
  * cortar una palabra entre fragmentos no la cuente dos veces.
@@ -162,7 +162,7 @@ export function estimateTokens(text) {
 export function estimateOutputTokens(text) {
   if (typeof text !== 'string') return 0;
   const words = text.match(/[\p{L}\p{N}][\p{L}\p{M}\p{N}]*(?:['’][\p{L}\p{M}\p{N}]+)*/gu);
-  return words ? Math.ceil(words.length * 4 / 3) : 0;
+  return words ? words.length : 0;
 }
 
 /** Identifica el modelo declarado por el cuerpo de una solicitud GPT. */

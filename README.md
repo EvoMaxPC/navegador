@@ -16,7 +16,7 @@ los dos sentidos**:
   tokens internos filtrados) y ofrece continuar exactamente donde se cortó.
 
 Todo el análisis es **local y determinista**: sin modelos auxiliares ni nube. La entrada GPT conserva el tokenizador BPE local
-`gpt-tokenizer`. **La salida IA se estima por las palabras capturadas, sin tokenizador: aproximadamente 4 tokens por cada 3 palabras.**
+`gpt-tokenizer`. **La salida IA se estima por las palabras capturadas, sin tokenizador: 1 unidad estimada por cada palabra (no es el consumo real de OpenAI).**
 Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar el conteo.
 
 **Corrección de tokens de salida 0.1.19:** captura SSE/NDJSON según el MIME real

@@ -448,7 +448,7 @@ test('15. salida aumenta por palabras, no por letras ni por fragmentos, y no se 
   const input = (await stats()).inputTokens;
   let text = '';
   for (const [fragment, expected] of [
-    ['Ho', 2], ['la', 2], [' ', 2], ['mundo', 3], [' otra', 4], [' palabra', 6],
+    ['Ho', 1], ['la', 1], [' ', 1], ['mundo', 2], [' otra', 3], [' palabra', 4],
   ]) {
     text += fragment;
     progreso(view, messageId, fragment);
@@ -458,8 +458,8 @@ test('15. salida aumenta por palabras, no por letras ni por fragmentos, y no se 
     assert.equal(during.responses, antes.responses, 'el progreso no suma respuestas');
   }
   capaStreamEnd(view, text, { messageId });
-  assert.equal((await stats()).outputTokens - antes.outputTokens, 6);
+  assert.equal((await stats()).outputTokens - antes.outputTokens, 4);
   assert.equal((await stats()).responses - antes.responses, 1);
   capaStreamEnd(view, text, { messageId });
-  assert.equal((await stats()).outputTokens - antes.outputTokens, 6);
+  assert.equal((await stats()).outputTokens - antes.outputTokens, 4);
 });

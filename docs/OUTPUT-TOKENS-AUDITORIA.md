@@ -1,6 +1,6 @@
 > **Cambio vigente solicitado por el usuario:** el contador de salida IA ya no usa
 > BPE. `countOutputTokens` usa `estimateOutputTokens`: cuenta palabras Unicode del texto
-> capturado y devuelve `ceil(palabras × 4 / 3)` (0 si no hay palabras). Las referencias a BPE de salida que siguen son
+> capturado y devuelve una unidad por palabra (0 si no hay palabras). Las referencias a BPE de salida que siguen son
 > el historial de la corrección anterior, no el comportamiento actual.
 >
 > Se conserva la captura SSE/NDJSON/DPU, actualización incremental y deduplicación.
@@ -255,8 +255,8 @@ compilar) y se añadió replay integral de updates con `application/json`.
 
 ### Estimación por palabras solicitada por el usuario
 
-La salida ya no depende de la longitud del texto: usa aproximadamente 4 tokens
-por cada 3 palabras, redondeando hacia arriba. Es una heurística, no el consumo
+La salida ya no depende de la longitud del texto: suma una unidad estimada
+por cada palabra. Es una heurística, no el consumo
 real informado por OpenAI. Se reconocen palabras/números Unicode y se ignora
 puntuación aislada. Una palabra parcial ya visible cuenta provisionalmente;
 completar sus letras no añade otra palabra. Los fragmentos se acumulan antes de
@@ -266,7 +266,10 @@ sin sumar otra vez lo ya mostrado. Los demás contadores permanecen sin cambios.
 Se añadieron pruebas con resultados numéricos independientes para palabras,
 espacios, acentos, números, puntuación y fragmentación de una palabra. Se valida
 el progreso `Ho` → `Hola` → `Hola mundo` → `Hola mundo otra palabra` con salidas
-2 → 2 → 3 → 6; el cierre y su repetición mantienen 6. La prueba integral DOM
-verifica también 2 palabras → 3 tokens estimados y 3 palabras → 4, reflejados en UI.
+1 → 1 → 2 → 4; el cierre y su repetición mantienen 4. La prueba integral DOM
+verifica también 2 palabras → 2 unidades estimadas y 3 palabras → 3, reflejados en UI.
 `npm run verify`: 574 pruebas, 573 aprobadas, 1 omitida, 0 fallos. Transporte
 reproducido/simulado: no se afirma haber realizado una conversación en vivo.
+
+Se integró el diagnóstico concurrente `9f571d6`/`17d5a57`: una unidad por palabra.
+El lector compartido preserva acentos combinados y apóstrofos dentro de palabras.
