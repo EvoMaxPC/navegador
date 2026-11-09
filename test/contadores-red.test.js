@@ -319,7 +319,7 @@ test('un envío detectado por la capa no bloquea a CDP si la capa no captura la 
   });
   view.debugger.bodies.set(
     'req-layer-no-capture',
-    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta capturada por CDP.'] } } })}\\n\\n`,
+    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta capturada por CDP.'] } } })}\n\n`,
   );
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-layer-no-capture' });
   await settle(80);
