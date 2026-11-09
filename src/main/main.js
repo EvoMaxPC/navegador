@@ -955,7 +955,11 @@ function noteUserMessageFromNetwork(details = {}) {
   if (method !== 'POST') return no;
   const site = detectSite(host);
   capture.posts += 1;
+  const responseOnly = isResponseRequest(site, url, method);
   if (!isMediable(site, url, method)) {
+    // El canal /conversation/updates lleva la respuesta, no el prompt. Se
+    // reconoce como tráfico conversacional, pero nunca se analiza como envío.
+    if (responseOnly) return { seen: true, counted: false };
     // Un POST al proveedor que no es la ruta que conocemos: si el sitio cambió
     // el endpoint, el mensaje no se cuenta y no hay rastro de por qué. Se
     // anota la ruta real una vez cada 30 s por endpoint, sin contarla.
