@@ -4,7 +4,7 @@ import { Engine } from '../src/main/engine.js';
 import { DEFAULT_SETTINGS } from '../src/core/settings.js';
 import { turnOutcome, outcomeFromEvent } from '../src/core/turnOutcome.js';
 
-const fields = ['turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsUnknown'];
+const fields = ['turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsPerformed'];
 function engine() {
   const events = [];
   const store = { settings: structuredClone(DEFAULT_SETTINGS), log: [], pushLog(entry) { this.log.push(entry); } };
@@ -173,4 +173,22 @@ test('regeneraciones idénticas son turnos distintos, sin otro mensaje de entrad
   assert.deepEqual(values(e), [3, 0, 0, 0]);
   assert.equal(e.stats().messages, before.messages);
   assert.equal(e.stats().inputTokens, before.inputTokens);
+});
+
+test('cancelación confirmada tardía suma +1 cancelado y mueve el mismo turno, sin duplicados', () => {
+  const e = engine();
+  send(e, 'late-stop');
+  e.onNetworkResponse(1, { messageId: 'late-stop', host: 'chatgpt.com' });
+  assert.deepEqual(values(e), [0, 0, 0, 1]);
+  const before = e.stats();
+  for (let i = 0; i < 3; i++) {
+    e.onTurnResult(1, { messageId: 'late-stop', host: 'chatgpt.com', stoppedByUser: true });
+  }
+  assert.deepEqual(values(e), [0, 1, 0, 0]);
+  assert.equal(e.stats().turnsCancelled - before.turnsCancelled, 1);
+  assert.equal(e.stats().inputTokens, before.inputTokens);
+  assert.equal(e.stats().outputTokens, before.outputTokens);
+  assert.equal(Object.hasOwn(e.stats(), 'turnsUnknown'), false, 'el nombre anterior ya no se expone');
+  finish(e, 'late-stop', { interrupted: true, finished: false });
+  assert.deepEqual(values(e), [0, 1, 0, 0]);
 });

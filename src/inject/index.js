@@ -776,7 +776,9 @@ try {
     'click',
     (event) => {
       if (site.id === 'chatgpt' && sitioActivo() && event.isTrusted && (state.response || state.currentMessageId) &&
-        event.target?.closest?.('[data-testid="stop-button"], [data-testid="stop-generating-button"]')) {
+        (site.stopButton || []).some((selector) => {
+          try { return Boolean(event.target?.closest?.(selector)); } catch { return false; }
+        })) {
         if (state.response) state.response.stoppedByUser = true;
         bridge.event('turn-result', { messageId: state.response?.messageId || state.currentMessageId, host: CONFIG.host || location.hostname,
           site: site.id, outcome: 'cancelled', stoppedByUser: true });

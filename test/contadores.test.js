@@ -185,13 +185,13 @@ test('5. una respuesta interrumpida se cuenta como respuesta, una sola vez', asy
 
   assert.equal(despues.responses, antes.responses + 1, 'la respuesta existió aunque se cortara');
   assert.equal(despues.turnsCompleted, antes.turnsCompleted, 'un corte del motor no es un fin normal');
-  assert.equal(despues.turnsUnknown, antes.turnsUnknown + 1, 'interrupción sin confirmación: un turno desconocido');
+  assert.equal(despues.turnsPerformed, antes.turnsPerformed + 1, 'interrupción sin confirmación: un turno desconocido');
 
   // El mismo cierre repetido (reintento del sitio) no vuelve a contar.
   await responder(206, { messageId: 'a6', text: 'Se cortó a mitad de fra', stopped: true, tokens: 40 });
   const otra = await stats();
   assert.equal(otra.responses, despues.responses, 'sin duplicados');
-  assert.equal(otra.turnsUnknown, despues.turnsUnknown, 'interrupción sin confirmación: un turno desconocido');
+  assert.equal(otra.turnsPerformed, despues.turnsPerformed, 'interrupción sin confirmación: un turno desconocido');
 });
 
 /* ------------------------------------------------------------------ */
@@ -300,7 +300,7 @@ test('una respuesta que sólo vio CDP también cuenta', async () => {
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses + 1, 'la observación cuenta como respuesta');
-  assert.equal(despues.turnsUnknown, antes.turnsUnknown + 1, 'interrupción sin confirmación: un turno desconocido');
+  assert.equal(despues.turnsPerformed, antes.turnsPerformed + 1, 'interrupción sin confirmación: un turno desconocido');
 });
 
 /* ------------------------------------------------------------------ */

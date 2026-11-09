@@ -335,7 +335,7 @@ test('una respuesta HTTP 2xx cierra el turno aunque la pestaña no venga en el e
   const fin = await stats();
   assert.equal(fin.messages, antes.messages + 1, 'el mensaje de entrada se conserva');
   assert.equal(fin.responses, antes.responses + 1, 'la respuesta HTTP se cuenta');
-  assert.equal(fin.turnsUnknown, antes.turnsUnknown + 1, 'interrupción sin confirmación: un turno desconocido');
+  assert.equal(fin.turnsPerformed, antes.turnsPerformed + 1, 'interrupción sin confirmación: un turno desconocido');
   assert.equal(fin.outputTokens, antes.outputTokens, 'sin texto no se inventan tokens');
 });
 
@@ -497,7 +497,7 @@ test('ChatGPT unauth-mweb conversation/updates cuenta la respuesta sin contar ot
   const fin = await stats();
   assert.equal(fin.messages, antes.messages + 1, 'el endpoint de respuesta no inventa otro mensaje');
   assert.equal(fin.responses, antes.responses + 1, 'la respuesta del endpoint actual se cuenta');
-  assert.equal(fin.turnsUnknown, antes.turnsUnknown + 1, 'interrupción sin confirmación: un turno desconocido');
+  assert.equal(fin.turnsPerformed, antes.turnsPerformed + 1, 'interrupción sin confirmación: un turno desconocido');
 });
 
 /* ------------------------------------------------------------------ */
@@ -625,7 +625,7 @@ test('si la ruta no se parece a ninguna conocida, el cuerpo delata la conversaci
 
   const fin = await stats();
   assert.equal(fin.responses, antes.responses + 1, '+1 respuestas de la IA');
-  assert.equal(fin.turnsUnknown, antes.turnsUnknown + 1, 'interrupción sin confirmación: un turno desconocido');
+  assert.equal(fin.turnsPerformed, antes.turnsPerformed + 1, 'interrupción sin confirmación: un turno desconocido');
 
   const log = await callIpc('nexo:log');
   const aviso = log.find((item) => item.code === 'chat-ruta');

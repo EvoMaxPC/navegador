@@ -3,7 +3,7 @@ export const TURN_OUTCOMES = {
   completed: 'turnsCompleted',
   cancelled: 'turnsCancelled',
   failed: 'turnsFailed',
-  unknown: 'turnsUnknown',
+  unknown: 'turnsPerformed',
 };
 
 export function turnOutcome(payload = {}) {

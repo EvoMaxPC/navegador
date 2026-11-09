@@ -441,7 +441,7 @@ test('14. si la capa y CDP no leen el cuerpo, la respuesta se cuenta por red', a
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 1, 'un mensaje');
   assert.equal(despues.responses, antes.responses + 1, '+1 respuestas de la IA');
-  assert.equal(despues.turnsUnknown, antes.turnsUnknown + 1, 'interrupción sin confirmación: un turno desconocido');
+  assert.equal(despues.turnsPerformed, antes.turnsPerformed + 1, 'interrupción sin confirmación: un turno desconocido');
   assert.equal(despues.interventions, antes.interventions + 2, 'envío + respuesta');
   assert.equal(
     despues.outputTokens,

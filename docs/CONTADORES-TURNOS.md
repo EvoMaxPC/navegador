@@ -1,4 +1,4 @@
-# Contadores de resultado de ChatGPT — NEXO 0.1.16
+# Contadores de resultado de ChatGPT — NEXO 0.1.17
 
 ## Implementación
 
@@ -11,7 +11,7 @@ exclusivos, todos inicializados en **0** al crear Engine:
 | `turnsCompleted` | turnos completos | finalización normal de la respuesta |
 | `turnsCancelled` | turnos cancelados | Stop real del usuario o cancelación explícita del proveedor |
 | `turnsFailed` | turnos fallidos | error de generación o fallo de la petición de conversación |
-| `turnsUnknown` | turnos desconocidos | interrupción sin confirmar el resultado |
+| `turnsPerformed` | turnos realizados | interrupción sin confirmar el resultado |
 
 Un `AbortError` o `net::ERR_ABORTED` **no prueba** por sí solo una cancelación del
 usuario: también puede proceder de navegación, recarga o del propio sitio.
@@ -69,10 +69,10 @@ que dependían del antiguo total de turnos.
 
 ## Pruebas
 
-- **18 pruebas nuevas de Engine/clasificación:** cero inicial, cuatro resultados,
+- **19 pruebas nuevas de Engine/clasificación:** cero inicial, cuatro resultados,
   errores y abortos, exclusividad, repetición SSE/CDP, confirmación tardía,
   tokens intactos, múltiples pestañas, IDs alternativos y worker sin pestaña.
-- **11 pruebas adicionales de circuito:** bundle de inyección, preload real,
+- **16 pruebas adicionales de circuito:** bundle de inyección, preload real,
   handlers reales, BPE y funciones de shell reales sobre DOM mínimo simulado.
   Cubren SSE/NDJSON normales, Stop con y sin gesto confiable, AbortError,
   error de generación con HTTP 200, rechazo de fetch, HTTP 500, error SSE sin
@@ -80,9 +80,9 @@ que dependían del antiguo total de turnos.
 - Pruebas existentes adaptadas a la semántica nueva: una red sin confirmación
   ya no se etiqueta como turno completo. Las verificaciones de tokens,
   mensajes, respuestas y demás funciones se conservan.
-- `npm run verify`: **521 pruebas, 520 aprobadas, 1 omitida, 0 fallos**.
+- `npm run verify`: **527 pruebas, 526 aprobadas, 1 omitida, 0 fallos**.
   La omitida requiere un ZIP externo de Electron para la cadena local.
-- Bundle: **45.1 kB**, **16.2 kB gzip**, 10 módulos; sin nuevas dependencias ni
+- Bundle: **45.2 kB**, **16.2 kB gzip**, 10 módulos; sin nuevas dependencias ni
   relajación de límites de rendimiento.
 
 Estas son pruebas automatizadas, incluidas grabaciones externas de ChatGPT.
@@ -106,3 +106,23 @@ la respuesta visible y registra desconocido si no puede confirmarla, sin
 inventar texto ni tokens. Se agregaron **3 pruebas de integración DPU** con DOM y
 transporte sintéticos (normal, Stop/cierre y respuesta no verificable), además
 de las **6 pruebas DPU recibidas del remoto**. No constituyen validación en vivo.
+
+
+## Ajuste 0.1.17: cancelación y nombre del cuarto contador
+
+El cuarto campo público se renombró a `turnsPerformed`, con etiqueta
+**turnos realizados** e ID `statTurnsPerformed`, en motor, IPC de estadísticas,
+shell y pruebas. Es el cambio de nombre solicitado; no se ha convertido en
+un total que duplique los otros tres resultados. La clasificación interna
+`unknown` se conserva para no cambiar las reglas de resultado ni los tokens.
+
+La detección del gesto Stop reutiliza ahora `site.stopButton` del perfil de
+ChatGPT, incluyendo los dos test IDs existentes y los aria-label Stop, Detener
+y Cancelar, sin distinguir mayúsculas. Antes, cuatro pruebas con aria-label no
+sumaban cancelaciones; después del cambio pasan. Se prueban cinco variantes de
+botón, clic en el icono hijo, clic repetido y posterior aborto/CDP: **exactamente
++1 en turnos cancelados** y aviso inmediato a la shell. También se verifica la
+cancelación confirmada después de una llegada de red sin resultado definitivo:
+se mueve el mismo turno a cancelados y no se contabiliza dos veces.
+
+No se cambió la tokenización, la captura de texto ni la lógica de suma de tokens.

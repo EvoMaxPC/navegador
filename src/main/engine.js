@@ -72,7 +72,7 @@ export class Engine {
       turnsCompleted: 0,
       turnsCancelled: 0,
       turnsFailed: 0,
-      turnsUnknown: 0,
+      turnsPerformed: 0,
       inputTokens: 0,
       outputTokens: 0,
       /**
@@ -981,7 +981,7 @@ export class Engine {
       turnsCompleted: c.turnsCompleted,
       turnsCancelled: c.turnsCancelled,
       turnsFailed: c.turnsFailed,
-      turnsUnknown: c.turnsUnknown,
+      turnsPerformed: c.turnsPerformed,
       inputTokens: c.inputTokens,
       outputTokens: c.outputTokens,
       // El panel muestra la actividad de la conversación: +1 al enviar y +1 al

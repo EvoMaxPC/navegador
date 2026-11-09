@@ -53,7 +53,7 @@ function thinkingExpected() {
 // Ejecuta las funciones reales de la shell y su suscripción IPC sobre elementos
 // mínimos. Es integración con DOM simulado, NO una prueba visual en Chromium.
 const appSource = readFileSync(new URL('../src/ui/shell/app.js', import.meta.url), 'utf8');
-const elements = Object.fromEntries(['messages', 'responses', 'turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsUnknown', 'inTokens', 'outTokens', 'interventions', 'capture'].map((key) => [key, { textContent: '0' }]));
+const elements = Object.fromEntries(['messages', 'responses', 'turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsPerformed', 'inTokens', 'outTokens', 'interventions', 'capture'].map((key) => [key, { textContent: '0' }]));
 let refreshFromIpc;
 const ui = vm.createContext({
   nexo: { getStats: stats, on: (_channel, listener) => { refreshFromIpc = listener; } },
@@ -98,9 +98,20 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
   const domListeners = new Map();
   const document = { body: { innerText: bodyText }, querySelector: () => null, querySelectorAll: () => [],
     addEventListener(name, handler) { domListeners.set(name, handler); } };
-  page.stop = (isTrusted = true) => domListeners.get('click')?.({ isTrusted, target: {
-    closest: (selector) => selector.includes('stop-button') ? {} : null,
-  } });
+  page.stop = (isTrusted = true, attributes = { 'data-testid': 'stop-button' }) => {
+    // DOM mínimo: compara atributos reales del botón, sin copiar los selectores
+    // de producción. El target puede ser el icono hijo del botón.
+    const button = { disabled: false, matches(selector) {
+      const match = selector.match(/^(?:button)?\[([\w-]+)(\*?=)"([^"]+)"( i)?\]$/);
+      if (!match) return selector === 'button';
+      let actual = attributes[match[1]] || '', expected = match[3];
+      if (match[4]) { actual = actual.toLowerCase(); expected = expected.toLowerCase(); }
+      return match[2] === '*=' ? actual.includes(expected) : actual === expected;
+    } };
+    domListeners.get('click')?.({ isTrusted, target: {
+      closest: (selector) => selector.split(',').some((item) => button.matches(item.trim())) ? button : null,
+    } });
+  };
   const context = vm.createContext({ window: page, location: page.location, document, console,
     setTimeout, clearTimeout, TextEncoder, TextDecoder, ReadableStream, WritableStream, TransformStream, Response, Headers, Request, URL, URLSearchParams, FormData });
   const requireBridge = createRequire(new URL('../src/preload/bridge.cjs', import.meta.url));
@@ -366,7 +377,7 @@ for (const [name, body, mime, expected] of [
 }
 
 
-const outcomes = ['turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsUnknown'];
+const outcomes = ['turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsPerformed'];
 function outcomeDelta(before) { return outcomes.map((key) => stats()[key] - before[key]); }
 function assertOutcomeUi() {
   for (const key of outcomes) assert.equal(elements[key].textContent, stats()[key].toLocaleString('es-AR'), key);
@@ -561,3 +572,34 @@ test('integración remota DPU: sin respuesta verificable en DOM queda desconocid
   assert.equal(stats().outputTokens, before.outputTokens, 'no inventa tokens si falta la respuesta');
   assertOutcomeUi();
 });
+
+
+for (const attributes of [
+  { 'data-testid': 'stop-generating-button' },
+  { 'aria-label': 'Stop generating' },
+  { 'aria-label': 'Detener generación' },
+  { 'aria-label': 'Cancelar generación' },
+  { 'aria-label': 'stop streaming' },
+]) {
+  test(`cancelar con ${JSON.stringify(attributes)} suma exactamente +1 y refresca el panel`, async () => {
+    const view = await openTab(), before = stats();
+    let release;
+    const holdOpen = new Promise((resolve) => { release = resolve; });
+    const page = pageFor(view, fixture('aborted.sse'), { holdOpen, abort: true });
+    const response = await requestReply(page);
+    const reading = response.text().catch((error) => assert.equal(error.name, 'AbortError'));
+    try {
+      await pause(50);
+      page.stop(true, attributes);
+      page.stop(true, attributes);
+      await pause();
+      assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+      assertOutcomeUi();
+      assert.equal(stats().outputTokens, before.outputTokens, 'el clic no modifica tokens');
+    } finally { release(); await reading; await pause(50); }
+    assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0], 'el aborto no vuelve a sumar');
+    await replayCdp(view, fixture('aborted.sse'));
+    assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0], 'CDP no vuelve a sumar');
+    assertOutcomeUi();
+  });
+}

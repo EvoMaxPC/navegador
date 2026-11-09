@@ -22,7 +22,13 @@ export const SITES = [
     hosts: ['chatgpt.com', 'chat.openai.com'],
     composer: ['#prompt-textarea', 'div[contenteditable="true"][id^="prompt"]', 'textarea[data-id]'],
     sendButton: ['button[data-testid="send-button"]', 'button[aria-label*="Send"]', 'button[aria-label*="Enviar"]'],
-    stopButton: ['button[data-testid="stop-button"]', 'button[aria-label*="Stop"]'],
+    stopButton: [
+      'button[data-testid="stop-button"]',
+      'button[data-testid="stop-generating-button"]',
+      'button[aria-label*="Stop" i]',
+      'button[aria-label*="Detener" i]',
+      'button[aria-label*="Cancelar" i]',
+    ],
     // Sólo la petición que ENVÍA un mensaje: POST a una ruta que **termine** en
     // `/conversation` — `/backend-api/conversation`, `/backend-api/f/conversation`
     // o la variante que el sitio estrene mañana (`/backend-api/v2/conversation`,
