@@ -80,7 +80,7 @@ const roleNode = (role, text, markdown = null) => ({
   querySelector: (selector) => selector === '.markdown' && markdown !== null ? { innerText: markdown } : null,
 });
 
-const { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer } = await import('../src/core/chatgptDpu.js');
+const { readChatGptDpuAnswer, waitForChatGptDpuAnswer } = await import('../src/core/chatgptDpu.js');
 
 test('DOM por rol: extrae la respuesta actual sin depender de ChatGPT said ni incluir botones', () => {
   const nodes = [roleNode('user', 'Pregunta actual'), roleNode('assistant', 'Respuesta\nCopiar\nCompartir', 'Respuesta\ncon saltos y código.')];
