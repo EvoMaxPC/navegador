@@ -61,8 +61,8 @@ export class Engine {
      * es el par de los dos. **Ninguno depende de que el motor intervenga**: un
      * mensaje sin mediación cuenta igual.
      *
-     * Los tokens son una estimación (`estimateTokens`), no un tokenizador real:
-     * `tokensEstimated` lo dice y la interfaz lo marca.
+     * Los tokens visibles de texto se cuentan con BPE GPT según el modelo detectado.
+     * No incluyen contenido multimodal ni tokens internos no expuestos por el proveedor.
      */
     this.counters = {
       messages: 0,
