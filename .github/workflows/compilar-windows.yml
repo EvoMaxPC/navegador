@@ -63,9 +63,16 @@ jobs:
         run: |
           $exe = Join-Path $PWD 'dist\Nexo-win32-x64\nexo.exe'
           if (-not (Test-Path $exe)) { throw "no se generó $exe" }
-          & $exe --smoke *> ci-humo.txt
+          $env:ELECTRON_ENABLE_LOGGING = '1'
+          $env:NEXO_SMOKE_OUT = Join-Path $PWD 'ci-humo.txt'
+          & $exe --smoke *> salida-humo.txt
           $codigo = $LASTEXITCODE
-          Get-Content ci-humo.txt
+          if (Test-Path ci-humo.txt) {
+            Get-Content ci-humo.txt
+          } else {
+            "sin informe: el ejecutable no llegó a escribirlo" | Out-File -Encoding utf8 ci-humo.txt
+          }
+          Get-Content salida-humo.txt -ErrorAction SilentlyContinue
           if ($codigo -ne 0) { throw "la prueba de humo falló con código $codigo" }
 
       - name: Resumen

@@ -8,7 +8,7 @@
 
 import { app, BrowserWindow, ipcMain, protocol, session, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { readFile, stat } from 'node:fs/promises';
+import { appendFile, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { Store } from './store.js';
 import { Engine } from './engine.js';
@@ -19,7 +19,7 @@ import { DEFAULT_SETTINGS } from '../core/settings.js';
 import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
-import { runSmoke, report as reportSmoke } from './smoke.js';
+import { runSmoke, report as reportSmoke, render as renderSmoke } from './smoke.js';
 import { eventMessage, permissionName, safeExternalUrl, sessionPayload } from './validate.js';
 import { PERMISSION_CATALOG } from '../nav/permissions.js';
 
@@ -31,6 +31,26 @@ const PAGE_PRELOAD = join(ROOT, 'src', 'preload', 'bridge.cjs');
 const isDev = process.argv.includes('--dev');
 /** `--smoke`: arranca, revisa la interfaz y sale. Lo usa el flujo de Windows. */
 const isSmoke = process.argv.includes('--smoke') || process.env.NEXO_SMOKE === '1';
+/**
+ * Archivo donde la prueba de humo deja su informe. En Windows el ejecutable es
+ * una aplicación de interfaz: lo que escribe en la consola no llega al proceso
+ * que lo lanzó, así que el resultado también va a un archivo.
+ */
+const smokeOut = process.env.NEXO_SMOKE_OUT || null;
+
+if (isSmoke && smokeOut) {
+  // Si el arranque revienta antes de la prueba, el archivo tiene que decirlo.
+  process.on('uncaughtException', (error) => {
+    appendFile(smokeOut, `\n✖ excepción al arrancar: ${error?.stack || error}\n`).finally(() =>
+      app.exit(70),
+    );
+  });
+  process.on('unhandledRejection', (error) => {
+    appendFile(smokeOut, `\n✖ promesa rechazada al arrancar: ${error?.stack || error}\n`).finally(() =>
+      app.exit(70),
+    );
+  });
+}
 
 let win = null;
 let store = null;
@@ -565,6 +585,10 @@ app.whenReady().then(async () => {
       checks: [{ name: 'prueba de humo', ok: false, detail: error?.message || String(error) }],
     }));
     const code = reportSmoke(smoke);
+    if (smokeOut) {
+      // `reportSmoke` ya escribió en consola; el archivo es la vía confiable.
+      await writeFile(smokeOut, renderSmoke(smoke), 'utf8').catch(() => {});
+    }
     app.exit(code);
     return;
   }

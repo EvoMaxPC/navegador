@@ -132,12 +132,20 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Imprime el informe y devuelve el código de salida. */
-export function report({ ok, checks }, write = (line) => console.log(line)) {
-  write('\n── prueba de humo ──────────────────────────────');
+/** Arma el texto del informe. */
+export function render({ ok, checks }) {
+  const lines = ['', '── prueba de humo ──────────────────────────────'];
   for (const item of checks) {
-    write(`${item.ok ? '✔' : '✖'} ${item.name}${item.detail ? ` · ${item.detail}` : ''}`);
+    lines.push(`${item.ok ? '✔' : '✖'} ${item.name}${item.detail ? ` · ${item.detail}` : ''}`);
   }
-  write(`────────────────────────────────────────────────\n${ok ? '✔ arrancó y funciona' : '✖ algo falló'}\n`);
-  return ok ? 0 : 1;
+  lines.push('────────────────────────────────────────────────');
+  lines.push(ok ? '✔ arrancó y funciona' : '✖ algo falló');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/** Imprime el informe y devuelve el código de salida. */
+export function report(resultado, write = (line) => console.log(line)) {
+  for (const line of render(resultado).split('\n')) write(line);
+  return resultado.ok ? 0 : 1;
 }
