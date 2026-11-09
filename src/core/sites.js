@@ -229,6 +229,24 @@ export function isMediable(profile, url = '', method = '') {
 }
 
 /**
+ * Endpoints que transportan la RESPUESTA del modelo, aunque no sean el POST
+ * que contiene el mensaje del usuario. ChatGPT usa este canal en su cliente
+ * web sin autenticar; no debe tratarse como un envío ni analizarse su cuerpo
+ * como si fuera el prompt.
+ */
+export function isResponseRequest(profile, url = '', method = '') {
+  if (!profile || profile.id !== 'chatgpt' || isAuthRequest(url)) return false;
+  if (String(method || '').toUpperCase() !== 'POST') return false;
+  let pathname = '';
+  try {
+    pathname = new URL(String(url), 'https://placeholder.invalid').pathname;
+  } catch {
+    return false;
+  }
+  return /^\/(?:backend-api\/)?unauth-mweb\/conversation\/updates\/?$/i.test(pathname);
+}
+
+/**
  * ¿La petición envía un mensaje de chat?
  *
  * Se evalúa sobre la RUTA (sin dominio ni query) cuando el perfil la declara, y
