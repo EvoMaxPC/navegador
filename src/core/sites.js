@@ -23,20 +23,23 @@ export const SITES = [
     composer: ['#prompt-textarea', 'div[contenteditable="true"][id^="prompt"]', 'textarea[data-id]'],
     sendButton: ['button[data-testid="send-button"]', 'button[aria-label*="Send"]', 'button[aria-label*="Enviar"]'],
     stopButton: ['button[data-testid="stop-button"]', 'button[aria-label*="Stop"]'],
-    requestMatch: /\/backend-api\/(f\/)?conversation|backend-api\/conversation/,
+    // Sólo la petición que ENVÍA un mensaje: POST a `/backend-api/conversation`
+    // (o `/f/conversation`; `backend-anon` para sesiones sin cuenta). Las rutas
+    // que empiezan igual NO son mensajes y no deben tocarse: `/conversation/prepare`
+    // (se mediaría dos veces el mismo texto), `/conversations` (listado),
+    // `/conversation/<id>` (historial).
+    requestMatch: /\/backend-(api|anon)\/(f\/)?conversation\/?$/,
+    requestPath: /^\/backend-(api|anon)\/(f\/)?conversation\/?$/,
+    postOnly: true,
+    streamAdapter: 'chatgpt',
     body: {
       kind: 'chatgpt-messages',
+      // Con esquema propio: si no se encuentra el mensaje NO se busca otro
+      // string cualquiera del cuerpo (se corrompería `timezone` o el modelo).
+      strict: true,
       // messages: [{author:{role}, content:{content_type, parts:[...]}}]
       patch: (body, text) => {
-        const messages = body?.messages;
-        if (!Array.isArray(messages)) return body;
-        for (let i = messages.length - 1; i >= 0; i -= 1) {
-          const m = messages[i];
-          if (m?.author?.role === 'user' && m?.content?.parts) {
-            m.content.parts = [text];
-            break;
-          }
-        }
+        patchUserText(body, { body: { kind: 'chatgpt-messages', strict: true } }, text);
         return body;
       },
     },
@@ -49,9 +52,13 @@ export const SITES = [
     hosts: ['claude.ai'],
     composer: ['div[contenteditable="true"].ProseMirror', 'div[contenteditable="true"]'],
     sendButton: ['button[aria-label="Send message"]', 'button[aria-label="Enviar mensaje"]'],
-    requestMatch: /\/api\/organizations\/[^/]+\/chat_conversations\/[^/]+\/completion/,
+    requestMatch: /\/api\/organizations\/[^/]+\/chat_conversations\/[^/]+\/completion\/?$/,
+    requestPath: /^\/api\/organizations\/[^/]+\/chat_conversations\/[^/]+\/completion\/?$/,
+    postOnly: true,
+    streamAdapter: 'claude',
     body: {
       kind: 'claude-prompt',
+      strict: true,
       patch: (body, text) => {
         if (typeof body?.prompt === 'string') body.prompt = text;
         return body;
@@ -167,9 +174,25 @@ export function detectSite(host = '') {
   return found || { ...GENERIC, host: clean };
 }
 
-/** ¿La URL parece una petición de chat? */
-export function isChatRequest(profile, url = '') {
+/**
+ * ¿La petición envía un mensaje de chat?
+ *
+ * Se evalúa sobre la RUTA (sin dominio ni query) cuando el perfil la declara, y
+ * los sitios con `postOnly` sólo se median con POST: un GET nunca lleva mensaje,
+ * y medirlo rompería listados y preparaciones intermedias.
+ */
+export function isChatRequest(profile, url = '', method = '') {
   if (!profile?.requestMatch) return false;
+  if (profile.postOnly && method && String(method).toUpperCase() !== 'POST') return false;
+  if (profile.requestPath) {
+    let pathname = '';
+    try {
+      pathname = new URL(String(url), 'https://placeholder.invalid').pathname;
+    } catch {
+      return false;
+    }
+    return profile.requestPath.test(pathname);
+  }
   return profile.requestMatch.test(url);
 }
 
@@ -184,22 +207,37 @@ export function isChatRequest(profile, url = '') {
 export function locateUserText(body, profile = {}) {
   const kind = profile?.body?.kind;
 
-  if (kind === 'claude-prompt' && typeof body?.prompt === 'string') {
-    return { path: ['prompt'], value: body.prompt };
+  if (kind === 'claude-prompt') {
+    if (typeof body?.prompt === 'string') return { path: ['prompt'], value: body.prompt };
+    if (profile.body.strict) return null;
   }
 
-  if (kind === 'chatgpt-messages' && Array.isArray(body?.messages)) {
-    for (let i = body.messages.length - 1; i >= 0; i -= 1) {
-      const m = body.messages[i];
-      if (m?.author?.role !== 'user') continue;
-      const parts = m.content?.parts;
-      if (Array.isArray(parts) && typeof parts[0] === 'string' && parts[0].length) {
-        return { path: ['messages', i, 'content', 'parts', 0], value: parts[0] };
-      }
-      if (typeof m.content?.text === 'string' && m.content.text.length) {
-        return { path: ['messages', i, 'content', 'text'], value: m.content.text };
+  if (kind === 'chatgpt-messages') {
+    // Regenerar, variantes y continuar no llevan un mensaje nuevo del usuario:
+    // tocarlos reescribiría cualquier otro string del cuerpo.
+    if (body?.action && body.action !== 'next') return null;
+    if (Array.isArray(body?.messages)) {
+      for (let i = body.messages.length - 1; i >= 0; i -= 1) {
+        const m = body.messages[i];
+        if (m?.author?.role !== 'user') continue;
+        const parts = m.content?.parts;
+        if (Array.isArray(parts)) {
+          // Con adjuntos, `parts` mezcla objetos (imágenes, archivos) y texto:
+          // se toma el último string no vacío y se deja el resto como está.
+          for (let j = parts.length - 1; j >= 0; j -= 1) {
+            if (typeof parts[j] === 'string' && parts[j].length) {
+              return { path: ['messages', i, 'content', 'parts', j], value: parts[j] };
+            }
+          }
+        }
+        if (typeof m.content?.text === 'string' && m.content.text.length) {
+          return { path: ['messages', i, 'content', 'text'], value: m.content.text };
+        }
+        // El último mensaje del usuario no tiene texto: no se mira más atrás.
+        break;
       }
     }
+    if (profile.body.strict) return null;
   }
 
   if (Array.isArray(body?.messages)) {

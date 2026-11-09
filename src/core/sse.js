@@ -23,13 +23,20 @@ export function parseSSE(buffer) {
     const chunk = normalized.slice(start, idx);
     start = idx + 2;
     if (chunk.trim()) {
-      const evt = { event: 'message', data: '', raw: chunk };
+      // `raw` conserva el evento tal cual llegó (comentarios `: ping`, `retry:`,
+      // `id:` y campos desconocidos incluidos) para poder reenviarlo sin tocarlo.
+      const evt = { event: 'message', data: '', raw: chunk, hasData: false };
       const dataLines = [];
       for (const line of chunk.split('\n')) {
-        if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
-        else if (line.startsWith('event:')) evt.event = line.slice(6).trim();
+        if (line.startsWith('data:')) {
+          // La especificación SSE quita UN solo espacio inicial, no todos: con
+          // `trimStart` una respuesta que empieza con sangría perdía caracteres.
+          const value = line.slice(5);
+          dataLines.push(value.startsWith(' ') ? value.slice(1) : value);
+        } else if (line.startsWith('event:')) evt.event = line.slice(6).trim();
         else if (line.startsWith('id:')) evt.id = line.slice(3).trim();
       }
+      evt.hasData = dataLines.length > 0;
       evt.data = dataLines.join('\n');
       events.push(evt);
     }
@@ -46,6 +53,39 @@ export function serializeSSE(evt) {
   const data = String(evt.data ?? '');
   for (const line of data.split('\n')) lines.push(`data: ${line}`);
   return `${lines.join('\n')}\n\n`;
+}
+
+/**
+ * Reescribe SOLO los datos de un evento recibido y conserva el resto de sus
+ * líneas (nombre del evento, id, retry, comentarios) en su posición original.
+ *
+ * Reconstruirlo con `serializeSSE` perdía esa información: un `: ping` se
+ * convertía en `data:` vacío y un `event: content_block_delta` podía cambiar de
+ * lugar respecto de su `data:`.
+ */
+export function rewriteSSE(evt, data) {
+  if (typeof evt.raw !== 'string') return serializeSSE({ ...evt, data });
+  if (!evt.hasData) return `${evt.raw}\n\n`;
+  const dataLines = String(data).split('\n').map((line) => `data: ${line}`);
+  const out = [];
+  let placed = false;
+  for (const line of evt.raw.split('\n')) {
+    if (line.startsWith('data:')) {
+      if (!placed) {
+        out.push(...dataLines);
+        placed = true;
+      }
+      continue;
+    }
+    out.push(line);
+  }
+  if (!placed) out.push(...dataLines);
+  return `${out.join('\n')}\n\n`;
+}
+
+/** Reenvía un evento exactamente como llegó (latidos, `retry:`, comentarios). */
+export function passthroughSSE(evt) {
+  return typeof evt.raw === 'string' ? `${evt.raw}\n\n` : serializeSSE(evt);
 }
 
 const DELTA_KEYS = new Set([
@@ -79,9 +119,12 @@ export function extractDeltas(json, opts = {}) {
       const val = getPath(json, p);
       if (typeof val === 'string' && val) texts.push({ path: p, text: val });
       else if (Array.isArray(val)) {
-        for (const item of val) {
-          if (typeof item === 'string' && item) texts.push({ path: p, text: item });
-        }
+        // Cada elemento lleva su propia ruta con índice: escribir en la ruta del
+        // array lo reemplazaría por un string y rompería el JSON que espera el
+        // cliente (p. ej. `message.content.parts` pasaría a ser un texto suelto).
+        val.forEach((item, i) => {
+          if (typeof item === 'string' && item) texts.push({ path: `${p}.${i}`, text: item });
+        });
       }
     }
     if (texts.length) return { texts, control: controlOf(json) };

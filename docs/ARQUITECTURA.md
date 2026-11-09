@@ -8,7 +8,11 @@ Tres ideas ordenan todo el proyecto:
    IIFE en el mundo principal de cada página.
 2. **Dos mundos, un puente.** El preload corre aislado y es el único con
    privilegios. El código que engancha `fetch` corre en el mundo de la página; se
-   comunican con `postMessage` y el preload traduce a IPC.
+   comunican con `postMessage` y el preload traduce a IPC. La configuración del
+   sitio llega por `sendSync('nexo:config-sync')` en el arranque del documento: el
+   enganche tiene que estar puesto **antes** de que la página guarde su propia
+   referencia a `window.fetch`, así que una espera asíncrona o un
+   `DOMContentLoaded` llegan tarde.
 3. **Nunca romper la petición del usuario.** Todo fallo del motor degrada a «dejar
    pasar el mensaje tal cual». No hay ninguna ruta en la que una excepción del
    análisis impida enviar o recibir.
@@ -64,21 +68,39 @@ también. Si lo subís, ganás precisión y perdés inmediatez.
 `#alignCut` retrocede hasta el último `\n\n` o fin de frase dentro de 400
 caracteres. Cortar un párrafo entero es aceptable; cortar una palabra no.
 
+### `src/core/streamAdapters.js`
+
+Traduce el cable de cada proveedor a «tramos de texto» y de vuelta. Cada adaptador
+expone tres operaciones:
+
+- `read(json)` → `{ segments, terminal }`. Cada tramo dice dónde está el texto
+  (`path`) y cuánto es nuevo (`newText`); `terminal` avisa si el evento cierra un
+  bloque o el mensaje.
+- `write(json, segments, values)` → escribe el texto reescrito **en el mismo
+  sitio** del JSON. En el protocolo de parches de ChatGPT el texto viaja en `v` y
+  la ruta `p` sólo dice dónde lo aplica el cliente: se reescribe `v`, nunca la
+  ruta (era el error que convertía `parts` en un string).
+- `pending({ text, delivered })` → arma el evento sintético con la forma del
+  último evento de texto, para soltar lo retenido antes de un cierre.
+
+Perfiles: `chatgpt` (parches `{p,o,v}` y el formato acumulado antiguo, con eco del
+usuario y estados que no son texto), `claude` (`content_block_delta` y el
+`completion` acumulado) y `generic` (el último recurso con `deltaPaths`).
+
 ### `src/core/streamFilter.js`
 
 `TransformStream<Uint8Array, Uint8Array>` que envuelve el cuerpo de la respuesta.
 
-- Parseo incremental de SSE (`parseSSE` guarda el resto sin cerrar).
-- Extracción genérica de deltas (`extractDeltas`) con pistas por adaptador.
-- Reescritura del texto dentro del mismo evento: se conserva el `id`, el `event` y
-  el resto del JSON.
+- Parseo incremental de SSE (`parseSSE` guarda el resto sin cerrar y conserva el
+  `raw` de cada evento: comentarios, `retry:` e `id:` se reenvían textualmente).
+- El adaptador del sitio dice qué eventos traen texto; el centinela decide cuánto
+  se entrega y `distribute()` reparte lo nuevo entre los tramos del evento, en
+  orden, sin solapamientos.
 - Al cortar: los eventos siguientes viajan con el texto vacío (el cliente necesita
   su cierre).
-- Al cerrar: el texto retenido se devuelve clonando el último evento de texto,
-  **antes** de reenviar `[DONE]`.
-
-Si el cuerpo no parece SSE (`looksLikeStream`), la respuesta pasa intacta y el
-motor se limita a no intervenir.
+- Al cerrar: el texto retenido se devuelve con la forma del último evento de texto,
+  **antes** del evento de cierre, y `[DONE]` siempre queda último.
+- Un cuerpo que no parece SSE (`looksLikeStream`) pasa intacto.
 
 ### `src/core/promptEngine.js`
 
@@ -111,13 +133,17 @@ libro de intervenciones. `ConversationTurn` envuelve al centinela y decide al ce
 ## Flujo completo de una petición
 
 1. La página llama a `fetch(url, {body})`.
-2. El hook comprueba `isChatRequest(site, url)`; si no es un chat, `fetch` nativo.
-3. `locateUserText(body, site)` encuentra el mensaje del usuario sin conocer el
-   esquema exacto (mensajes estilo OpenAI, `prompt`, `f_req` de Gemini, último
-   string de contenido como último recurso).
+2. El hook comprueba `isChatRequest(site, url, method)`: ruta exacta (comparada por
+   `pathname`, sin contar la consulta) y método. Si no es un envío de mensaje,
+   `fetch` nativo y nada más — `/prepare`, listados y regeneraciones no se tocan.
+3. `planRequest()` **sólo prepara**: lee el cuerpo (`Request.clone().text()` si
+   hace falta), `locateUserText(body, site)` encuentra el mensaje del usuario y
+   `patchUserText` reescribe ese campo y únicamente ese campo.
 4. `bridge.request('prepare', {prompt})` → IPC → proceso principal → `promptEngine`.
-5. `patchUserText(body, site, textoMediado)` reescribe el cuerpo. Solo ese campo.
-6. `fetch` nativo de verdad. Si la respuesta es SSE, se envuelve con el filtro.
+5. **Un solo** `fetch` nativo con el cuerpo ya mediado. No hay reenvío: un fallo de
+   red o un `AbortError` (el botón «Detener») llegan a la página tal cual y nunca
+   se duplica el mensaje.
+6. Si la respuesta es SSE, se envuelve con el filtro; si no, pasa intacta.
 7. `onStop` → IPC → libro de intervenciones y marca en la pestaña.
 8. `onEnd` → IPC → reparación, decisión de continuación, actualización del historial.
 9. Si la continuación automática está habilitada, `submitContinuation` escribe el

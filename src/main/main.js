@@ -290,6 +290,14 @@ function createWindow() {
 
 function registerIpc() {
   ipcMain.handle('nexo:config', (_event, payload = {}) => engine.configFor(payload.host || ''));
+
+  // La misma configuración, pero síncrona: el preload de cada pestaña la
+  // necesita ANTES de que la página registre su propio `fetch`. Es una llamada
+  // de milisegundos y se paga una sola vez por documento.
+  ipcMain.on('nexo:config-sync', (event, payload = {}) => {
+    const host = typeof payload?.host === 'string' ? payload.host : '';
+    event.returnValue = engine ? engine.configFor(host) : null;
+  });
   ipcMain.handle('nexo:prepare', (event, payload) => engine.prepare(event.sender.id, payload));
   ipcMain.handle('nexo:stream-end', (event, payload) => engine.onStreamEnd(event.sender.id, payload));
   ipcMain.handle('nexo:stream-stop', (event, payload) => engine.onStreamStop(event.sender.id, payload));

@@ -137,11 +137,44 @@ export class StreamSentinel {
     const limit = this.stopped
       ? this.cutIndex
       : Math.max(0, this.raw.length - this.holdback);
-    const end = Math.min(Math.max(limit, this.delivered.length), this.raw.length);
+    const end = this.#pairSafe(Math.min(Math.max(limit, this.delivered.length), this.raw.length));
     const emit = this.raw.slice(this.delivered.length, end);
     this.delivered += emit;
 
     return { emit, stopped: this.stopped, events };
+  }
+
+  /**
+   * Nunca se corta en medio de un par sustituto UTF-16 (emojis y símbolos fuera
+   * del plano básico): la mitad suelta se convierte en « » al codificar a UTF-8.
+   */
+  #pairSafe(index) {
+    if (index <= this.delivered.length || index >= this.raw.length) return index;
+    const antes = this.raw.charCodeAt(index - 1);
+    const despues = this.raw.charCodeAt(index);
+    const alto = antes >= 0xd800 && antes <= 0xdbff;
+    const bajo = despues >= 0xdc00 && despues <= 0xdfff;
+    return alto && bajo ? index - 1 : index;
+  }
+
+  /**
+   * Entrega ahora lo retenido SIN cerrar el turno. Se usa justo antes de un
+   * evento de cierre (fin de bloque, fin de mensaje, `[DONE]`) para que el texto
+   * retenido llegue en su orden original y no después del cierre, que dejaría al
+   * cliente con el cierre antes que el texto.
+   * @returns {string}
+   */
+  release() {
+    if (this.stopped) return '';
+    let end = this.raw.length;
+    // Un sustituto alto al final puede ser media pareja que todavía no terminó
+    // de llegar: se entrega en el siguiente trozo.
+    const ultimo = end > 0 ? this.raw.charCodeAt(end - 1) : 0;
+    if (ultimo >= 0xd800 && ultimo <= 0xdbff) end -= 1;
+    if (end <= this.delivered.length) return '';
+    const emit = this.raw.slice(this.delivered.length, end);
+    this.delivered += emit;
+    return emit;
   }
 
   /**

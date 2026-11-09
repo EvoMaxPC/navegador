@@ -53,7 +53,9 @@ test('todo canal IPC que invoca el preload está registrado en el principal', ()
 });
 
 test('todo canal que el preload envía sin respuesta tiene su listener', () => {
-  const sent = unique([...preload.matchAll(/ipcRenderer\.send\('([^']+)'/g)].map((m) => m[1]));
+  const sent = unique([
+    ...[...preload.matchAll(/ipcRenderer\.send(?:Sync)?\('([^']+)'/g)].map((m) => m[1]),
+  ]);
   const listened = new Set([...main.matchAll(/ipcMain\.on\('([^']+)'/g)].map((m) => m[1]));
   const missing = sent.filter((channel) => !listened.has(channel));
   assert.deepEqual(missing, [], `canales enviados sin listener: ${missing.join(', ')}`);

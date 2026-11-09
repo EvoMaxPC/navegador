@@ -10,7 +10,11 @@ Cada sitio de IA se describe con un objeto en `src/core/sites.js`:
   composer: ['#prompt-textarea', ...],         // cuadro de texto (continuación)
   sendButton: ['button[data-testid="send-button"]', ...],
   requestMatch: /backend-api\/conversation/,   // petición de chat
-  body: { kind: 'chatgpt-messages' },          // forma del cuerpo
+  requestPath: ['/backend-api/conversation',   // rutas exactas (sin consulta)
+                '/backend-api/f/conversation'],
+  postOnly: true,                              // sólo POST
+  streamAdapter: 'chatgpt',                    // lector del stream
+  body: { kind: 'chatgpt-messages', strict: true }, // forma del cuerpo
   deltaPaths: ['message.content.parts'],       // pistas para leer el stream
   accent: '#10a37f',
 }
@@ -20,12 +24,18 @@ Cada sitio de IA se describe con un objeto en `src/core/sites.js`:
 
 | Capa | Necesita | Fragilidad |
 |---|---|---|
-| Intervención saliente | `requestMatch` + `body.kind` | baja: la URL y el esquema cambian poco |
-| Filtro de respuesta | `deltaPaths` o la heurística genérica | baja: el formato SSE es estable |
+| Intervención saliente | `requestPath` + `postOnly` + `body.kind` | baja: la URL y el esquema cambian poco |
+| Filtro de respuesta | `streamAdapter` (o `deltaPaths` genérico) | baja: el formato SSE es estable |
 | Continuación automática | `composer` + `sendButton` | alta: los selectores cambian seguido |
 
 El motor está diseñado para que si un adaptador falla, la consecuencia sea «no se
 media ese sitio», nunca «se rompe el sitio».
+
+**Qué cuenta como envío de mensaje.** Se compara la ruta por `pathname` (la
+consulta no importa) y el método. En ChatGPT además se exige que el cuerpo sea un
+envío real: `action` distinto de `next` o sin mensaje nuevo (regenerar, continuar)
+no se reescribe, y nunca se rellena con otro campo del cuerpo. Con `strict: true`
+un cuerpo que no encaja deja de mediarse en vez de adivinar.
 
 ## Estado
 

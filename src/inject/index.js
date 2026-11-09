@@ -46,6 +46,7 @@ const bridge = (() => {
     const entry = pending.get(data.id);
     if (!entry) return;
     pending.delete(data.id);
+    clearTimeout(entry.timer);
     if (data.error) entry.reject(new Error(data.error));
     else entry.resolve(data.payload);
   });
@@ -54,9 +55,12 @@ const bridge = (() => {
     request(type, payload, timeout = 5000) {
       const id = `n${Date.now().toString(36)}-${(seq += 1)}`;
       return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        const entry = { resolve, reject, timer: null };
+        pending.set(id, entry);
         window.postMessage({ __nexo: 'call', id, type, payload }, '*');
-        setTimeout(() => {
+        // Cancelable: si la respuesta llega, el temporizador no debe quedar vivo
+        // sujetando la promesa ni dispararse después con el mismo id.
+        entry.timer = setTimeout(() => {
           if (pending.delete(id)) reject(new Error(`nexo:timeout:${type}`));
         }, timeout);
       });
@@ -85,62 +89,74 @@ function safeJson(text) {
   }
 }
 
-function bodyToText(body) {
-  if (typeof body === 'string') return body;
-  if (body instanceof URLSearchParams) return null;
-  if (body instanceof FormData) return null;
-  return null;
-}
-
-function shouldMediate(url) {
+function shouldMediate(url, method) {
   if (!state.enabled) return false;
   if (state.settings.sites?.[site.id]?.enabled === false) return false;
-  return isChatRequest(site, url);
+  return isChatRequest(site, url, method);
+}
+
+function urlOf(input) {
+  if (typeof input === 'string') return input;
+  if (typeof URL !== 'undefined' && input instanceof URL) return input.href;
+  return input?.url || String(input?.href || '');
+}
+
+function methodOf(input, init) {
+  return String(init?.method || input?.method || 'GET');
 }
 
 /* ------------------------------------------------------------------ */
 /* 1 + 2. petición saliente                                            */
 /* ------------------------------------------------------------------ */
 
-async function mediateRequest(input, init) {
-  const url = typeof input === 'string' ? input : input?.url || String(input?.href || '');
-  if (!shouldMediate(url)) return init;
+/**
+ * Decide si la petición se media y, si es así, devuelve los argumentos con los
+ * que hay que enviarla. Devuelve `null` cuando NO hay nada que cambiar.
+ *
+ * Esta función sólo PREPARA: nunca envía. Así, un fallo del motor (tiempo de
+ * espera, error de IPC, esquema desconocido) se resuelve enviando la petición
+ * original, y un fallo de la RED no puede provocar un segundo envío del mensaje.
+ */
+async function planRequest(input, init) {
+  const url = urlOf(input);
+  if (!shouldMediate(url, methodOf(input, init))) return null;
 
-  const raw = bodyToText(init?.body);
-  const parsed = safeJson(raw);
-  if (!parsed) return init;
+  // El cuerpo viaja como string en `init`, o dentro de un objeto `Request`.
+  let text = typeof init?.body === 'string' ? init.body : null;
+  const desdeRequest =
+    text === null && init?.body === undefined && typeof Request !== 'undefined' && input instanceof Request;
+  if (desdeRequest) text = await input.clone().text();
 
-  try {
-    const located = locateUserText(parsed, site);
-    if (!located || !located.value) return init;
+  const parsed = safeJson(text);
+  if (!parsed) return null;
 
-    const report = await bridge.request('prepare', {
-      prompt: located.value,
-      url,
-      site: site.id,
-    });
+  const located = locateUserText(parsed, site);
+  if (!located || !located.value) return null;
 
-    if (!report?.text || report.text === located.value) return init;
+  const report = await bridge.request('prepare', { prompt: located.value, url, site: site.id });
+  if (!report?.text || report.text === located.value) return null;
 
-    patchUserText(parsed, site, report.text);
-    return { ...init, body: JSON.stringify(parsed) };
-  } catch (error) {
-    // Nunca se rompe la petición del usuario por un fallo del motor.
-    bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
-    return init;
-  }
+  if (!patchUserText(parsed, site, report.text)) return null;
+  const body = JSON.stringify(parsed);
+  return desdeRequest ? { input: new Request(input, { body }), init } : { input, init: { ...init, body } };
 }
 
 /* ------------------------------------------------------------------ */
 /* 3. respuesta entrante (streaming)                                   */
 /* ------------------------------------------------------------------ */
 
+// Estados sin cuerpo: `new Response(stream, { status: 204 })` lanza TypeError y
+// la petición se rompería para la página.
+const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
+
 function wrapResponse(response) {
   if (!response || !response.body || !looksLikeStream(response.headers)) return response;
+  if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
   const filtered = response.body.pipeThrough(
     createStreamFilter({
       settings: state.settings,
+      adapter: site.streamAdapter || null,
       deltaPaths: site.deltaPaths,
       language: state.language,
       host: CONFIG.host,
@@ -166,11 +182,21 @@ function wrapResponse(response) {
   const headers = new Headers(response.headers);
   headers.delete('content-length');
 
-  return new Response(filtered, {
+  const wrapped = new Response(filtered, {
     status: response.status,
     statusText: response.statusText,
     headers,
   });
+  // Una `Response` construida a mano pierde `url` y `redirected`, que algunos
+  // clientes leen (por ejemplo para resolver rutas relativas del stream).
+  for (const key of ['url', 'redirected']) {
+    try {
+      Object.defineProperty(wrapped, key, { value: response[key] });
+    } catch {
+      // Propiedad no redefinible en esta versión: se ignora.
+    }
+  }
+  return wrapped;
 }
 
 /* ------------------------------------------------------------------ */
@@ -182,21 +208,33 @@ if (!window.__NEXO_HOOKED__) {
   const nativeFetch = window.fetch.bind(window);
 
   window.fetch = async function nexoFetch(input, init) {
-    const parsed = safeJson(bodyToText(init?.body));
-    if (!parsed || !shouldMediate(typeof input === 'string' ? input : input?.url || '')) {
-      return nativeFetch(input, init);
-    }
-
-    state.active += 1;
+    // 1) Preparar: no envía nada. Cualquier fallo → petición original.
+    let plan = null;
     try {
-      const mediatedInit = await mediateRequest(input, init);
-      const response = await nativeFetch(input, mediatedInit);
-      return wrapResponse(response);
+      plan = await planRequest(input, init);
     } catch (error) {
-      bridge.event('error', { stage: 'fetch', message: String(error?.message || error) });
-      return nativeFetch(input, init);
+      bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
+    }
+    if (!plan) return nativeFetch(input, init);
+
+    // 2) Enviar, UNA sola vez. Un error de red o un AbortError (el usuario pulsó
+    //    «Detener») se propaga a la página, que ya sabe qué hacer: reenviar desde
+    //    acá duplicaría el mensaje en el servidor.
+    state.active += 1;
+    let response;
+    try {
+      response = await nativeFetch(plan.input, plan.init);
     } finally {
       state.active -= 1;
+    }
+
+    // 3) Envolver la respuesta. Si el filtro fallara, se entrega la original sin
+    //    reenviar nada (el cuerpo todavía no se consumió).
+    try {
+      return wrapResponse(response);
+    } catch (error) {
+      bridge.event('error', { stage: 'stream', message: String(error?.message || error) });
+      return response;
     }
   };
 }

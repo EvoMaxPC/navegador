@@ -13,8 +13,57 @@ const { join } = require('node:path');
 const INJECT_PATH = join(__dirname, '..', '..', 'build', 'inject.js');
 
 let injected = false;
+let injectSource = '';
 
-async function boot() {
+/**
+ * Código de la capa de inyección, leído una vez por proceso de renderizado.
+ * @returns {string}
+ */
+function readInjectSource() {
+  if (injectSource) return injectSource;
+  try {
+    injectSource = readFileSync(INJECT_PATH, 'utf8');
+  } catch (error) {
+    console.warn('[nexo] falta build/inject.js — ejecutá «npm run build:inject»');
+    injectSource = '';
+  }
+  return injectSource;
+}
+
+/**
+ * Configuración del motor para este sitio. Se pide de forma SÍNCRONA: el
+ * enganche de `fetch` tiene que estar instalado antes de que corra el primer
+ * script de la página. Con una espera asíncrona (o esperando a
+ * `DOMContentLoaded`) la aplicación del sitio ya habría guardado su propia
+ * referencia a `window.fetch` y la mediación nunca vería los mensajes.
+ */
+function readConfigSync(host) {
+  try {
+    const config = ipcRenderer.sendSync('nexo:config-sync', { host, href: location.href });
+    if (config && typeof config === 'object') return config;
+  } catch (error) {
+    console.warn('[nexo] configuración síncrona no disponible:', error.message);
+  }
+  return null;
+}
+
+/** Inyecta la capa en el mundo principal de la página. */
+function inject(config) {
+  const source = readInjectSource();
+  if (!source) return;
+  const prelude = `window.__NEXO_CONFIG__ = ${JSON.stringify(config)};`;
+  try {
+    // Se lanza sin `await`: nada tiene que interponerse antes de los scripts del
+    // sitio, y el error —si lo hubiera— se informa sin romper la página.
+    webFrame.executeJavaScript(prelude + '\n;' + source, false).catch((error) => {
+      console.warn('[nexo] fallo al inyectar:', error.message);
+    });
+  } catch (error) {
+    console.warn('[nexo] fallo al inyectar:', error.message);
+  }
+}
+
+function boot() {
   if (injected) return;
   injected = true;
 
@@ -22,32 +71,20 @@ async function boot() {
   if (!/^https?:$/.test(location.protocol)) return;
 
   const host = location.hostname;
-
-  let config;
-  try {
-    config = await ipcRenderer.invoke('nexo:config', { host, href: location.href });
-  } catch (error) {
-    console.warn('[nexo] sin configuración:', error.message);
+  const config = readConfigSync(host);
+  if (config) {
+    if (config.enabled !== false) inject(config);
     return;
   }
 
-  if (!config || config.enabled === false) return;
-
-  let source = '';
-  try {
-    source = readFileSync(INJECT_PATH, 'utf8');
-  } catch (error) {
-    console.warn('[nexo] falta build/inject.js — ejecutá «npm run build:inject»');
-    return;
-  }
-
-  const prelude = `window.__NEXO_CONFIG__ = ${JSON.stringify(config)};`;
-  try {
-    // El mundo aislado puede ejecutar código en el mundo principal de la página.
-    await webFrame.executeJavaScript(prelude + '\n;' + source, false);
-  } catch (error) {
-    console.warn('[nexo] fallo al inyectar:', error.message);
-  }
+  // Sin canal síncrono queda el camino asíncrono. Llega tarde para algunos
+  // sitios, pero es mejor que no mediar nada.
+  ipcRenderer
+    .invoke('nexo:config', { host, href: location.href })
+    .then((asyncConfig) => {
+      if (asyncConfig && asyncConfig.enabled !== false) inject(asyncConfig);
+    })
+    .catch((error) => console.warn('[nexo] sin configuración:', error.message));
 }
 
 /* ------------------------------------------------------------------ */
@@ -97,8 +134,5 @@ ipcRenderer.on('nexo:settings', (_event, payload) => {
   window.postMessage({ __nexo: 'action', type: 'settings', payload }, '*');
 });
 
-if (document.readyState === 'loading') {
-  window.addEventListener('DOMContentLoaded', boot, { once: true });
-} else {
-  boot();
-}
+// Inmediato: el preload corre antes que cualquier script de la página.
+boot();
