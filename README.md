@@ -18,9 +18,9 @@ los dos sentidos**:
 Todo el análisis es **local y determinista**: sin modelos auxiliares ni nube. El conteo GPT usa el tokenizador BPE local
 `gpt-tokenizer`, incluido en la distribución.
 
-**Corrección de tokens de salida 0.1.15:** soporte de SSE multiplexado y NDJSON
-registrados de ChatGPT, recuperación de BPE y actualización automática del contador
-al terminar la respuesta, sin esperar el cierre de la conexión HTTP.
+**Corrección de tokens de salida 0.1.19:** captura SSE/NDJSON según el MIME real
+(incluido `/conversation/updates`), lectura del texto DPU tras el render y captura
+parcial al detener la respuesta. BPE en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
 **Contadores 0.1.18:** turnos cancelados, fallidos y realizados,
@@ -80,7 +80,7 @@ entregó. El modelo está simulado; la mediación es la de verdad — es el mism
 código que corre dentro del navegador.
 
 ```bash
-npm test                # 529 pruebas, con dependencias instaladas
+npm test                # 540 pruebas, con dependencias instaladas
 npm run bench           # rendimiento medido: tabla antes/después
 npm run verify          # pruebas + bundle + checklist manual
 npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
@@ -276,7 +276,7 @@ src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
 scripts/         verificación, icono, empaquetado para Windows y prueba de humo
-test/            529 pruebas con node:test (incluye un Electron falso para el arranque)
+test/            540 pruebas con node:test (incluye un Electron falso para el arranque)
 docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
 .github/         flujo que compila la aplicación de Windows
 ```

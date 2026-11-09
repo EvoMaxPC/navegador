@@ -89,3 +89,45 @@ export function extractChatGptDpuAnswer(bodyText, prompt = '') {
 
   return region.slice(markerIndex + marker.length).trim();
 }
+
+
+/** Lee sólo el mensaje assistant posterior al último usuario coincidente.
+ * Los atributos de rol no dependen del idioma de las etiquetas de accesibilidad.
+ * La lectura textual antigua queda como respaldo para layouts sin esos nodos.
+ */
+export function readChatGptDpuAnswer(document, prompt = '') {
+  const normalize = (text) => String(text || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+  const textOf = (node) => String(node?.innerText ?? node?.textContent ?? '').trim();
+  const nodes = Array.from(document.querySelectorAll?.('[data-message-author-role]') || []);
+  const userIndex = nodes.findLastIndex((node) => node.getAttribute?.('data-message-author-role') === 'user');
+  if (userIndex >= 0) {
+    const user = nodes[userIndex];
+    const empty = { text: '', user, assistant: null, body: '' };
+    if (prompt && normalize(textOf(user)) !== normalize(prompt)) return empty;
+    const assistant = nodes.slice(userIndex + 1).findLast((node) => node.getAttribute?.('data-message-author-role') === 'assistant');
+    if (!assistant) return empty;
+    const content = assistant.querySelector?.('.markdown') || assistant;
+    return { text: textOf(content), user, assistant, body: '' };
+  }
+  const body = String(document.body?.innerText || '');
+  return { text: extractChatGptDpuAnswer(body, prompt), user: null, assistant: null, body };
+}
+
+/** Espera acotada a la aplicación del HTML; no instala observadores permanentes. */
+export async function waitForChatGptDpuAnswer(document, prompt, before, {
+  timeout = 5000, interval = 50, stableFor = 100, isCurrent = () => true,
+} = {}) {
+  const start = Date.now();
+  let previous = '', stableSince = start;
+  while (Date.now() - start < timeout && isCurrent()) {
+    const snapshot = readChatGptDpuAnswer(document, prompt);
+    const fresh = !before?.text || snapshot.text !== before.text || snapshot.body !== before.body ||
+      snapshot.user !== before.user || snapshot.assistant !== before.assistant;
+    if (snapshot.text && fresh) {
+      if (snapshot.text !== previous) { previous = snapshot.text; stableSince = Date.now(); }
+      else if (Date.now() - stableSince >= stableFor) return snapshot.text;
+    } else { previous = ''; stableSince = Date.now(); }
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+  return '';
+}

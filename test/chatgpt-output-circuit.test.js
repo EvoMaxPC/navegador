@@ -75,10 +75,10 @@ async function openTab() {
 
 // Capa de producción + preload real + IPC real del principal, sin copiar su
 // extracción/tokenización. Sólo se sustituye el transporte externo por replay.
-function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null, fetchError = null, status = 200, bodyText = '' } = {}) {
-  const listeners = [];
+function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null, fetchError = null, status = 200, bodyText = '', initialBodyText = '', roleNodes = null } = {}) {
+  const listeners = [], captures = [];
   const bytes = new TextEncoder().encode(body);
-  let offset = 0;
+  let offset = 0, transportStarted = false;
   const page = {
     location: { href: 'https://chatgpt.com/c/output-circuit', hostname: 'chatgpt.com', pathname: '/c/output-circuit', protocol: 'https:' },
     addEventListener: (name, listener) => { if (name === 'message') listeners.push(listener); },
@@ -86,6 +86,7 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     fetch: async () => {
       if (beforeResponse) await beforeResponse();
       if (fetchError) throw fetchError;
+      transportStarted = true;
       return new Response(new ReadableStream({
       async pull(controller) {
         if (offset < bytes.length) { controller.enqueue(bytes.slice(offset, offset += chunkSize)); return; }
@@ -97,7 +98,7 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     },
   };
   const domListeners = new Map();
-  const document = { body: { innerText: bodyText }, querySelector: () => null, querySelectorAll: () => [],
+  const document = { body: { get innerText() { if (!transportStarted) return initialBodyText; return typeof bodyText === 'function' ? bodyText() : bodyText; } }, querySelector: () => null, querySelectorAll: (selector) => selector === '[data-message-author-role]' && roleNodes ? roleNodes(transportStarted) : [],
     addEventListener(name, handler) { domListeners.set(name, handler); } };
   page.stop = (isTrusted = true, attributes = { 'data-testid': 'stop-button' }) => {
     // DOM mínimo: compara atributos reales del botón, sin copiar los selectores
@@ -120,7 +121,10 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
   const ipcRenderer = {
     on() {},
     sendSync: () => ({ host: 'chatgpt.com', enabled: true, settings: { receiving: { stopOnLoop: false } }, language: 'es' }),
-    invoke: async (channel, payload) => journal.ipcHandlers.get(channel)?.({ sender }, payload),
+    invoke: async (channel, payload) => {
+      if (channel === 'nexo:stream-end') captures.push(payload);
+      return journal.ipcHandlers.get(channel)?.({ sender }, payload);
+    },
     send: (channel, payload) => journal.ipcListeners.get(channel)?.({ sender }, payload),
   };
   const preload = vm.createContext({ window: page, location: page.location, console,
@@ -130,6 +134,7 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     } } : requireBridge(name),
   });
   vm.runInContext(readFileSync(new URL('../src/preload/bridge.cjs', import.meta.url), 'utf8'), preload);
+  page.captures = captures;
   return page;
 }
 
@@ -575,7 +580,7 @@ test('integración remota DPU: sin respuesta verificable en DOM queda desconocid
   const page = pageFor(view, '<template>DPU sin respuesta</template>', { mime: dpuMime });
   const response = await requestDpu(page);
   await response.text();
-  await pause(260);
+  await pause(5300);
   assert.deepEqual(outcomeDelta(before), [0, 0, 1]);
   assert.equal(stats().outputTokens, before.outputTokens, 'no inventa tokens si falta la respuesta');
   assertOutcomeUi();
@@ -611,3 +616,69 @@ for (const attributes of [
     assertOutcomeUi();
   });
 }
+
+for (const [mime, name, expected] of [
+  ['application/x-ndjson', 'logged-out-reply.ndjson', anonymous],
+  ['text/plain', 'logged-out-reply.ndjson', anonymous],
+  ['text/event-stream', 'normal-reply.sse', normal],
+]) {
+  test(`updates con ${mime}: texto grabado → BPE → contador, sin depender del DOM`, async () => {
+    const view = await openTab(), before = stats();
+    const body = fixture(name);
+    const page = pageFor(view, body, { mime });
+    const response = await page.fetch('/unauth-mweb/conversation/updates?operationId=recorded', {
+      method: 'POST', body: new URLSearchParams({ prompt: 'Test' }),
+    });
+    await response.text();
+    await pause(260);
+    assert.equal(page.captures.at(-1)?.text, expected, 'el texto grabado llega íntegro al handler real de salida');
+    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(expected), 'tokeniza el texto de esta respuesta');
+    assert.equal(stats().responses - before.responses, 1);
+    assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+  });
+}
+
+test('DPU: el render llega después de 180 ms y todavía debe aportar tokens', async () => {
+  const view = await openTab(), before = stats();
+  let dom = 'You said:\nPregunta DPU';
+  const answer = 'Esta respuesta llegó después de que cerrara el transporte.';
+  const page = pageFor(view, '<template>DPU</template>', { mime: dpuMime, bodyText: () => dom });
+  const response = await requestDpu(page);
+  await response.text();
+  await pause(350);
+  dom += `\nChatGPT said:\n${answer}`;
+  await pause(450);
+  assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
+  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
+  assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+});
+
+test('DPU: un aborto no debe descartar el texto parcial visible de esta respuesta', async () => {
+  const view = await openTab(), before = stats();
+  const answer = 'Texto parcial recibido antes de detener la generación';
+  const page = pageFor(view, '<template>partial</template>', { mime: dpuMime, abort: true,
+    bodyText: `You said:\nPregunta DPU\nChatGPT said:\n${answer}` });
+  const response = await requestDpu(page);
+  await response.text().catch(() => {});
+  await pause(300);
+  assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
+  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
+  assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+});
+
+test('DPU sin etiquetas traducidas: nodos user/assistant → BPE → tokens de salida visibles', async () => {
+  const view = await openTab(), before = stats();
+  const answer = 'Respuesta visible de GPT, sin etiquetas de accesibilidad en el body.';
+  const user = { innerText: 'Pregunta DPU', getAttribute: () => 'user' };
+  const assistant = { innerText: answer + '\nCopiar', getAttribute: () => 'assistant',
+    querySelector: () => ({ innerText: answer }) };
+  const page = pageFor(view, '<template>DPU</template>', { mime: dpuMime, bodyText: 'interfaz sin ChatGPT said:',
+    roleNodes: (started) => started ? [user, assistant] : [],
+  });
+  const response = await requestDpu(page);
+  await response.text();
+  await pause(260);
+  assert.equal(page.captures.at(-1)?.text, answer, 'el texto visible se entrega al proceso principal');
+  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
+  assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+});

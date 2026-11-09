@@ -20,7 +20,7 @@
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
-import { extractChatGptDpuAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
+import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
 import { estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
@@ -482,25 +482,28 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
     reader = copy.body?.getReader?.();
     if (!reader) throw new Error('no se pudo abrir una copia del stream DPU');
 
-    let bytes = 0;
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      bytes += Number(chunk.value?.byteLength) || 0;
-      if (bytes > MAX_DPU_RESPONSE_BYTES) {
-        await reader.cancel().catch(() => {});
-        throw new Error(`respuesta DPU supera el límite de lectura (${bytes} bytes)`);
+    let bytes = 0, readError = null;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        bytes += Number(chunk.value?.byteLength) || 0;
+        if (bytes > MAX_DPU_RESPONSE_BYTES) {
+          void reader.cancel().catch(() => {});
+          throw new Error(`respuesta DPU supera el límite de lectura (${bytes} bytes)`);
+        }
       }
-    }
-    if (!bytes) throw new Error('ChatGPT devolvió un stream DPU vacío');
+    } catch (error) { readError = error; }
 
-    // El consumidor original termina de aplicar el último template al DOM.
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    const bodyText = String(document.body?.innerText || '');
-    const answer = extractChatGptDpuAnswer(bodyText, capture.promptText || '');
+    // EOF o AbortError no garantizan que Chromium ya haya aplicado los templates.
+    // En un aborto también se tokeniza el parcial visible, nunca el prompt.
+    const answer = await waitForChatGptDpuAnswer(document, capture.promptText || '', generation?.dpuBefore, {
+      isCurrent: () => !generation || state.response === generation,
+    });
     if (!answer) {
-      throw new Error(`el stream DPU terminó (${bytes} bytes), pero no se encontró la respuesta del prompt actual en el DOM (${bodyText.length} caracteres visibles)`);
+      throw new Error(`no se pudo confirmar texto DPU del prompt actual (${bytes} bytes; ${readError?.message || 'sin respuesta nueva tras esperar el render'})`);
     }
+    if (readError) bridge.event('error', { stage: 'dpu-interrupted', message: String(readError?.message || readError).slice(0, 300) });
 
     const clipped = answer.length > MAX_CAPTURE_CHARS;
     const { promptText: _promptText, ...metadata } = capture;
@@ -509,12 +512,12 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
       site: 'chatgpt',
       host: CONFIG.host || location.hostname,
       source: 'dpu',
-      outcome: generation?.stoppedByUser ? 'cancelled' : 'completed',
+      outcome: generation?.stoppedByUser ? 'cancelled' : readError ? 'unknown' : 'completed',
       stoppedByUser: Boolean(generation?.stoppedByUser),
-      finished: true,
-      interrupted: false,
+      finished: !readError,
+      interrupted: Boolean(readError),
       stopped: false,
-      truncated: false,
+      truncated: Boolean(readError),
       deliveredChars: answer.length,
       droppedChars: 0,
       chars: answer.length,
@@ -671,6 +674,7 @@ if (!window.__NEXO_HOOKED__) {
     const generation = prepared.chat ? { messageId, stoppedByUser: false } : null;
     if (generation) {
       state.response = generation;
+      if (prepared.dpu) generation.dpuBefore = readChatGptDpuAnswer(document, prepared.promptText || '');
       if (prepared.send === false) bridge.event('turn-result', { phase: 'started', messageId, site: site.id,
         host: CONFIG.host || location.hostname, model: prepared.model || '' });
     }
@@ -716,7 +720,10 @@ if (!window.__NEXO_HOOKED__) {
       url,
     };
     const mime = String(response.headers?.get?.('content-type') || '');
-    if (prepared.dpu || isChatGptDpuMime(mime)) {
+    // La ruta updates también transporta SSE/NDJSON: decide el MIME recibido,
+    // no la hipótesis usada para leer el formulario de envío.
+    if (isChatGptDpuMime(mime)) {
+      if (generation && !generation.dpuBefore) generation.dpuBefore = readChatGptDpuAnswer(document, prepared.promptText || '');
       // No se reemplaza el Response: Chromium y ChatGPT deben aplicar los DPU
       // originales al DOM sin que Nexo altere ni consuma el flujo visible.
       void captureChatGptDpuResponse(response, { ...capture, promptText: prepared.promptText || '' }, generation);

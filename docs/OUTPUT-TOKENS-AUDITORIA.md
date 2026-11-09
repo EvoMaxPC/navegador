@@ -122,3 +122,60 @@ simulados. `npm run verify`: **483 pruebas, 482 aprobadas, 1 omitida, 0 fallos**
 bundle **40.1 kB / 14.6 kB gzip**. Se mantiene pendiente el ensayo real en Windows
 descrito en la sección 6; no se puede prometer cobertura absoluta de un protocolo
 externo sin capturar la sesión que falla.
+
+## 9. Corrección 0.1.19: pérdida de texto antes del tokenizador
+
+Sobre `7c658c9` se reprodujeron cinco fallos adicionales, antes de editar
+producción, en el circuito de inyección/preload/IPC/Engine/shell:
+
+1. `/unauth-mweb/conversation/updates` se marcaba como DPU por la ruta y esa marca
+   forzaba la captura HTML aunque el MIME fuese NDJSON, text/plain con NDJSON o
+   SSE. Las grabaciones externas originales, enviadas por su endpoint updates,
+   aportaban **0 en vez de 18/18/12 tokens** con el tokenizador actual.
+2. El lector DPU sólo consultaba el DOM una vez a los 180 ms del cierre. Una
+   respuesta aplicada después de 350 ms no se capturaba: **0 en vez de 11**.
+3. Un error/AbortError al leer la copia DPU saltaba directamente al catch, sin
+   recuperar el texto parcial ya visible: **0 en vez de 8** en la regresión.
+
+No se atribuyen estos fallos a una captura propia de la sesión del usuario: son
+reproducciones del código con grabaciones y transportes/DOM controlados.
+
+### Cambios
+
+- `src/inject/index.js`: el **MIME recibido** decide DPU frente a SSE/NDJSON; la
+  ruta sólo ayuda a leer el formulario. El HTML verdadero conserva su Response
+  original. Se espera de forma acotada a su aplicación al DOM y se conserva el
+  texto parcial verificable después de un aborto. El estado de cancelación y los
+  otros contadores no se modifican.
+- `src/core/chatgptDpu.js`: lectura por nodos `data-message-author-role`, del
+  assistant posterior al último user que coincide con el prompt. El contenido
+  `.markdown` excluye los controles del mensaje. El lector textual anterior se
+  mantiene como respaldo para layouts sin esos roles.
+- La captura DPU se compara con una instantánea **anterior a la petición** para
+  no tokenizar la respuesta anterior, incluso con prompts repetidos. La espera
+  tiene límite de 5 segundos, muestreo de 50 ms y estabilidad de texto de 100 ms;
+  no se instala un MutationObserver permanente ni se afirma que la estabilidad
+  visual sea una confirmación de protocolo. Sólo se usa para el DPU verdadero,
+  cuyo transporte HTML ya terminó o se interrumpió. Una generación nueva invalida
+  la captura antigua. Si no se obtiene texto de esa respuesta, se mantiene el
+  diagnóstico `dpu-capture`; nunca se inventan tokens.
+- Se mantienen sin cambios el BPE por modelo en main, su fallback diagnosticado,
+  las sumas de tokens y la actualización de shell. El texto pasa por el canal
+  `nexo:stream-end` existente; el metadato estimado de la página **no decide** el
+  valor que se muestra.
+- `test/chatgpt-output-circuit.test.js`: las pruebas nuevas comprueban tanto el
+  **texto exacto recibido por el handler real** como su BPE y el campo de salida.
+  Los streams SSE/NDJSON son las grabaciones externas ya documentadas; los
+  escenarios de DOM/temporización/DPU son sintéticos y se identifican como tales.
+- `test/chatgpt-dpu.test.js`: roles sin etiquetas traducidas, prompt repetido,
+  bloqueo de respuesta vieja/ajena y espera de una respuesta nueva idéntica.
+
+`npm run verify`: **540 pruebas, 539 aprobadas, 1 omitida, 0 fallos**. Bundle
+**46.7 kB / 16.7 kB gzip**, 10 módulos; no se rebajaron límites de rendimiento.
+
+Sigue faltando comprobar una respuesta propia en ChatGPT dentro de NEXO real:
+no hay acceso a ChatGPT ni navegador gráfico ejecutable en este sandbox. Si la
+versión 0.1.19 aún no captura en la máquina del usuario, la evidencia necesaria
+es el diagnóstico de la misma respuesta (`dpu-capture`, `response-mime`,
+`response-formato`, `incoming`) y su MIME/ruta sanitizados. Un ZIP compilado o
+estas pruebas no bastan para declarar validada esa sesión en vivo.
