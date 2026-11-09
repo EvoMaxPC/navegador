@@ -385,9 +385,9 @@ function assertOutcomeUi() {
   for (const key of displayedOutcomes) assert.equal(elements[key].textContent, stats()[key].toLocaleString('es-AR'), key);
 }
 test('el panel muestra los tres contadores actuales y elimina el contador duplicado', () => {
-  assert.match(shellHtml, /id="statTurnsCancelled">0<\\/b><span>turnos cancelados<\\/span>/);
-  assert.match(shellHtml, /id="statTurnsFailed">0<\\/b><span>turnos fallidos<\\/span>/);
-  assert.match(shellHtml, /id="statTurnsPerformed">0<\\/b><span>turnos completos<\\/span>/);
+  assert.match(shellHtml, /id="statTurnsCancelled">0<\/b><span>turnos cancelados<\/span>/);
+  assert.match(shellHtml, /id="statTurnsFailed">0<\/b><span>turnos fallidos<\/span>/);
+  assert.match(shellHtml, /id="statTurnsPerformed">0<\/b><span>turnos completos<\/span>/);
   assert.doesNotMatch(shellHtml, /id="statTurnsCompleted"/);
 });
 function requestReply(page) {
