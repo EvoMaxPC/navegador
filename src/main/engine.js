@@ -332,9 +332,15 @@ export class Engine {
    */
   onNetworkResponse(webContentsId, payload = {}) {
     const now = Date.now();
-    const pendiente = this.#pendingTurn(webContentsId, now);
-    if (!pendiente) return { ok: true, skipped: 'sin-turno' };
-    const key = `${webContentsId}|net-resp|${pendiente.entry.messageId || pendiente.entry.at}`;
+    const pendiente = payload.messageId
+      ? [...this.awaiting.entries()]
+          .map(([id, entry]) => ({ id, entry }))
+          .find((item) => item.entry.messageId === String(payload.messageId)) || null
+      : this.#pendingTurn(webContentsId, now);
+    if (!pendiente || now - pendiente.entry.at > VENTANA_RESPUESTA_MS) {
+      return { ok: true, skipped: 'sin-turno' };
+    }
+    const key = `${pendiente.id}|net-resp|${pendiente.entry.messageId || pendiente.entry.at}`;
     if (this.seenResponses.has(key)) return { ok: true, duplicate: true };
     this.seenResponses.set(key, now);
 
