@@ -418,7 +418,7 @@ export class Engine {
       return { duplicate: true, sameText: false, tokens: 0, joined: true };
     }
 
-    const tokens = countGptTokens(text, model || esperando?.entry?.model || '');
+    const tokens = countTokensForProvider(text, model || esperando?.entry?.model || '', provider || esperando?.entry?.host || '');
     vistos.push({ at: now, text, tokens, messageId: messageId || null });
     this.recentTexts.set(webContentsId, vistos.slice(-6));
     return { duplicate: false, sameText: false, tokens };
