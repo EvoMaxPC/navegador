@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const read = (path) => readFileSync(join(ROOT, path), 'utf8');
+// Se normalizan los saltos de línea: en Windows el checkout usa CRLF y las
+// expresiones de este archivo razonan sobre líneas.
+const read = (path) => readFileSync(join(ROOT, path), 'utf8').replace(/\r\n?/g, '\n');
 
 const html = read('src/ui/shell/index.html');
 const shellApp = read('src/ui/shell/app.js');
