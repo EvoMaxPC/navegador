@@ -324,3 +324,103 @@ test('con la capa activa, CDP no vuelve a leer el mismo stream', async () => {
   const despues = await stats();
   assert.equal(despues.responses, antes.responses, 'el stream lo cuenta la página, no CDP');
 });
+
+/* ------------------------------------------------------------------ */
+/* auditoría: sólo la conversación, asociada y avisada                 */
+/* ------------------------------------------------------------------ */
+
+test('un JSON que no es del endpoint de conversación no cuenta como respuesta', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-audit-1');
+  const antes = await stats();
+
+  // Mismo dominio, mismo POST, JSON con texto: no es la respuesta del modelo.
+  await peticion(view, {
+    requestId: 'req-cuentas',
+    url: 'https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27',
+    postData: '{"accounts":{}}',
+    body: { message: { author: { role: 'assistant' }, content: { parts: ['Esto no es una respuesta del modelo.'] } } },
+  });
+
+  const despues = await stats();
+  assert.equal(despues.responses, antes.responses, 'no se cuenta');
+  assert.equal(despues.turns, antes.turns, 'ni cierra un turno');
+  assert.equal(despues.outputTokens, antes.outputTokens, 'ni suma tokens');
+});
+
+test('la respuesta del endpoint de conversación se asocia a su mensaje y cierra el turno', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-audit-2');
+  const antes = await stats();
+
+  await peticion(view, {
+    requestId: 'req-asociada',
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    postData: JSON.stringify({
+      action: 'next',
+      messages: [{ author: { role: 'user' }, content: { content_type: 'text', parts: ['¿cuánto es 2+2?'] } }],
+    }),
+  });
+
+  await peticion(view, {
+    requestId: 'req-asociada',
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    postData: JSON.stringify({
+      action: 'next',
+      messages: [{ author: { role: 'user' }, content: { content_type: 'text', parts: ['¿cuánto es 2+2?'] } }],
+    }),
+    body: { message: { author: { role: 'assistant' }, content: { parts: ['Son 4.'] } } },
+  });
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages + 1, 'un mensaje');
+  assert.equal(despues.responses, antes.responses + 1, 'una respuesta');
+  assert.equal(despues.turns, antes.turns + 1, 'un turno, asociado por identificador');
+
+  const log = await callIpc('nexo:log');
+  const entrada = log.find((item) => item.code === 'incoming-cdp');
+  assert.ok(entrada, 'la respuesta observada queda en el registro');
+  assert.equal(entrada.meta.paired, true, 'y dice que quedó asociada a su mensaje');
+  assert.ok(entrada.meta.messageId, 'con el identificador del mensaje');
+});
+
+test('una respuesta observada actualiza los contadores de la interfaz al instante', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-audit-3');
+  const win = journal.windows[0];
+  const antesAvisos = win.webContents.sent.filter((m) => m.channel === 'nexo:stats-changed').length;
+
+  await peticion(view, {
+    requestId: 'req-aviso',
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    postData: JSON.stringify({
+      action: 'next',
+      messages: [{ author: { role: 'user' }, content: { content_type: 'text', parts: ['hola otra vez'] } }],
+    }),
+  });
+
+  const avisos = win.webContents.sent.filter((m) => m.channel === 'nexo:stats-changed');
+  assert.ok(avisos.length > antesAvisos, 'el panel recibe el aviso sin esperar a nada más');
+  const ultimo = avisos.at(-1).payload;
+  assert.ok(ultimo.messages >= 1, 'y el aviso lleva los contadores');
+});
+
+test('una respuesta marcada como dudosa se informa como heurística, no como corte confirmado', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-audit-4');
+  await callIpc(
+    'nexo:stream-end',
+    {
+      host: 'chatgpt.com',
+      site: 'chatgpt',
+      chars: 30,
+      tokens: 8,
+      text: 'La respuesta termina en un guion',
+      finished: true,
+      truncated: true,
+    },
+    view.id,
+  );
+
+  const log = await callIpc('nexo:log');
+  const entrada = log.find((item) => item.code === 'incoming');
+  assert.ok(entrada, 'queda en el registro');
+  assert.equal(entrada.title, 'Respuesta recibida en chatgpt.com', 'no se afirma que la interrumpieron');
+  assert.match(entrada.detail, /heurística/i, 'se dice que el cierre es una heurística');
+});

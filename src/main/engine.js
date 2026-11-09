@@ -413,6 +413,21 @@ export class Engine {
   }
 
   /**
+   * Identificador del mensaje que está esperando respuesta en esa pestaña.
+   *
+   * Lo usa CDP para atar una respuesta a su mensaje sin adivinar: si el envío
+   * todavía no tiene respuesta, ese es el turno que hay que cerrar. Pasada la
+   * ventana, no se devuelve nada: un mensaje viejo sin respuesta no se cierra con
+   * una respuesta ajena.
+   */
+  currentSendId(webContentsId, withinMs = VENTANA_RESPUESTA_MS) {
+    const awaiting = this.awaiting.get(webContentsId);
+    if (!awaiting) return null;
+    if (Date.now() - awaiting.at > withinMs) return null;
+    return awaiting.messageId || null;
+  }
+
+  /**
    * ¿La capa de la página sigue viva en esa pestaña?
    *
    * Si lo está, el stream lo captura la página y CDP no debe leerlo (sería
@@ -440,6 +455,7 @@ export class Engine {
   onCdpCapture(webContentsId, capture = {}) {
     const text = String(capture.text || '');
     if (!text.trim()) return { ok: false, skipped: 'empty' };
+    const now = Date.now();
 
     const host = capture.host || safeHost(capture.url) || 'desconocido';
     if (!this.isEnabledFor(host)) {
@@ -471,10 +487,21 @@ export class Engine {
     }
     this.counters.responses += 1;
     this.counters.outputTokens += merge.tokens;
+
+    // El turno se cierra con **su** mensaje. Si la captura trae identificador, se
+    // exige que coincida; si no lo trae (un socket), se acepta el pendiente de la
+    // pestaña sólo dentro de la ventana de respuesta.
+    const awaitId = capture.messageId ? String(capture.messageId) : null;
     const awaiting = this.awaiting.get(webContentsId);
+    let paired = false;
     if (awaiting) {
-      this.counters.turns += 1;
-      this.awaiting.delete(webContentsId);
+      const vigente = now - awaiting.at <= VENTANA_RESPUESTA_MS;
+      const coincide = awaitId ? awaiting.messageId === awaitId : true;
+      if (vigente && coincide) {
+        this.counters.turns += 1;
+        this.awaiting.delete(webContentsId);
+        paired = true;
+      }
     }
 
     const guard = this.#guard(webContentsId, host);
@@ -564,6 +591,10 @@ export class Engine {
       loop: verdict.stopped,
       truncated: verdict.truncated,
       chars: text.length,
+      // Cómo quedó atada la respuesta: por identificador (preciso) o por
+      // pestaña, y si cerró un turno. Se usa para el registro y las pruebas.
+      paired,
+      messageId: awaitId,
     };
   }
 

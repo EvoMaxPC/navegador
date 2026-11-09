@@ -217,10 +217,25 @@ La salida (respuesta) se captura por:
   del sitio y —cuando la capa no está viva en esa pestaña— el cuerpo completo del
   SSE, que el depurador entrega al terminar.
 
-Un `GET` del historial de la conversación devuelve JSON con todos los mensajes
-anteriores: **no es una respuesta nueva** y no se cuenta. Una respuesta que llega
-en pedazos se acumula y se cuenta al cerrarse; mientras crece no suma respuestas,
-sólo corrige los tokens de salida.
+Sólo la respuesta a una petición **de conversación** puede ser una respuesta del
+modelo: CDP exige que la URL sea la del endpoint de chat del sitio
+(`isMediable`, la misma función que decide la mediación). Un `GET` del historial,
+un JSON de cuentas o de listas no se cuentan, aunque vengan del mismo dominio y
+sean un POST.
+
+**Asociación.** El envío guarda su `messageId` en la petición observada. La
+respuesta a esa petición viaja con el mismo identificador y cierra **ese** turno;
+un socket, que no tiene URL de petición, se asocia al mensaje que está esperando
+respuesta en esa pestaña, y sólo dentro de la ventana de respuesta. Un mensaje
+viejo sin respuesta no se cierra con una respuesta ajena.
+
+Una respuesta que llega en pedazos se acumula y se cuenta al cerrarse; mientras
+crece no suma respuestas, sólo corrige los tokens de salida.
+
+**Cierre dudoso ≠ corte confirmado.** Que una respuesta parezca incompleta
+(`detectTruncation`) es una heurística de texto; el registro lo dice así y no
+afirma que la red la haya cortado. Un fallo de red (`net::ERR_FAILED`) se anota
+como fallo de la petición, nunca como «respuesta recibida».
 
 Reglas que sostienen la cuenta:
 

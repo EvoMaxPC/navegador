@@ -491,11 +491,11 @@ function registerIpc() {
         kind: 'receiving',
         code: 'incoming',
         severity: cortada ? 'warn' : 'info',
-        title: `Respuesta ${cortada ? 'interrumpida' : 'recibida'} en ${host}`,
+        title: `Respuesta ${payload?.stopped ? 'interrumpida' : 'recibida'} en ${host}`,
         detail: payload?.stopped
           ? `Se cortó un bucle antes de mostrarlo (${payload?.droppedChars || 0} caracteres descartados).`
           : payload?.truncated
-            ? `Terminó a mitad de frase (${chars} caracteres).`
+            ? `No parece terminada (${chars} caracteres): es una heurística de cierre, no un corte confirmado por la red.`
             : `${chars} caracteres llegaron a la pantalla.`,
         meta: {
           host,
@@ -1100,12 +1100,16 @@ app.whenReady().then(async () => {
             code: 'incoming-cdp',
             severity: 'info',
             title: `Respuesta recibida en ${host}`,
-            detail: `${chars} caracteres leídos por ${capture.source === 'websocket' ? 'el socket' : 'el cuerpo JSON'}.`,
+            detail:
+              `${chars} caracteres leídos por ${capture.source === 'websocket' ? 'el socket' : capture.source === 'sse' ? 'el stream' : 'el cuerpo JSON'}` +
+              `${event.paired ? ', asociados a su mensaje' : ''}.`,
             meta: {
               host,
               site: capture.site || null,
               url: capture.url || '',
-              source: capture.source === 'websocket' ? 'cdp-ws' : 'cdp-json',
+              source: capture.source === 'websocket' ? 'cdp-ws' : capture.source === 'sse' ? 'cdp-sse' : 'cdp-json',
+              messageId: event.messageId || null,
+              paired: Boolean(event.paired),
               chars,
               tokens: estimateTokens(String(capture.text || '')),
               conversationId: capture.conversationId || null,

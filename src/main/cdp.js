@@ -30,7 +30,7 @@ import {
   promptOf,
   terminalOf,
 } from '../core/cdp.js';
-import { detectSite, locateUserText } from '../core/sites.js';
+import { detectSite, isMediable, locateUserText } from '../core/sites.js';
 import { estimateTokens, fingerprint } from '../core/text.js';
 
 /** Versión del protocolo que expone Electron/Chromium. */
@@ -323,15 +323,23 @@ export class CdpObserver {
     const host = hostOf(url);
     if (!isAiHost(host)) return;
     const method = String(request.method || 'GET').toUpperCase();
+    const site = detectSite(host);
     const entry = {
       url,
       host,
-      site: detectSite(host).id,
+      site: site.id,
       type,
       method,
       post: method === 'POST',
+      /**
+       * ¿Es la petición de conversación del sitio? No alcanza con que sea un
+       * POST al dominio: el resto de las peticiones del sitio devuelven JSON
+       * de cuentas, listas y metadatos, que no son respuestas del modelo.
+       */
+      chat: isMediable(site, url, method),
       send: false,
       prompt: null,
+      messageId: null,
     };
     state.requests.set(params.requestId, entry);
     if (state.requests.size > 200) {
@@ -341,7 +349,7 @@ export class CdpObserver {
 
     // El cuerpo de la petición trae el mensaje del usuario. Leerlo acá es lo que
     // hace que la entrada se cuente aunque la capa de la página no esté activa.
-    if (entry.post && this.contentAllowed(host)) {
+    if (entry.post && entry.chat && this.contentAllowed(host)) {
       this.#noteSend(state, params.requestId, String(request.postData || '')).catch((error) =>
         this.log(`CDP: al leer el envío: ${error?.message || error}`),
       );
@@ -389,10 +397,12 @@ export class CdpObserver {
 
     entry.send = true;
     entry.prompt = text;
+    const messageId = `cdp-${requestId}`;
+    entry.messageId = messageId;
     if (!this.engine || typeof this.engine.onUserMessage !== 'function') return;
     try {
       const counted = this.engine.onUserMessage(state.id, {
-        messageId: `cdp-${requestId}`,
+        messageId,
         source: 'cdp',
         site: site.id,
         host: entry.host,
@@ -461,6 +471,14 @@ export class CdpObserver {
     const mimeType = String(response.mimeType || '');
     const stream = isStreamMime(mimeType);
     if (!stream && !isJsonMime(mimeType)) {
+      this.stats.ignored += 1;
+      return;
+    }
+    // Sólo la respuesta a la petición de conversación es una respuesta del
+    // modelo. Un JSON de cuentas, de ajustes o de listas no lo es aunque venga
+    // del mismo dominio y sea un POST.
+    const origen = state.requests.get(requestId);
+    if (origen && !origen.chat) {
       this.stats.ignored += 1;
       return;
     }
@@ -538,6 +556,7 @@ export class CdpObserver {
         host: pending.host,
         url: pending.url,
         source: 'sse',
+        messageId: request?.messageId || null,
         conversationId: `${pending.site.id}#${state.id}#${params.requestId}`,
       });
       const prompt = request?.prompt || null;
@@ -567,6 +586,7 @@ export class CdpObserver {
       host: pending.host,
       url: pending.url,
       source: 'json',
+      messageId: request?.messageId || null,
       conversationId: `${pending.site.id}#${state.id}#${params.requestId}`,
     });
     // En el camino WebSocket el prompt llega en un frame saliente; acá se busca
@@ -590,6 +610,11 @@ export class CdpObserver {
     const capture = socket.capture.take();
     if (!capture) return;
     capture.closedBy = reason;
+    // Un socket no trae el identificador de la petición HTTP, pero sí pertenece
+    // a la pestaña: se asocia al mensaje que está esperando respuesta en ella.
+    if (!capture.messageId && typeof this.engine?.currentSendId === 'function') {
+      capture.messageId = this.engine.currentSendId(state.id) || null;
+    }
     this.#deliver(state, capture);
   }
 
@@ -605,7 +630,13 @@ export class CdpObserver {
     try {
       const result = this.engine.onCdpCapture(state.id, capture);
       if (result?.duplicate) this.stats.duplicates += 1;
-      this.onEvent(state.id, { type: 'capture', capture, duplicate: Boolean(result?.duplicate) });
+      this.onEvent(state.id, {
+        type: 'capture',
+        capture,
+        duplicate: Boolean(result?.duplicate),
+        paired: Boolean(result?.paired),
+        messageId: result?.messageId || capture?.messageId || null,
+      });
     } catch (error) {
       this.log(`CDP: al entregar al motor: ${error?.message || error}`);
     }

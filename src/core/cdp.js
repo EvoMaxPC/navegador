@@ -142,13 +142,15 @@ export class CdpCapture {
   /**
    * @param {{
    *   site?: object, host?: string, conversationId?: string, url?: string,
-   *   source?: 'websocket'|'json'
+   *   messageId?: string|null, source?: 'websocket'|'json'|'sse'
    * }} [opts]
    */
   constructor(opts = {}) {
     this.site = opts.site || detectSite(opts.host || '');
     this.host = opts.host || this.site.host || '';
     this.conversationId = opts.conversationId || '';
+    /** Mensaje del usuario al que pertenece esta respuesta, si se conoce. */
+    this.messageId = opts.messageId || null;
     this.url = opts.url || '';
     this.source = opts.source || 'websocket';
     /** Un adaptador por captura: guarda el estado de los protocolos acumulados. */
@@ -265,6 +267,7 @@ export class CdpCapture {
       frames: this.frames,
       controls: this.controls.slice(),
       conversationId: this.conversationId,
+      messageId: this.messageId,
       source: this.source,
       url: this.url,
       host: this.host,
