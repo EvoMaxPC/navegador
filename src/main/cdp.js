@@ -487,7 +487,7 @@ export class CdpObserver {
         site: site.id,
         url: entry.url,
         chars: text.length,
-        tokens: countGptTokens(text, model),
+        tokens: countTokensForProvider(text, model, entry.host),
         promptHash: fingerprint(text),
       });
     } catch (error) {
