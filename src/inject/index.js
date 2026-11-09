@@ -20,7 +20,7 @@
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
-import { extractChatGptDpuAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
+import { extractChatGptAssistantDomText, extractChatGptDpuAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
 import { estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
@@ -469,6 +469,8 @@ const MAX_DPU_RESPONSE_BYTES = 12_000_000;
 
 const DPU_DOM_CAPTURE_TIMEOUT_MS = 5_000;
 const DPU_DOM_POLL_MS = 50;
+const CHATGPT_DOM_CAPTURE_TIMEOUT_MS = 5_000;
+const CHATGPT_DOM_POLL_MS = 100;
 
 async function waitForChatGptDpuAnswer(prompt) {
   const deadline = Date.now() + DPU_DOM_CAPTURE_TIMEOUT_MS;
@@ -479,6 +481,20 @@ async function waitForChatGptDpuAnswer(prompt) {
     if (answer) return { answer, bodyText };
     if (Date.now() >= deadline) return { answer: '', bodyText };
     await new Promise((resolve) => setTimeout(resolve, DPU_DOM_POLL_MS));
+  }
+}
+
+/**
+ * Respaldo del stream autenticado: si el adaptador SSE no entregó texto,
+ * recupera la respuesta visible del DOM y la asocia al prompt actual.
+ */
+async function waitForChatGptAssistantAnswer(prompt) {
+  const deadline = Date.now() + CHATGPT_DOM_CAPTURE_TIMEOUT_MS;
+  while (true) {
+    const answer = extractChatGptAssistantDomText(document, prompt);
+    if (answer) return answer;
+    if (Date.now() >= deadline) return '';
+    await new Promise((resolve) => setTimeout(resolve, CHATGPT_DOM_POLL_MS));
   }
 }
 
@@ -550,7 +566,7 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
   }
 }
 
-function wrapResponse(response, capture = {}, generation = null) {
+function wrapResponse(response, capture = {}, generation = null, promptText = '') {
   if (!response || !response.body || !looksLikeStream(response.headers)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
@@ -572,30 +588,50 @@ function wrapResponse(response, capture = {}, generation = null) {
         bridge.event('error', { stage: `filtro:${info.stage}`, message: info.message });
       },
       onEnd: (info) => {
-        const text = String(info.text || '');
-        const recortado = text.length > MAX_CAPTURE_CHARS;
-        bridge.event('stream-end', {
-          ...capture,
-          site: site.id,
-          host: CONFIG.host,
-          outcome: generation?.stoppedByUser ? 'cancelled' : info.outcome,
-          stoppedByUser: Boolean(generation?.stoppedByUser),
-          finished: !info.interrupted,
-          interrupted: Boolean(info.interrupted),
-          model: info.model || capture.model || '',
-          stopped: info.stopped,
-          code: info.code,
-          truncated: info.truncated,
-          truncationReason: info.truncationReason,
-          deliveredChars: info.deliveredChars,
-          droppedChars: info.droppedChars,
-          chars: text.length,
-          tokens: estimateTokens(text),
-          clipped: recortado,
-          text: recortado ? text.slice(0, MAX_CAPTURE_CHARS) : text,
-          dropped: info.dropped.slice(0, 600),
+        void (async () => {
+          let text = String(info.text || '');
+          // ChatGPT autenticado: el stream puede cerrar sin exponer sus deltas
+          // al adaptador. En ese caso, recuperar el último mensaje visible y
+          // verificar que pertenezca al prompt de esta petición.
+          if (site.id === 'chatgpt' && !text.trim()) {
+            text = await waitForChatGptAssistantAnswer(promptText);
+            if (!text) {
+              bridge.event('error', {
+                stage: 'chatgpt-output-capture',
+                message: 'El stream terminó sin texto y no se encontró la respuesta actual en el DOM.',
+              });
+            }
+          }
+          const recortado = text.length > MAX_CAPTURE_CHARS;
+          bridge.event('stream-end', {
+            ...capture,
+            site: site.id,
+            host: CONFIG.host,
+            outcome: generation?.stoppedByUser ? 'cancelled' : info.outcome,
+            stoppedByUser: Boolean(generation?.stoppedByUser),
+            finished: !info.interrupted,
+            interrupted: Boolean(info.interrupted),
+            model: info.model || capture.model || '',
+            stopped: info.stopped,
+            code: info.code,
+            truncated: info.truncated,
+            truncationReason: info.truncationReason,
+            deliveredChars: text.length || info.deliveredChars,
+            droppedChars: info.droppedChars,
+            chars: text.length,
+            tokens: estimateTokens(text),
+            clipped: recortado,
+            text: recortado ? text.slice(0, MAX_CAPTURE_CHARS) : text,
+            dropped: String(info.dropped || '').slice(0, 600),
+          });
+          if (state.response === generation) state.response = null;
+        })().catch((error) => {
+          bridge.event('error', {
+            stage: 'chatgpt-output-capture',
+            message: String(error?.message || error).slice(0, 300),
+          });
+          if (state.response === generation) state.response = null;
         });
-        if (state.response === generation) state.response = null;
       },
     });
   response.body.pipeTo(filter.writable).catch((error) => {
@@ -737,7 +773,7 @@ if (!window.__NEXO_HOOKED__) {
       return response;
     }
     try {
-      return wrapResponse(response, capture, generation);
+      return wrapResponse(response, capture, generation, prepared.promptText || '');
     } catch (error) {
       bridge.event('error', { stage: 'stream', message: String(error?.message || error) });
       return response;
