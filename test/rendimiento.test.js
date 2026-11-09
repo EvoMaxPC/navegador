@@ -119,3 +119,30 @@ test('el código que se inyecta en cada página sigue siendo chico', { skip: !ex
   const ms = mediana(20, () => new Function(code));
   assert.ok(ms < 20, `compilar el bundle tardó ${ms.toFixed(2)} ms (techo 20 ms)`);
 });
+
+test('el informe de rendimiento se arma con lo que haya', async () => {
+  const { formatMarkdown, normalizarBench } = await import('../scripts/reportar-rendimiento.mjs');
+  const smoke = [
+    '── prueba de humo ──',
+    '✔ ventana',
+    'tiempos: proceso 3,1 ms · ready 214,8 ms',
+    'principal: 96,4 MB (heap 41,2 MB)',
+    'procesos: 6 · 328,7 MB',
+    'código previsto: 0',
+  ].join('\n');
+  const bench = { 'historial · búsqueda': { ms: 0.44, ops: 1 }, 'inyección · tamaño del bundle': { ms: 25.6, texto: '25,6 kB' } };
+
+  assert.equal(normalizarBench(bench).length, 2);
+  const texto = formatMarkdown({ smoke, bench, meta: { commit: 'abcdef1234', ref: 'main', fecha: '2026-11-09 09:00' } });
+  assert.match(texto, /`abcdef1`/);
+  assert.match(texto, /ready 214,8 ms/);
+  assert.match(texto, /96,4 MB/);
+  assert.match(texto, /historial · búsqueda/);
+  assert.match(texto, /25,6 kB/);
+
+  // Sin datos no rompe: deja constancia y sigue.
+  const vacio = formatMarkdown({});
+  assert.match(vacio, /no trajo medidas/);
+  assert.ok(!vacio.includes('NaN'));
+  assert.equal(normalizarBench(null).length, 0);
+});

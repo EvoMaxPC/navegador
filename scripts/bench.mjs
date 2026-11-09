@@ -19,7 +19,7 @@
  * comparar antes/después y para detectar regresiones, no como promesa absoluta.
  */
 
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -337,10 +337,10 @@ async function medirMemoria() {
   resultados.push({
     nombre: 'inyección · tamaño del bundle',
     unidad: 'kB',
-    mejor: 0,
-    mediana: 0,
+    mejor: kb,
+    mediana: kb,
     ops: 1,
-    msPorOp: 0,
+    msPorOp: kb,
     porSegundo: 0,
     mostrar: `${fmt(kb, 1)} kB`,
   });
@@ -404,9 +404,28 @@ for (const r of resultados) {
 }
 console.log('────────────────────────────────────────────────────────────────────────────────\n');
 
+// `texto` es exactamente lo que muestra la tabla: la medida derivada (µs por
+// carácter, tamaño en kB) se calcula una sola vez, acá.
+const instantanea = Object.fromEntries(
+  resultados.map((r) => [
+    r.nombre,
+    {
+      ms: Number(r.msPorOp.toFixed(6)),
+      ops: r.ops,
+      unidad: r.unidad || '',
+      texto: r.mostrar || '',
+    },
+  ]),
+);
+
+// `--json-out=archivo` deja la instantánea en un archivo sin ensuciar la
+// consola: la usa la compilación de Windows para publicar sus números.
+const guardar = process.argv.find((valor) => valor.startsWith('--json-out='));
+if (guardar) {
+  const destino = resolve(root, guardar.slice('--json-out='.length));
+  writeFileSync(destino, `${JSON.stringify(instantanea, null, 2)}\n`, 'utf8');
+  console.log(`instantánea guardada en ${destino}\n`);
+}
 if (process.argv.includes('--json')) {
-  const instantanea = Object.fromEntries(
-    resultados.map((r) => [r.nombre, { ms: Number(r.msPorOp.toFixed(6)), ops: r.ops }]),
-  );
   console.log(JSON.stringify(instantanea, null, 2));
 }

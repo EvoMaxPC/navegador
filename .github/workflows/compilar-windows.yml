@@ -32,6 +32,7 @@ concurrency:
 permissions:
   contents: write
   checks: write
+  issues: write
 
 jobs:
   compilar:
@@ -56,13 +57,22 @@ jobs:
         run: npm run verify
 
       - name: Referencia de rendimiento
-        run: npm run bench
+        run: node scripts/bench.mjs --json-out=ci-bench.json
 
       - name: Empaquetar
         run: npm run dist:win
 
       - name: Prueba de humo del ejecutable
         run: node scripts/humo.mjs
+
+      # Los números de arranque y memoria de Windows quedan en un issue fijo,
+      # que es la única forma de compararlos entre compilaciones.
+      - name: Publicar el informe de rendimiento
+        if: always()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/reportar-rendimiento.mjs --publicar
 
       - name: Resumen
         shell: pwsh

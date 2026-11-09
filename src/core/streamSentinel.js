@@ -20,7 +20,7 @@
  */
 
 import { analyzeTail, detectTruncation } from './analysis.js';
-import { codeFenceState, excerpt, tokenizeWithSpans } from './text.js';
+import { codeFenceState, excerpt, tokenizeWithStarts } from './text.js';
 
 const SEVERITY_RANK = { none: 0, low: 1, medium: 2, high: 3 };
 
@@ -277,7 +277,8 @@ export class StreamSentinel {
       case 'paragraph-loop': {
         const needle = (detail.block || '').toLowerCase().slice(0, 40);
         if (!needle) return this.raw.length;
-        const lower = this.raw.toLowerCase();
+        // Se reutiliza la copia en minúsculas que mantiene `push`.
+        const lower = this.low.length === this.raw.length ? this.low : this.raw.toLowerCase();
         const first = lower.indexOf(needle);
         const second = first >= 0 ? lower.indexOf(needle, first + 10) : -1;
         return second > 0 ? second : this.raw.length;
@@ -285,14 +286,14 @@ export class StreamSentinel {
       case 'stutter': {
         const token = detail.token || '';
         if (!token) return this.#alignCut(this.raw.length);
-        const spans = tokenizeWithSpans(this.raw);
-        let end = spans.length - 1;
-        while (end >= 0 && spans[end].token !== token) end -= 1;
+        const { tokens, starts } = tokenizeWithStarts(this.raw);
+        let end = tokens.length - 1;
+        while (end >= 0 && tokens[end] !== token) end -= 1;
         if (end < 0) return this.#alignCut(this.raw.length);
         let start = end;
-        while (start > 0 && spans[start - 1].token === token) start -= 1;
+        while (start > 0 && tokens[start - 1] === token) start -= 1;
         // Se conserva una sola aparición de la palabra y se descarta la tirada.
-        return spans[start].start + token.length;
+        return starts[start] + token.length;
       }
       default:
         return this.#alignCut(Math.max(0, this.raw.length - 1));
