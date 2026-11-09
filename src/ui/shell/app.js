@@ -1331,17 +1331,46 @@ async function boot() {
   }
   paso('sesion');
 
-  if (restored?.windows?.[0]?.tabs?.length) {
-    const win = restored.windows[0];
-    const ids = win.tabs.map((tab) => createTab(tab.url, { activate: false }).id);
-    activateTab(ids[Math.min(win.activeIndex, ids.length - 1)]);
-    pushLocalNotice(`Se restauraron ${ids.length} ${ids.length === 1 ? 'pestaña' : 'pestañas'} de la sesión anterior.`);
-  } else {
-    createTab(START_URL);
-  }
-  paso('pestana');
   els.browser.classList.add('with-sidebar');
   els.omnibox.focus();
+
+  /**
+   * Abre la primera pestaña.
+   *
+   * Se hace después del primer cuadro a propósito: crear un `<webview>` obliga a
+   * Chromium a montar un proceso de invitado y su canal de composición, y
+   * mientras eso ocurre la ventana no pinta nada. Medido en Windows: sin esta
+   * espera el primer pintado llegaba a los 868 ms; con ella el marco del
+   * navegador aparece de inmediato y la página arranca pocos milisegundos
+   * después.
+   */
+  const abrirPrimera = () => {
+    if (restored?.windows?.[0]?.tabs?.length) {
+      const win = restored.windows[0];
+      const ids = win.tabs.map((tab) => createTab(tab.url, { activate: false }).id);
+      activateTab(ids[Math.min(win.activeIndex, ids.length - 1)]);
+      pushLocalNotice(`Se restauraron ${ids.length} ${ids.length === 1 ? 'pestaña' : 'pestañas'} de la sesión anterior.`);
+    } else {
+      createTab(START_URL);
+    }
+    paso('pestana');
+    reportarMedidas(marcas);
+  };
+
+  // Dos cuadros: el primero se pinta con el marco ya armado, y la pestaña se
+  // crea cuando ese cuadro ya está en pantalla. El temporizador es la red de
+  // seguridad para ventanas ocultas, donde no hay cuadros.
+  let abierta = false;
+  const abrirUnaVez = () => {
+    if (abierta) return;
+    abierta = true;
+    abrirPrimera();
+  };
+  requestAnimationFrame(() => {
+    paso('primer-cuadro');
+    requestAnimationFrame(abrirUnaVez);
+  });
+  setTimeout(abrirUnaVez, 200);
 
   // Desde acá el navegador ya es usable: se reporta el arranque percibido.
   reportarMedidas(marcas);
