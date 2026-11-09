@@ -1256,21 +1256,54 @@ document.getElementById('openDemo').addEventListener('click', () => createTab(DE
 /* arranque                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Manda las medidas de arranque al proceso principal.
+ *
+ * Nunca puede lanzar: medir el arranque no puede romper el arranque.
+ * @param {Record<string, number>} marcas
+ */
+function reportarMedidas(marcas) {
+  try {
+    const datos = { ...marcas };
+    const nav = performance.getEntriesByType('navigation')[0];
+    if (nav) {
+      // Tiempos absolutos de la navegación: separan «cargar la página» de
+      // «nuestro código haciendo cosas».
+      datos['nav-red'] = Math.round(nav.responseEnd);
+      datos['nav-dom'] = Math.round(nav.domInteractive);
+      datos['nav-load'] = Math.round(nav.domComplete || nav.loadEventEnd);
+    }
+    const pintado = performance.getEntriesByName('first-contentful-paint')[0];
+    if (pintado) datos['nav-pintado'] = Math.round(pintado.startTime);
+    nexo.perf?.(datos);
+  } catch {
+    // Sin medidas se arranca igual.
+  }
+}
+
+/**
+ * Arranque de la interfaz, en dos tiempos:
+ *
+ * 1. lo imprescindible para que haya una pestaña navegando (configuración y
+ *    sesión, dos llamadas);
+ * 2. todo lo demás —ajustes, registro, estadísticas, panel de sitios,
+ *    historial, marcadores y descargas— después de eso.
+ *
+ * Antes se esperaba a todo antes de crear la primera pestaña: el usuario veía
+ * el marco del navegador quieto mientras se serializaban 4 000 visitas, el
+ * registro completo y la lista de memoria. La mediación no depende de nada de
+ * eso, así que ahora la primera página empieza a cargar de inmediato.
+ */
 async function boot() {
+  const t0 = performance.now();
+  const marcas = {};
+  const paso = (nombre) => {
+    marcas[nombre] = Number((performance.now() - t0).toFixed(1));
+  };
+
   state.config = await nexo.getConfig();
   document.getElementById('version').textContent = `v${state.config.version}`;
-
-  const settings = await nexo.getSettings();
-  fillSettings(settings);
-  renderSitesList();
-
-  state.logs = await nexo.getLog();
-  renderLog();
-  refreshStats();
-  refreshMemory();
-  renderHistory();
-  renderBookmarks();
-  renderDownloads();
+  paso('config');
 
   // Continuidad: si había pestañas guardadas, se reabren tal cual estaban.
   let restored = null;
@@ -1279,6 +1312,7 @@ async function boot() {
   } catch {
     restored = null;
   }
+  paso('sesion');
 
   if (restored?.windows?.[0]?.tabs?.length) {
     const win = restored.windows[0];
@@ -1288,10 +1322,30 @@ async function boot() {
   } else {
     createTab(START_URL);
   }
-
+  paso('pestana');
   els.browser.classList.add('with-sidebar');
   els.omnibox.focus();
-  renderSitePanel();
+
+  // Desde acá el navegador ya es usable: se reporta el arranque percibido.
+  reportarMedidas(marcas);
+
+  // Segunda mitad: lo que se puede cargar sin retener la primera pintura.
+  const [settings, logs] = await Promise.all([nexo.getSettings(), nexo.getLog()]);
+  fillSettings(settings);
+  renderSitesList();
+  state.logs = logs;
+  renderLog();
+
+  await Promise.all([
+    refreshStats(),
+    refreshMemory(),
+    renderHistory(),
+    renderBookmarks(),
+    renderDownloads(),
+    renderSitePanel(),
+  ]);
+  paso('paneles');
+  reportarMedidas(marcas);
 }
 
 boot();

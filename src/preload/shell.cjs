@@ -78,6 +78,13 @@ contextBridge.exposeInMainWorld('nexo', {
     clear: (scope) => ipcRenderer.invoke('nexo:data:clear', scope),
   },
 
+  /**
+   * Medidas de arranque de la interfaz. Va sin respuesta: la interfaz no debe
+   * esperar nada para pintar.
+   * @param {Record<string, number>} data
+   */
+  perf: (data) => ipcRenderer.send('nexo:perf', data),
+
   session: {
     capture: (windows) => ipcRenderer.invoke('nexo:session:capture', { windows }),
     /** Guardado sin esperar respuesta: para el cierre de la ventana. */

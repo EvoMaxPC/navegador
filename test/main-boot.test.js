@@ -268,3 +268,23 @@ test('el arranque deja marcas de tiempo para medirse', async () => {
     assert.ok(orden[i] >= orden[i - 1], `el orden de las marcas se rompió en ${i}`);
   }
 });
+
+test('las medidas de arranque de la interfaz se registran y las pestañas no pueden inyectarlas', async () => {
+  await settle();
+  const { marks } = await import('../src/main/perf.js');
+  const listener = journal.ipcListeners.get('nexo:perf');
+  assert.ok(listener, 'falta el canal nexo:perf');
+
+  // La shell sí: se aceptan números y se guardan con prefijo `ui-`.
+  listener({ sender: { getType: () => 'window' } }, { config: 12.3, pestana: 41, basura: 'no es un número' });
+  assert.equal(marks()['ui-config'], 12.3);
+  assert.equal(marks()['ui-pestana'], 41);
+  assert.equal(marks()['ui-basura'], undefined);
+
+  // Una página web no puede escribir en el informe de arranque.
+  listener({ sender: { getType: () => 'webview' } }, { config: 999 });
+  assert.equal(marks()['ui-config'], 12.3);
+  // Ni un mensaje sin forma.
+  listener({ sender: { getType: () => 'window' } }, null);
+  assert.equal(marks()['ui-config'], 12.3);
+});

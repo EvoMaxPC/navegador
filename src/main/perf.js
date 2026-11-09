@@ -23,6 +23,28 @@ export function mark(name) {
   return marcas[name];
 }
 
+/**
+ * Incorpora medidas que llegan desde la interfaz.
+ *
+ * El arranque tiene dos mitades: el proceso principal (marcas de arriba) y la
+ * página de la shell, que se mide con `performance` en el renderer. Sin la
+ * segunda mitad no se sabe si la lentitud es de Electron o de nuestro código.
+ *
+ * @param {Record<string, number>} datos
+ */
+export function absorb(datos) {
+  if (!datos || typeof datos !== 'object') return marcas;
+  for (const [nombre, valor] of Object.entries(datos)) {
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) continue;
+    // Prefijo para no confundir una marca del renderer con una del proceso
+    // principal. Se conserva el orden de llegada en el informe.
+    const clave = nombre.startsWith('ui-') ? nombre : `ui-${nombre}`;
+    marcas[clave] = Number(numero.toFixed(1));
+  }
+  return marcas;
+}
+
 /** Todas las marcas, en orden de aparición. */
 export function marks() {
   return { ...marcas };

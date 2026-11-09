@@ -22,7 +22,7 @@ import { sanitizeFilename } from '../nav/downloads.js';
 import { runSmoke, report as reportSmoke, render as renderSmoke } from './smoke.js';
 import { eventMessage, permissionName, safeExternalUrl, sessionPayload } from './validate.js';
 import { PERMISSION_CATALOG } from '../nav/permissions.js';
-import { mark, smokeReport } from './perf.js';
+import { absorb as absorbPerf, mark, smokeReport } from './perf.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -303,6 +303,13 @@ function registerIpc() {
     pagePreload: `file://${PAGE_PRELOAD}`,
     platform: process.platform,
   }));
+
+  // Medidas de la interfaz: sólo las acepta la shell, y sólo números.
+  ipcMain.on('nexo:perf', (event, data) => {
+    if (event.sender?.getType?.() === 'webview') return;
+    if (!data || typeof data !== 'object') return;
+    absorbPerf(data);
+  });
 
   // Sólo las pestañas pueden anunciar eventos, y sólo con la forma esperada:
   // sin esto, cualquier página podría inventar «intervenciones» en el panel.
