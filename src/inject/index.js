@@ -597,7 +597,7 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
   const mime = String(response?.headers?.get?.('content-type') || '');
   const jsonUpdates = site.id === 'chatgpt' &&
     isResponseRequest(site, capture.url || '', 'POST') &&
-    /application\\/json/i.test(mime);
+    /application[/]json/i.test(mime);
   if (!response || !response.body || (!looksLikeStream(response.headers) && !jsonUpdates)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
