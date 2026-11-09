@@ -150,6 +150,13 @@ function createTab(url = START_URL, { activate = true } = {}) {
   };
 
   view.addEventListener('page-title-updated', (event) => setTitle(event.title));
+  // Tiempo hasta que la pestaña está usable: es lo que el usuario espera ver.
+  if (state.seq === 1) {
+    view.addEventListener('dom-ready', () => reportarMedidas({ 'tab-dom': Number(performance.now().toFixed(1)) }));
+    view.addEventListener('did-finish-load', () =>
+      reportarMedidas({ 'tab-load': Number(performance.now().toFixed(1)) }),
+    );
+  }
   view.addEventListener('did-navigate', (event) => {
     tab.url = event.url;
     if (state.activeId === id) els.omnibox.value = event.url;

@@ -200,9 +200,18 @@ function createWindow() {
     },
   });
 
-  // En modo humo la ventana queda oculta: hay runners sin escritorio donde
-  // mostrar una ventana falla, y la prueba no necesita ver nada.
   if (!isSmoke) win.once('ready-to-show', () => win.show());
+  else {
+    // En modo humo la ventana no se muestra con `ready-to-show`, pero tampoco
+    // puede quedarse oculta: Chromium pospone el trabajo de una ventana oculta
+    // y entonces lo que se mide no es el arranque que ve el usuario. Se muestra
+    // sin tomar el foco; si el runner no tiene escritorio, se sigue igual.
+    try {
+      win.showInactive();
+    } catch {
+      // Sin escritorio no hay nada que mostrar.
+    }
+  }
   win.on('closed', () => {
     win = null;
   });
