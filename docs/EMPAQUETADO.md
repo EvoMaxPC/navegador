@@ -12,6 +12,7 @@ Cada etiqueta `v*` compila en un runner de Windows y adjunta el ZIP a la release
 
 | Versión | Archivo | Tamaño | sha256 |
 |---|---|---|---|
+| [v0.1.4](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.4) | `Nexo-0.1.4-win32-x64.zip` | 149 MB | ver el adjunto en la release |
 | [v0.1.3](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.3) | `Nexo-0.1.3-win32-x64.zip` | 149 MB | ver el adjunto en la release |
 | [v0.1.2](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.2) | `Nexo-0.1.2-win32-x64.zip` | 149 MB | ver el adjunto en la release |
 | [v0.1.1](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.1) | `Nexo-0.1.1-win32-x64.zip` | 149 MB | ver el adjunto en la release |
