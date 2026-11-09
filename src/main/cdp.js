@@ -827,7 +827,9 @@ export class CdpObserver {
       return;
     }
     this.stats.bodies += 1;
-    this.#deliver(state, capture.take());
+    const listo = capture.take();
+    if (listo) listo.model = request?.model || '';
+    this.#deliver(state, listo);
   }
 
   /* ------------------------------------------------------------------ */
