@@ -7,6 +7,14 @@
 > EVO MEMORY ya construidos y medidos, que esta propuesta reutiliza en lugar de
 > rehacer.
 
+> **Decisiones aprobadas (2026-11-09):**
+> 1. El producto se sigue llamando **Nexo** en la interfaz; EVO queda como nombre
+>    del motor de memoria y de mediación.
+> 2. Etapa 2 con alcance **completo** (historial, marcadores, descargas, sesión,
+>    atajos, buscar en página, zoom y permisos). **En curso.**
+> 3. Orden: **navegador primero**, después adaptadores reales.
+> 4. Canal de red por **CDP: autorizado**.
+
 ---
 
 ## 0. Resumen ejecutivo

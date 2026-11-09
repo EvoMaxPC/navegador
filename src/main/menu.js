@@ -1,12 +1,15 @@
 /** Menú de aplicación. Los comandos viajan a la interfaz como eventos. */
 
 import { Menu, app, shell } from 'electron';
+import { acceleratorFor } from '../nav/shortcuts.js';
 
 /**
  * @param {{send: (channel: string, payload?: any) => void}} bridge
  */
 export function buildMenu({ send }) {
   const isMac = process.platform === 'darwin';
+  const acc = (command) => acceleratorFor(command, process.platform);
+  const run = (command, extra = {}) => () => send('nexo:command', { type: command, ...extra });
 
   const template = [
     ...(isMac
@@ -16,7 +19,7 @@ export function buildMenu({ send }) {
             submenu: [
               { role: 'about', label: 'Acerca de Nexo' },
               { type: 'separator' },
-              { label: 'Ajustes de mediación…', accelerator: 'Cmd+,', click: () => send('nexo:command', { type: 'settings' }) },
+              { label: 'Ajustes…', accelerator: acc('settings'), click: run('settings') },
               { type: 'separator' },
               { role: 'hide', label: 'Ocultar Nexo' },
               { role: 'quit', label: 'Salir de Nexo' },
@@ -27,12 +30,27 @@ export function buildMenu({ send }) {
     {
       label: 'Archivo',
       submenu: [
-        { label: 'Pestaña nueva', accelerator: 'CmdOrCtrl+T', click: () => send('nexo:command', { type: 'new-tab' }) },
-        { label: 'Cerrar pestaña', accelerator: 'CmdOrCtrl+W', click: () => send('nexo:command', { type: 'close-tab' }) },
+        { label: 'Pestaña nueva', accelerator: acc('new-tab'), click: run('new-tab') },
+        { label: 'Reabrir pestaña cerrada', accelerator: acc('reopen-tab'), click: run('reopen-tab') },
+        { label: 'Cerrar pestaña', accelerator: acc('close-tab'), click: run('close-tab') },
         { type: 'separator' },
-        { label: 'Abrir ChatGPT', click: () => send('nexo:command', { type: 'open', url: 'https://chatgpt.com' }) },
-        { label: 'Abrir Claude', click: () => send('nexo:command', { type: 'open', url: 'https://claude.ai' }) },
-        { label: 'Abrir Gemini', click: () => send('nexo:command', { type: 'open', url: 'https://gemini.google.com' }) },
+        { type: 'separator' },
+        { label: 'Pestaña siguiente', accelerator: 'CmdOrCtrl+Tab', click: run('next-tab') },
+        { label: 'Pestaña anterior', accelerator: 'CmdOrCtrl+Shift+Tab', click: run('prev-tab') },
+        {
+          label: 'Ir a la pestaña',
+          submenu: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({
+            label: n === 9 ? 'Última (9)' : String(n),
+            accelerator: `CmdOrCtrl+${n}`,
+            click: run(`tab-${n}`),
+          })),
+        },
+        { type: 'separator' },
+        { label: 'Historial', accelerator: acc('history'), click: run('history') },
+        { label: 'Marcadores', click: run('bookmarks') },
+        { label: 'Descargas', accelerator: acc('downloads'), click: run('downloads') },
+        { type: 'separator' },
+        { label: 'Abrir sitio…', accelerator: acc('focus-omnibox'), click: run('focus-omnibox') },
         { type: 'separator' },
         ...(isMac ? [{ role: 'close', label: 'Cerrar ventana' }] : [{ role: 'quit', label: 'Salir' }]),
       ],
@@ -47,36 +65,38 @@ export function buildMenu({ send }) {
         { role: 'copy', label: 'Copiar' },
         { role: 'paste', label: 'Pegar' },
         { role: 'selectAll', label: 'Seleccionar todo' },
+        { type: 'separator' },
+        { label: 'Buscar en la página', accelerator: acc('find'), click: run('find') },
+        { label: 'Buscar siguiente', accelerator: acc('find-next'), click: run('find-next') },
       ],
     },
     {
       label: 'Ver',
       submenu: [
-        { role: 'reload', label: 'Recargar' },
-        { role: 'forceReload', label: 'Forzar recarga' },
-        { role: 'toggleDevTools', label: 'Herramientas de desarrollo' },
+        { label: 'Recargar', accelerator: acc('reload'), click: run('reload') },
+        { label: 'Forzar recarga', accelerator: acc('hard-reload'), click: run('hard-reload') },
         { type: 'separator' },
-        { role: 'resetZoom', label: 'Tamaño normal' },
-        { role: 'zoomIn', label: 'Acercar' },
-        { role: 'zoomOut', label: 'Alejar' },
+        { label: 'Acercar', accelerator: acc('zoom-in'), click: run('zoom-in') },
+        { label: 'Alejar', accelerator: acc('zoom-out'), click: run('zoom-out') },
+        { label: 'Tamaño normal', accelerator: acc('zoom-reset'), click: run('zoom-reset') },
         { type: 'separator' },
         { role: 'togglefullscreen', label: 'Pantalla completa' },
+        { role: 'toggleDevTools', label: 'Herramientas de desarrollo' },
       ],
     },
     {
       label: 'Nexo',
       submenu: [
-        {
-          label: 'Activar/desactivar mediación',
-          accelerator: 'CmdOrCtrl+Shift+M',
-          click: () => send('nexo:command', { type: 'toggle-engine' }),
-        },
-        {
-          label: 'Mostrar panel de intervenciones',
-          accelerator: 'CmdOrCtrl+Shift+I',
-          click: () => send('nexo:command', { type: 'toggle-sidebar' }),
-        },
+        { label: 'Panel EVO', accelerator: acc('toggle-sidebar'), click: run('toggle-sidebar') },
+        { label: 'Memoria', accelerator: acc('memory'), click: run('memory') },
+        { label: 'Actividad', click: run('activity') },
+        { label: 'Sitios y permisos', click: run('sites') },
         { type: 'separator' },
+        {
+          label: 'Activar o desactivar mediación',
+          accelerator: acc('toggle-engine'),
+          click: run('toggle-engine'),
+        },
         {
           label: 'Cómo funciona',
           click: () => shell.openExternal('https://github.com/EvoMaxPC/navegador#readme'),
@@ -87,10 +107,7 @@ export function buildMenu({ send }) {
       label: 'Ayuda',
       role: 'help',
       submenu: [
-        {
-          label: 'Abrir sala de pruebas',
-          click: () => send('nexo:command', { type: 'open', url: 'nexo://demo' }),
-        },
+        { label: 'Abrir sala de pruebas', click: run('open', { url: 'nexo://demo' }) },
       ],
     },
   ];

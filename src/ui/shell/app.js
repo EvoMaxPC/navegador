@@ -7,6 +7,8 @@
  */
 
 import { SITES } from '../../core/sites.js';
+import { displayUrl, hostOf, resolveInput } from '../../nav/url.js';
+import { ZOOM_STEPS, clampZoom, zoomLabel } from '../../nav/zoom.js';
 
 const nexo = window.nexo;
 
@@ -27,9 +29,42 @@ const els = {
   log: document.getElementById('log'),
   stats: { turns: document.getElementById('statTurns'), loops: document.getElementById('statLoops'), log: document.getElementById('statLog') },
   sidebar: document.getElementById('sidebar'),
+  suggestions: document.getElementById('suggestions'),
+  bookmarkBtn: document.getElementById('bookmarkBtn'),
+  findbar: document.getElementById('findbar'),
+  findInput: document.getElementById('findInput'),
+  findCount: document.getElementById('findCount'),
+  findPrev: document.getElementById('findPrev'),
+  findNext: document.getElementById('findNext'),
+  findClose: document.getElementById('findClose'),
+  historySearch: document.getElementById('historySearch'),
+  historySearchForm: document.getElementById('historySearchForm'),
+  historyList: document.getElementById('historyList'),
+  historyRange: document.getElementById('historyRange'),
+  historyClear: document.getElementById('historyClear'),
+  historyNote: document.getElementById('historyNote'),
+  bookmarkSearch: document.getElementById('bookmarkSearch'),
+  bookmarkSearchForm: document.getElementById('bookmarkSearchForm'),
+  bookmarkList: document.getElementById('bookmarkList'),
+  bookmarkCurrent: document.getElementById('bookmarkCurrent'),
+  downloadList: document.getElementById('downloadList'),
+  downloadNote: document.getElementById('downloadNote'),
+  downloadsClear: document.getElementById('downloadsClear'),
+  siteHost: document.getElementById('siteHost'),
+  permissionList: document.getElementById('permissionList'),
+  zoomValue: document.getElementById('zoomValue'),
+  zoomIn: document.getElementById('zoomIn'),
+  zoomOut: document.getElementById('zoomOut'),
+  zoomReset: document.getElementById('zoomReset'),
+  profileNote: document.getElementById('profileNote'),
+  clearHistoryData: document.getElementById('clearHistoryData'),
+  clearCookies: document.getElementById('clearCookies'),
+  clearBookmarksData: document.getElementById('clearBookmarksData'),
+  clearEverything: document.getElementById('clearEverything'),
 };
 
 const DEMO_URL = 'nexo://app/demo/index.html';
+const START_URL = 'nexo://app/src/ui/start/index.html';
 const SEARCH = 'https://duckduckgo.com/?q=';
 
 const state = {
@@ -39,6 +74,11 @@ const state = {
   config: null,
   settings: null,
   logs: [],
+  /** Pestañas cerradas, para reabrir con Ctrl+Shift+T. */
+  closed: [],
+  /** Última consulta de sugerencias, para no pisar respuestas viejas. */
+  suggestToken: 0,
+  find: { active: false, query: '' },
 };
 
 /* ------------------------------------------------------------------ */
@@ -48,22 +88,9 @@ const state = {
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const hostOf = (url) => {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return '';
-  }
-};
-
-function normalizeInput(text) {
-  const value = text.trim();
-  if (!value) return null;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) || value.startsWith('nexo://')) return value;
-  if (/^(localhost|127\.0\.0\.1)(:\d+)?/.test(value)) return `http://${value}`;
-  if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(value)) return `https://${value}`;
-  return SEARCH + encodeURIComponent(value);
-}
+// La resolución de lo escrito en la barra vive en `src/nav/url.js`: una sola
+// implementación para la interfaz, el proceso principal y las pruebas.
+const normalizeInput = (text) => resolveInput(text, { searchBase: SEARCH });
 
 const SITE_CHIPS = [
   { label: 'ChatGPT', url: 'https://chatgpt.com', color: '#10a37f' },
@@ -79,7 +106,7 @@ const SITE_CHIPS = [
 /* pestañas                                                            */
 /* ------------------------------------------------------------------ */
 
-function createTab(url = DEMO_URL, { activate = true } = {}) {
+function createTab(url = START_URL, { activate = true } = {}) {
   const id = `tab-${(state.seq += 1)}`;
 
   const view = document.createElement('webview');
@@ -140,6 +167,30 @@ function createTab(url = DEMO_URL, { activate = true } = {}) {
     setTitle('No se pudo cargar');
   });
 
+  // Buscador en la página: el recuento lo informa el propio Chromium.
+  view.addEventListener('found-in-page', (event) => {
+    const result = event.result || {};
+    if (result.matches === 0) els.findCount.textContent = 'sin resultados';
+    else els.findCount.textContent = `${result.activeMatchOrdinal} de ${result.matches}`;
+  });
+
+  view.addEventListener('did-start-loading', () => {
+    tabEl.classList.add('loading');
+    tabEl.classList.remove('loaded');
+  });
+  view.addEventListener('did-stop-loading', () => {
+    tabEl.classList.remove('loading');
+    tabEl.classList.add('loaded');
+    if (state.activeId === id) {
+      updateStar();
+      renderSitePanel();
+    }
+    scheduleSessionCapture();
+  });
+
+  view.addEventListener('did-navigate', () => scheduleSessionCapture());
+  view.addEventListener('page-title-updated', () => scheduleSessionCapture());
+
   if (activate) activateTab(id);
   updateWelcome();
   return tab;
@@ -154,14 +205,23 @@ function activateTab(id) {
     other.tabEl.classList.toggle('active', active);
     other.view.classList.toggle('hidden', !active);
   }
-  els.omnibox.value = tab.url === DEMO_URL ? 'Sala de pruebas de Nexo' : tab.url;
+  els.omnibox.value =
+    tab.url === DEMO_URL ? 'Sala de pruebas de Nexo'
+      : tab.url === START_URL ? ''
+        : displayUrl(tab.url);
   tab.cut = 0;
   tab.tabEl.querySelector('.cut-dot').hidden = true;
+  hideSuggestions();
+  updateStar();
+  renderSitePanel();
+  scheduleSessionCapture();
 }
 
 function closeTab(id) {
   const tab = state.tabs.get(id);
   if (!tab) return;
+  state.closed.push({ url: tab.url, title: tab.title });
+  if (state.closed.length > 25) state.closed.shift();
   tab.view.remove();
   tab.tabEl.remove();
   state.tabs.delete(id);
@@ -172,6 +232,23 @@ function closeTab(id) {
     else state.activeId = null;
   }
   updateWelcome();
+  scheduleSessionCapture();
+}
+
+/** Cambia de pestaña en orden circular. */
+function cycleTab(delta) {
+  const ids = [...state.tabs.keys()];
+  if (ids.length < 2) return;
+  const index = ids.indexOf(state.activeId);
+  const next = ids[(index + delta + ids.length) % ids.length];
+  activateTab(next);
+}
+
+/** Reabre la última pestaña cerrada (Ctrl+Shift+T). */
+function reopenTab() {
+  const last = state.closed.pop();
+  if (!last) return null;
+  return createTab(last.url);
 }
 
 function activeTab() {
@@ -208,14 +285,17 @@ function navigate(url) {
 
 els.omniboxForm.addEventListener('submit', (event) => {
   event.preventDefault();
+  const chosen = els.suggestions.querySelector('.suggestion.active');
+  const target = chosen?.dataset.url || els.omnibox.value;
   els.omnibox.blur();
-  navigate(els.omnibox.value);
+  hideSuggestions();
+  navigate(target);
 });
 
 els.back.addEventListener('click', () => activeTab()?.view.canGoBack?.() && activeTab().view.goBack());
 els.forward.addEventListener('click', () => activeTab()?.view.canGoForward?.() && activeTab().view.goForward());
 els.reload.addEventListener('click', () => activeTab()?.view.reload());
-els.newTab.addEventListener('click', () => createTab(DEMO_URL));
+els.newTab.addEventListener('click', () => createTab(START_URL));
 
 els.toggleSidebar.addEventListener('click', () => {
   els.browser.classList.toggle('with-sidebar');
@@ -243,6 +323,304 @@ els.sites.addEventListener('click', (event) => {
     createTab(url);
   }
 });
+
+/* ------------------------------------------------------------------ */
+/* navegador: historial, marcadores, descargas, sitio, zoom, sesión     */
+/* ------------------------------------------------------------------ */
+
+let sessionTimer = null;
+
+/** La sesión se guarda con retardo: navegar no debe escribir en disco. */
+function scheduleSessionCapture() {
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(() => {
+    const tabs = [...state.tabs.values()].map((tab) => ({ url: tab.url, title: tab.title }));
+    if (!tabs.length) return;
+    const activeIndex = Math.max(0, [...state.tabs.keys()].indexOf(state.activeId));
+    nexo.session.capture([{ tabs, activeIndex }]).catch(() => {});
+  }, 500);
+}
+
+/* ---------------- barra: sugerencias ---------------- */
+
+let suggestTimer = null;
+
+function hideSuggestions() {
+  els.suggestions.hidden = true;
+  els.suggestions.innerHTML = '';
+}
+
+function renderSuggestions(items) {
+  if (!items.length) return hideSuggestions();
+  els.suggestions.innerHTML = items
+    .map(
+      (item, index) => `<button class="suggestion" data-url="${escapeHtml(item.url)}" data-index="${index}" role="option">
+        <span class="s-kicker">${item.kind === 'bookmark' ? '★' : item.kind === 'top' ? '↑' : '↺'}</span>
+        <span class="s-title">${escapeHtml(item.title || item.url)}</span>
+        <span class="s-url">${escapeHtml(displayUrl(item.url))}</span>
+      </button>`,
+    )
+    .join('');
+  els.suggestions.hidden = false;
+}
+
+async function loadSuggestions() {
+  const query = els.omnibox.value.trim();
+  if (!query) return hideSuggestions();
+  const token = (state.suggestToken += 1);
+  try {
+    const items = await nexo.suggest(query);
+    if (token !== state.suggestToken) return; // llegó tarde: no pisar
+    renderSuggestions(items);
+  } catch {
+    hideSuggestions();
+  }
+}
+
+els.omnibox.addEventListener('input', () => {
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(loadSuggestions, 120);
+});
+
+els.omnibox.addEventListener('blur', () => {
+  setTimeout(hideSuggestions, 140);
+});
+
+// Teclado en la barra: bajar a la lista, elegir y volver a escribir.
+els.omnibox.addEventListener('keydown', (event) => {
+  const options = [...els.suggestions.querySelectorAll('.suggestion')];
+  if (!options.length) {
+    if (event.key === 'Escape') hideSuggestions();
+    return;
+  }
+  const activeIndex = options.findIndex((option) => option.classList.contains('active'));
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    const next = (activeIndex + 1) % options.length;
+    options.forEach((option, i) => option.classList.toggle('active', i === next));
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    const next = (activeIndex - 1 + options.length) % options.length;
+    options.forEach((option, i) => option.classList.toggle('active', i === next));
+  } else if (event.key === 'Enter' && activeIndex >= 0) {
+    event.preventDefault();
+    els.omnibox.value = options[activeIndex].dataset.url;
+    hideSuggestions();
+    navigate(options[activeIndex].dataset.url);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    hideSuggestions();
+  }
+});
+
+els.suggestions.addEventListener('mousedown', (event) => {
+  const option = event.target.closest('.suggestion');
+  if (!option) return;
+  event.preventDefault();
+  els.omnibox.value = option.dataset.url;
+  hideSuggestions();
+  navigate(option.dataset.url);
+});
+
+/* ---------------- marcadores ---------------- */
+
+async function updateStar() {
+  const tab = activeTab();
+  const marked = tab && tab.url ? await nexo.bookmarks.is(tab.url) : false;
+  els.bookmarkBtn.textContent = marked ? '★' : '☆';
+  els.bookmarkBtn.classList.toggle('on', Boolean(marked));
+  els.bookmarkBtn.setAttribute('aria-pressed', String(Boolean(marked)));
+}
+
+async function toggleBookmark() {
+  const tab = activeTab();
+  if (!tab || !tab.url) return;
+  const result = await nexo.bookmarks.toggle({ url: tab.url, title: tab.title });
+  await updateStar();
+  renderBookmarks();
+  if (result.added) pushLocalNotice(`Marcador guardado: ${tab.title}`);
+}
+
+function renderBookmarks() {
+  const query = els.bookmarkSearch.value.trim();
+  nexo.bookmarks.list(query ? { query } : {}).then((items) => {
+    if (!items.length) {
+      els.bookmarkList.innerHTML = '<li class="nav-empty">Sin marcadores todavía. Usá la estrella de la barra o Ctrl+D.</li>';
+      return;
+    }
+    let folder = null;
+    els.bookmarkList.innerHTML = items
+      .map((item) => {
+        const header = item.folder !== folder && !query ? `<li class="nav-folder">${escapeHtml(item.folder)}</li>` : '';
+        folder = item.folder;
+        return `${header}<li class="nav-item">
+          <button class="nav-open" data-url="${escapeHtml(item.url)}" title="${escapeHtml(item.url)}">
+            <span class="nav-title">${escapeHtml(item.title)}</span>
+            <span class="nav-url">${escapeHtml(displayUrl(item.url))}</span>
+          </button>
+          <button class="nav-action" data-remove="${escapeHtml(item.id)}" title="Quitar marcador">×</button>
+        </li>`;
+      })
+      .join('');
+  });
+}
+
+/* ---------------- historial ---------------- */
+
+function renderHistory() {
+  const query = els.historySearch.value.trim();
+  nexo.history.list({ query, limit: 200 }).then((items) => {
+    if (!items.length) {
+      els.historyList.innerHTML = '<li class="nav-empty">Sin resultados. Lo que navegues va a aparecer acá.</li>';
+      els.historyNote.textContent = '';
+      return;
+    }
+    const days = new Map();
+    els.historyList.innerHTML = items
+      .map((entry) => {
+        const day = new Date(entry.ts).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+        const header = !query && !days.has(day) ? `<li class="nav-folder">${escapeHtml(day)}</li>` : '';
+        days.set(day, true);
+        const time = new Date(entry.ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+        return `${header}<li class="nav-item">
+          <button class="nav-open" data-url="${escapeHtml(entry.url)}" title="${escapeHtml(entry.url)}">
+            <span class="nav-title">${escapeHtml(entry.title)}</span>
+            <span class="nav-url">${escapeHtml(displayUrl(entry.url))}</span>
+          </button>
+          <span class="nav-time">${time}</span>
+        </li>`;
+      })
+      .join('');
+    els.historyNote.textContent = `${items.length} ${items.length === 1 ? 'visita' : 'visitas'} mostradas.`;
+  });
+}
+
+/* ---------------- descargas ---------------- */
+
+function renderDownloads() {
+  nexo.downloads.list().then((items) => {
+    if (!items.length) {
+      els.downloadList.innerHTML = '<li class="nav-empty">Sin descargas. Cuando bajes un archivo se va a ver acá con su progreso.</li>';
+      els.downloadNote.textContent = '';
+      return;
+    }
+    els.downloadList.innerHTML = items
+      .map((item) => {
+        const percent = item.totalBytes ? Math.min(100, Math.round((item.receivedBytes / item.totalBytes) * 100)) : null;
+        const label = {
+          started: 'iniciando',
+          progress: percent === null ? 'descargando' : `${percent} %`,
+          completed: 'completada',
+          cancelled: 'cancelada',
+          interrupted: 'interrumpida',
+        }[item.state];
+        const actions = [];
+        if (item.state === 'completed') {
+          actions.push(`<button class="nav-action" data-open="${escapeHtml(item.id)}" title="Abrir archivo">abrir</button>`);
+          actions.push(`<button class="nav-action" data-show="${escapeHtml(item.id)}" title="Mostrar en carpeta">carpeta</button>`);
+        } else if (item.state === 'started' || item.state === 'progress') {
+          actions.push(`<button class="nav-action" data-cancel="${escapeHtml(item.id)}" title="Cancelar">cancelar</button>`);
+        }
+        return `<li class="nav-item download ${escapeHtml(item.state)}">
+          <div class="download-body">
+            <span class="nav-title">${escapeHtml(item.filename)}</span>
+            <span class="nav-url">${escapeHtml(item.host || '')} · ${escapeHtml(label)}</span>
+            ${percent !== null && item.state !== 'completed' ? `<span class="bar"><span style="width:${percent}%"></span></span>` : ''}
+          </div>
+          <div class="download-actions">${actions.join('')}</div>
+        </li>`;
+      })
+      .join('');
+    els.downloadNote.textContent = 'Las descargas se ubican en la carpeta que elijas al bajarlas.';
+  });
+}
+
+/* ---------------- sitio actual: permisos y zoom ---------------- */
+
+async function renderSitePanel() {
+  const tab = activeTab();
+  const host = tab && tab.url ? hostOf(tab.url) : '';
+  els.siteHost.textContent = host || 'Ninguna página abierta';
+
+  const level = tab ? await nexo.zoom.get(tab.url) : 1;
+  els.zoomValue.textContent = zoomLabel(level);
+
+  const rules = host ? await nexo.permissions.for(host) : [];
+  els.permissionList.innerHTML = rules
+    .map(
+      (rule) => `<li class="perm-row">
+        <span class="perm-label">${escapeHtml(rule.label)}</span>
+        <select class="mini-select" data-permission="${escapeHtml(rule.permission)}" data-host="${escapeHtml(host)}">
+          <option value="ask" ${rule.value === 'ask' ? 'selected' : ''}>preguntar</option>
+          <option value="allow" ${rule.value === 'allow' ? 'selected' : ''}>permitir</option>
+          <option value="deny" ${rule.value === 'deny' ? 'selected' : ''}>bloquear</option>
+        </select>
+      </li>`,
+    )
+    .join('');
+
+  const stats = await nexo.profile.stats();
+  if (stats) {
+    els.profileNote.textContent =
+      `${stats.history.total} visitas · ${stats.bookmarks} marcadores · ` +
+      `${stats.downloads.total} descargas · ${stats.permissionSites} sitios con permisos propios.`;
+  }
+}
+
+async function applyZoom(direction) {
+  const tab = activeTab();
+  if (!tab) return;
+  const current = clampZoom(await nexo.zoom.get(tab.url));
+  let next;
+  if (direction === 0) {
+    next = 1;
+  } else {
+    const index = ZOOM_STEPS.reduce((best, step, i) => (Math.abs(step - current) < Math.abs(ZOOM_STEPS[best] - current) ? i : best), 0);
+    next = ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, index + Math.sign(direction)))];
+  }
+  await nexo.zoom.set(tab.url, next);
+  try {
+    tab.view.setZoomFactor(next);
+  } catch {
+    /* pestaña en carga */
+  }
+  els.zoomValue.textContent = zoomLabel(next);
+}
+
+/* ---------------- buscar en la página ---------------- */
+
+function openFind() {
+  els.findbar.hidden = false;
+  state.find.active = true;
+  els.findInput.focus();
+  els.findInput.select();
+  if (els.findInput.value) runFind(true);
+}
+
+function closeFind() {
+  els.findbar.hidden = true;
+  state.find.active = false;
+  els.findCount.textContent = '';
+  try {
+    activeTab()?.view.stopFindInPage('clearSelection');
+  } catch {
+    /* nada que limpiar */
+  }
+}
+
+function runFind(forward = true) {
+  const tab = activeTab();
+  const query = els.findInput.value;
+  if (!tab || !query) {
+    els.findCount.textContent = '';
+    return;
+  }
+  try {
+    tab.view.findInPage(query, { forward, findNext: true });
+  } catch {
+    els.findCount.textContent = '';
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* panel: registro                                                     */
@@ -277,6 +655,16 @@ function renderLog() {
       </li>`,
     )
     .join('');
+}
+
+function pushLocalNotice(text) {
+  pushIntervention({
+    kind: 'system',
+    code: 'notice',
+    severity: 'info',
+    title: text,
+    ts: Date.now(),
+  });
 }
 
 function pushIntervention(entry) {
@@ -542,15 +930,191 @@ S.sitesList.addEventListener('change', (event) => {
 /* pestañas del panel                                                  */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* eventos del navegador                                               */
+/* ------------------------------------------------------------------ */
+
+els.bookmarkBtn.addEventListener('click', toggleBookmark);
+els.bookmarkCurrent.addEventListener('click', toggleBookmark);
+
+// Abrir enlaces desde cualquier lista (historial, marcadores, sugerencias).
+function openFromList(event) {
+  const open = event.target.closest('.nav-open');
+  if (open?.dataset.url) {
+    navigate(open.dataset.url);
+    els.browser.classList.remove('with-sidebar');
+    return;
+  }
+}
+
+els.historyList.addEventListener('click', openFromList);
+els.bookmarkList.addEventListener('click', openFromList);
+
+els.bookmarkList.addEventListener('click', async (event) => {
+  const remove = event.target.closest('[data-remove]');
+  if (!remove) return;
+  await nexo.bookmarks.remove(remove.dataset.remove);
+  renderBookmarks();
+  updateStar();
+});
+
+els.historySearchForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  renderHistory();
+});
+els.historySearch.addEventListener('input', () => renderHistory());
+els.historyClear.addEventListener('click', async () => {
+  const range = els.historyRange.value;
+  const result = await nexo.history.clear(range);
+  renderHistory();
+  pushLocalNotice(`Historial borrado (${result.removed} ${result.removed === 1 ? 'visita' : 'visitas'}).`);
+});
+
+els.bookmarkSearchForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  renderBookmarks();
+});
+els.bookmarkSearch.addEventListener('input', () => renderBookmarks());
+
+els.downloadList.addEventListener('click', async (event) => {
+  const open = event.target.closest('[data-open]');
+  const show = event.target.closest('[data-show]');
+  const cancel = event.target.closest('[data-cancel]');
+  if (open) {
+    const result = await nexo.downloads.open(open.dataset.open);
+    if (!result.ok) pushLocalNotice('No se pudo abrir el archivo descargado.');
+  } else if (show) {
+    await nexo.downloads.show(show.dataset.show);
+  } else if (cancel) {
+    await nexo.downloads.cancel(cancel.dataset.cancel);
+    renderDownloads();
+  }
+});
+
+els.downloadsClear.addEventListener('click', async () => {
+  const result = await nexo.downloads.clear();
+  renderDownloads();
+  pushLocalNotice(`${result.removed} ${result.removed === 1 ? 'descarga quitada' : 'descargas quitadas'} de la lista.`);
+});
+
+els.permissionList.addEventListener('change', async (event) => {
+  const select = event.target.closest('select[data-permission]');
+  if (!select) return;
+  await nexo.permissions.set({
+    host: select.dataset.host,
+    permission: select.dataset.permission,
+    value: select.value,
+  });
+  renderSitePanel();
+});
+
+els.zoomIn.addEventListener('click', () => applyZoom(1));
+els.zoomOut.addEventListener('click', () => applyZoom(-1));
+els.zoomReset.addEventListener('click', () => applyZoom(0));
+
+els.clearHistoryData.addEventListener('click', async () => {
+  const result = await nexo.history.clear('all');
+  renderHistory();
+  renderSitePanel();
+  pushLocalNotice(`Historial vaciado (${result.removed} visitas).`);
+});
+
+els.clearCookies.addEventListener('click', async () => {
+  const result = await nexo.data.clear({ cookies: true, cache: true });
+  pushLocalNotice(
+    result.ok
+      ? 'Cookies, almacenamiento y caché borrados. Vas a tener que volver a iniciar sesión en los sitios.'
+      : 'No se pudieron borrar los datos de navegación.',
+  );
+  renderSitePanel();
+});
+
+els.clearBookmarksData.addEventListener('click', async () => {
+  const result = await nexo.bookmarks.clear();
+  renderBookmarks();
+  updateStar();
+  pushLocalNotice(`${result.removed} marcadores borrados.`);
+});
+
+els.clearEverything.addEventListener('click', async () => {
+  if (!window.confirm('¿Borrar historial, marcadores, descargas, sesión y datos de los sitios? No se puede deshacer.')) return;
+  await nexo.profile.clear({
+    history: true,
+    bookmarks: true,
+    downloads: true,
+    session: true,
+    permissions: true,
+    zoom: true,
+    since: null,
+  });
+  await nexo.data.clear({ cookies: true, cache: true });
+  state.closed = [];
+  renderHistory();
+  renderBookmarks();
+  renderDownloads();
+  renderSitePanel();
+  pushLocalNotice('Todos los datos locales del navegador fueron borrados.');
+});
+
+/* ---------------- buscar en la página ---------------- */
+
+els.findInput.addEventListener('input', () => runFind(true));
+els.findInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    runFind(!event.shiftKey);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeFind();
+  }
+});
+els.findNext.addEventListener('click', () => runFind(true));
+els.findPrev.addEventListener('click', () => runFind(false));
+els.findClose.addEventListener('click', closeFind);
+
+/* ---------------- avisos del proceso principal ---------------- */
+
+nexo.on('nexo:downloads-changed', () => renderDownloads());
+nexo.on('nexo:download-done', (payload) => {
+  if (!payload) return;
+  const state = payload.state === 'completed' ? 'completada' : payload.state;
+  pushLocalNotice(`Descarga ${state}: ${payload.filename}`);
+  renderDownloads();
+});
+nexo.on('nexo:bookmarks-changed', () => {
+  renderBookmarks();
+  updateStar();
+});
+nexo.on('nexo:profile-changed', () => renderSitePanel());
+
+// Al cerrar la ventana se guarda la sesión con los datos más frescos.
+window.addEventListener('beforeunload', () => {
+  const tabs = [...state.tabs.values()].map((tab) => ({ url: tab.url, title: tab.title }));
+  if (!tabs.length) return;
+  const activeIndex = Math.max(0, [...state.tabs.keys()].indexOf(state.activeId));
+  nexo.session.capture([{ tabs, activeIndex }]);
+});
+
 document.querySelectorAll('.stab').forEach((tab) => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.stab').forEach((t) => t.classList.toggle('active', t === tab));
     document.querySelectorAll('.panel-view').forEach((panel) => {
       panel.classList.toggle('active', panel.dataset.panel === tab.dataset.panel);
     });
-    if (tab.dataset.panel === 'memory') refreshMemory();
+    const panel = tab.dataset.panel;
+    if (panel === 'memory') refreshMemory();
+    if (panel === 'history') renderHistory();
+    if (panel === 'bookmarks') renderBookmarks();
+    if (panel === 'downloads') renderDownloads();
+    if (panel === 'sites') renderSitePanel();
   });
 });
+
+/** Abre el panel lateral en la solapa pedida. */
+function showPanel(name) {
+  els.browser.classList.add('with-sidebar');
+  document.querySelector(`.stab[data-panel="${name}"]`)?.click();
+}
 
 // El proceso principal avisa cuando la memoria cambia por otra vía (importación,
 // vaciado) para que el panel no muestre datos viejos.
@@ -581,7 +1145,7 @@ nexo.on('nexo:open-tab', ({ url }) => {
 nexo.on('nexo:command', (command) => {
   switch (command?.type) {
     case 'new-tab':
-      createTab(DEMO_URL);
+      createTab(START_URL);
       break;
     case 'close-tab':
       if (state.activeId) closeTab(state.activeId);
@@ -596,10 +1160,83 @@ nexo.on('nexo:command', (command) => {
       els.browser.classList.toggle('with-sidebar');
       break;
     case 'settings':
-      els.browser.classList.add('with-sidebar');
-      document.querySelector('.stab[data-panel="settings"]')?.click();
+      showPanel('settings');
+      break;
+    case 'history':
+      showPanel('history');
+      break;
+    case 'bookmarks':
+      showPanel('bookmarks');
+      break;
+    case 'downloads':
+      showPanel('downloads');
+      break;
+    case 'sites':
+      showPanel('sites');
+      break;
+    case 'activity':
+      showPanel('activity');
+      break;
+    case 'memory':
+      showPanel('memory');
+      break;
+    case 'focus-omnibox':
+      els.omnibox.focus();
+      els.omnibox.select();
+      break;
+    case 'reopen-tab':
+      reopenTab();
+      break;
+    case 'next-tab':
+      cycleTab(1);
+      break;
+    case 'prev-tab':
+      cycleTab(-1);
+      break;
+    case 'bookmark':
+      toggleBookmark();
+      break;
+    case 'find':
+      openFind();
+      break;
+    case 'find-next':
+      runFind(true);
+      break;
+    case 'find-prev':
+      runFind(false);
+      break;
+    case 'escape':
+      if (state.find.active) closeFind();
+      else hideSuggestions();
+      break;
+    case 'zoom-in':
+      applyZoom(1);
+      break;
+    case 'zoom-out':
+      applyZoom(-1);
+      break;
+    case 'zoom-reset':
+      applyZoom(0);
+      break;
+    case 'reload':
+      activeTab()?.view.reload?.();
+      break;
+    case 'hard-reload':
+      activeTab()?.view.reloadIgnoringCache?.();
+      break;
+    case 'back':
+      if (activeTab()?.view.canGoBack?.()) activeTab().view.goBack();
+      break;
+    case 'forward':
+      if (activeTab()?.view.canGoForward?.()) activeTab().view.goForward();
       break;
     default:
+      if (String(command?.type || '').startsWith('tab-')) {
+        const index = Number(command.type.slice(4)) - 1;
+        const ids = [...state.tabs.keys()];
+        if (ids[index]) activateTab(ids[index]);
+        else if (index === 8) activateTab(ids[ids.length - 1]);
+      }
       break;
   }
 });
@@ -622,10 +1259,30 @@ async function boot() {
   renderLog();
   refreshStats();
   refreshMemory();
+  renderHistory();
+  renderBookmarks();
+  renderDownloads();
 
-  createTab(DEMO_URL);
+  // Continuidad: si había pestañas guardadas, se reabren tal cual estaban.
+  let restored = null;
+  try {
+    restored = await nexo.session.restore();
+  } catch {
+    restored = null;
+  }
+
+  if (restored?.windows?.[0]?.tabs?.length) {
+    const win = restored.windows[0];
+    const ids = win.tabs.map((tab) => createTab(tab.url, { activate: false }).id);
+    activateTab(ids[Math.min(win.activeIndex, ids.length - 1)]);
+    pushLocalNotice(`Se restauraron ${ids.length} ${ids.length === 1 ? 'pestaña' : 'pestañas'} de la sesión anterior.`);
+  } else {
+    createTab(START_URL);
+  }
+
   els.browser.classList.add('with-sidebar');
   els.omnibox.focus();
+  renderSitePanel();
 }
 
 boot();

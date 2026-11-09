@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self' nexo:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' nexo:;" />
+        content="default-src 'self' nexo:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' nexo: https: http:;" />
   <title>Nexo</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <div class="browser">
+  <div class="browser with-sidebar">
     <header class="chrome">
       <div class="tabstrip">
         <div class="tabs" id="tabs" role="tablist"></div>
@@ -17,7 +17,7 @@
           <span class="engine-pill" id="enginePill" title="Estado del motor de mediación">
             <span class="dot"></span><span id="enginePillText">Mediación activa</span>
           </span>
-          <button class="icon-btn" id="toggleSidebar" title="Panel de intervenciones (Ctrl+Shift+I)" aria-label="Panel de intervenciones">
+          <button class="icon-btn" id="toggleSidebar" title="Panel EVO (Ctrl+Shift+I)" aria-label="Panel EVO">
             <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 5h16v14H4z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 5v14" stroke="currentColor" stroke-width="1.6"/></svg>
           </button>
         </div>
@@ -25,31 +25,47 @@
 
       <div class="toolbar">
         <div class="nav-group">
-          <button class="icon-btn" id="back" title="Atrás" aria-label="Atrás">
+          <button class="icon-btn" id="back" title="Atrás (Ctrl+←)" aria-label="Atrás">
             <svg viewBox="0 0 24 24" width="17" height="17"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-          <button class="icon-btn" id="forward" title="Adelante" aria-label="Adelante">
+          <button class="icon-btn" id="forward" title="Adelante (Ctrl+→)" aria-label="Adelante">
             <svg viewBox="0 0 24 24" width="17" height="17"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-          <button class="icon-btn" id="reload" title="Recargar" aria-label="Recargar">
+          <button class="icon-btn" id="reload" title="Recargar (Ctrl+R)" aria-label="Recargar">
             <svg viewBox="0 0 24 24" width="17" height="17"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
 
-        <form class="omnibox-form" id="omniboxForm">
-          <input class="omnibox" id="omnibox" type="text" spellcheck="false" placeholder="Buscá o escribí una dirección…" />
+        <form class="omnibox-form" id="omniboxForm" autocomplete="off">
+          <input class="omnibox" id="omnibox" type="text" spellcheck="false"
+                 placeholder="Buscá o escribí una dirección…" aria-label="Barra de direcciones" />
+          <button class="icon-btn star" id="bookmarkBtn" type="button" title="Marcar esta página (Ctrl+D)"
+                  aria-label="Marcar esta página" aria-pressed="false">☆</button>
+          <div class="suggestions" id="suggestions" hidden role="listbox"></div>
         </form>
 
         <div class="sites" id="sites"></div>
       </div>
     </header>
 
-    <main class="viewport" id="viewport"></main>
+    <main class="viewport" id="viewport">
+      <div class="findbar" id="findbar" hidden>
+        <input id="findInput" type="text" placeholder="Buscar en la página…" spellcheck="false" aria-label="Buscar en la página" />
+        <span class="find-count" id="findCount">0 de 0</span>
+        <button class="icon-btn" id="findPrev" title="Anterior (Ctrl+Shift+F)" aria-label="Anterior">↑</button>
+        <button class="icon-btn" id="findNext" title="Siguiente (F3)" aria-label="Siguiente">↓</button>
+        <button class="icon-btn" id="findClose" title="Cerrar (Esc)" aria-label="Cerrar">×</button>
+      </div>
+    </main>
 
     <aside class="sidebar" id="sidebar" aria-label="Panel de Nexo">
       <div class="sidebar-tabs" role="tablist">
         <button class="stab active" data-panel="activity">Actividad</button>
         <button class="stab" data-panel="memory">Memoria</button>
+        <button class="stab" data-panel="history">Historial</button>
+        <button class="stab" data-panel="bookmarks">Marcadores</button>
+        <button class="stab" data-panel="downloads">Descargas</button>
+        <button class="stab" data-panel="sites">Sitios</button>
         <button class="stab" data-panel="settings">Ajustes</button>
         <button class="stab" data-panel="about">Acerca</button>
       </div>
@@ -81,9 +97,7 @@
         <div class="mem-legend" id="memLegend"></div>
         <ul class="memory-list" id="memoryList"></ul>
 
-        <div class="panel-head">
-          <h2>Continuidad</h2>
-        </div>
+        <div class="panel-head"><h2>Continuidad</h2></div>
         <p class="note">
           El paquete de continuidad es un texto plano con lo esencial del proyecto. Pegalo al
           empezar una conversación en cualquier IA y seguís donde estabas.
@@ -93,12 +107,74 @@
           <button class="ghost" id="memCopy">Copiar</button>
         </div>
         <textarea class="mem-packet" id="memPacket" rows="6" spellcheck="false" placeholder="Acá aparece el paquete…"></textarea>
-
         <div class="mem-actions">
           <button class="ghost" id="memImport">Importar pegado</button>
           <button class="ghost danger" id="memClear">Vaciar memoria</button>
         </div>
         <p class="note" id="memFile"></p>
+      </section>
+
+      <section class="panel-view" data-panel="history">
+        <form class="mem-search" id="historySearchForm">
+          <input id="historySearch" type="text" spellcheck="false" placeholder="Buscar en el historial…" />
+        </form>
+        <div class="panel-head">
+          <h2>Historial</h2>
+          <select class="mini-select" id="historyRange" title="Qué borrar">
+            <option value="hour">última hora</option>
+            <option value="day">último día</option>
+            <option value="week">última semana</option>
+            <option value="month">último mes</option>
+            <option value="all">todo</option>
+          </select>
+          <button class="link danger" id="historyClear">Borrar</button>
+        </div>
+        <ul class="nav-list" id="historyList"></ul>
+        <p class="note" id="historyNote"></p>
+      </section>
+
+      <section class="panel-view" data-panel="bookmarks">
+        <form class="mem-search" id="bookmarkSearchForm">
+          <input id="bookmarkSearch" type="text" spellcheck="false" placeholder="Buscar en marcadores…" />
+        </form>
+        <div class="panel-head">
+          <h2>Marcadores</h2>
+          <button class="ghost" id="bookmarkCurrent">Marcar esta página</button>
+        </div>
+        <ul class="nav-list" id="bookmarkList"></ul>
+      </section>
+
+      <section class="panel-view" data-panel="downloads">
+        <div class="panel-head">
+          <h2>Descargas</h2>
+          <button class="link" id="downloadsClear">Limpiar terminadas</button>
+        </div>
+        <ul class="nav-list" id="downloadList"></ul>
+        <p class="note" id="downloadNote"></p>
+      </section>
+
+      <section class="panel-view" data-panel="sites">
+        <div class="panel-head"><h2>Sitio actual</h2></div>
+        <p class="note" id="siteHost">Ninguna página abierta</p>
+        <div class="zoom-row">
+          <button class="ghost" id="zoomOut" title="Alejar">−</button>
+          <span class="zoom-value" id="zoomValue">100 %</span>
+          <button class="ghost" id="zoomIn" title="Acercar">+</button>
+          <button class="link" id="zoomReset">restablecer</button>
+        </div>
+        <ul class="perm-list" id="permissionList"></ul>
+
+        <div class="panel-head"><h2>Datos guardados</h2></div>
+        <p class="note">
+          Nexo no envía nada a ningún servidor. Borrar acá afecta solo a este equipo.
+        </p>
+        <div class="danger-grid">
+          <button class="ghost" id="clearHistoryData">Historial</button>
+          <button class="ghost" id="clearCookies">Cookies y sesiones</button>
+          <button class="ghost" id="clearBookmarksData">Marcadores</button>
+          <button class="ghost-danger" id="clearEverything">Borrar todo</button>
+        </div>
+        <p class="note" id="profileNote"></p>
       </section>
 
       <section class="panel-view" data-panel="settings">
@@ -142,7 +218,7 @@
           <input type="number" id="setKeepRecent" min="2" max="40" step="1" />
         </label>
 
-        <div class="panel-head"><h2>Sitios</h2></div>
+        <div class="panel-head"><h2>Sitios de IA</h2></div>
         <ul class="sites-list" id="sitesList"></ul>
 
         <div class="panel-head"><h2>Privacidad</h2></div>
@@ -163,7 +239,14 @@
             <li><b>Antes de enviar:</b> limpia repeticiones, detecta instrucciones contradictorias, resuelve referencias sueltas y añade un protocolo anti-bucle.</li>
             <li><b>Antes de mostrar:</b> retiene unos caracteres, detecta repeticiones por período y corta la generación en el punto exacto.</li>
             <li><b>Después:</b> repara markdown, cierra bloques de código y ofrece continuar sin repetir.</li>
-            <li><b>Entre conversaciones:</b> EVO MEMORY destila lo que importa —objetivos, decisiones, restricciones, pendientes y problemas— y lo devuelve cuando hace falta, en lugar de arrastrar todo el historial.</li>
+            <li><b>Entre conversaciones:</b> EVO MEMORY destila objetivos, decisiones, restricciones, pendientes y problemas, y los devuelve cuando hacen falta.</li>
+          </ul>
+          <h3>Atajos</h3>
+          <ul class="shortcut-list">
+            <li><kbd>Ctrl</kbd>+<kbd>T</kbd> pestaña nueva · <kbd>Ctrl</kbd>+<kbd>W</kbd> cerrar · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> reabrir</li>
+            <li><kbd>Ctrl</kbd>+<kbd>L</kbd> barra de direcciones · <kbd>Ctrl</kbd>+<kbd>F</kbd> buscar en página</li>
+            <li><kbd>Ctrl</kbd>+<kbd>H</kbd> historial · <kbd>Ctrl</kbd>+<kbd>J</kbd> descargas · <kbd>Ctrl</kbd>+<kbd>D</kbd> marcar</li>
+            <li><kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> zoom · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> panel EVO</li>
           </ul>
           <p class="note">Sala de pruebas: <button class="link" id="openDemo">abrir</button></p>
         </div>

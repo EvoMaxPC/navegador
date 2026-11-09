@@ -20,6 +20,16 @@ dependencias en tiempo de ejecución.
 
 ---
 
+## Estado
+
+- **Navegador (etapa 2, completa):** pestañas, historial, marcadores, descargas,
+  restauración de sesión, buscar en página, zoom por sitio, permisos por sitio y
+  borrado de datos. Verificado con pruebas automáticas y con un checklist manual
+  en [`docs/NAVEGADOR.md`](docs/NAVEGADOR.md).
+- **Mediación (etapa 0, completa):** motor saliente, centinela, filtro SSE,
+  reparación, antibucles y EVO MEMORY.
+- **Interceptación de red por CDP (etapa 4):** aprobada, todavía no implementada.
+
 ## Probarlo en 30 segundos
 
 ```bash
@@ -190,6 +200,7 @@ cómo añadir uno.
 ## Estructura
 
 ```
+src/nav/         historial, marcadores, descargas, sesión, permisos, zoom, atajos
 src/memory/      EVO MEMORY: destilado, índice, recuperación, contexto, paquete
 src/core/        motor isomorfo, sin dependencias (Node y navegador)
   analysis.js      periodicidad, tartamudeo, truncamiento
@@ -203,9 +214,10 @@ src/inject/      capa inyectada en el mundo principal de la página
 src/preload/     puentes (pestañas y shell)
 src/main/        proceso principal: ventana, pestañas, ajustes, motor
 src/ui/shell/    interfaz del navegador
+src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
-test/            146 pruebas con node:test
-docs/            arquitectura, adaptadores, privacidad y memoria
+test/            195 pruebas con node:test
+docs/            arquitectura, navegador, adaptadores, privacidad, memoria y propuesta
 ```
 
 ## Privacidad

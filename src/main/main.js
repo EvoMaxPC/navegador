@@ -12,8 +12,11 @@ import { dirname, join, normalize, sep } from 'node:path';
 import { Store } from './store.js';
 import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
+import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
+import { hostOf, isInternal } from '../nav/url.js';
+import { sanitizeFilename } from '../nav/downloads.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -26,6 +29,12 @@ let win = null;
 let store = null;
 let engine = null;
 let memory = null;
+let profile = null;
+/** Guardado diferido: navegar no debe escribir en disco en cada clic. */
+let saveTimer = null;
+/** Relación entre descargas de Chromium y entradas del perfil. */
+const downloadItems = new Map();
+let downloadSeq = 0;
 
 /**
  * Esquema propio para servir la interfaz y la sala de pruebas desde el disco.
@@ -103,7 +112,30 @@ function createWindow() {
       broadcast('nexo:open-tab', { url });
       return { action: 'deny' };
     });
-    contents.on('destroyed', () => engine?.dropTab(contents.id));
+
+    // Historial: se registra desde el proceso principal para que no dependa de
+    // que el JavaScript de la interfaz esté vivo.
+    const recordVisit = (url, transition = 'link') => {
+      if (!profile || isInternal(url)) return;
+      profile.history.add({ url, title: contents.getTitle() || url, transition });
+      scheduleProfileSave();
+    };
+    contents.on('did-navigate', (_e, url) => recordVisit(url));
+    contents.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      if (isMainFrame) recordVisit(url, 'in-page');
+    });
+    contents.on('page-title-updated', (_e, title) => {
+      const url = contents.getURL();
+      if (profile && url) profile.history.retitle(url, title);
+    });
+    contents.on('did-finish-load', () => {
+      applyZoom(contents);
+    });
+
+    contents.on('destroyed', () => {
+      engine?.dropTab(contents.id);
+      if (profile) profile.saveAll();
+    });
     if (isDev) contents.on('console-message', (_e, level, message) => console.log('[pestaña]', message));
   });
 
@@ -168,16 +200,256 @@ function registerIpc() {
   });
 
   ipcMain.handle('nexo:open-external', (_event, url) => shell.openExternal(url));
+
+  /* ---------------- navegador: perfil ---------------- */
+  ipcMain.handle('nexo:profile:stats', () => profile?.stats() || null);
+  ipcMain.handle('nexo:profile:clear', (_event, scope = {}) => {
+    const result = profile?.clear(scope) || {};
+    broadcast('nexo:profile-changed', profile?.stats() || null);
+    return result;
+  });
+
+  /* ---------------- historial ---------------- */
+  ipcMain.handle('nexo:history:list', (_event, payload = {}) => {
+    if (!profile) return [];
+    const limit = Math.min(500, Number(payload.limit) || 100);
+    return payload.query
+      ? profile.history.search(payload.query, { limit })
+      : profile.history.recent({ limit, offset: Number(payload.offset) || 0 });
+  });
+  ipcMain.handle('nexo:history:top', (_event, payload = {}) => profile?.history.topSites(payload) || []);
+  ipcMain.handle('nexo:history:remove', (_event, id) => ({ ok: Boolean(profile?.history.remove(id)) }));
+  ipcMain.handle('nexo:history:clear', (_event, payload = {}) => {
+    const since = payload.range === 'all' ? null : Date.now() - rangeMs(payload.range);
+    const result = profile?.history.clear({ since }) || { removed: 0 };
+    profile?.history.save({ force: true });
+    broadcast('nexo:profile-changed', profile?.stats() || null);
+    return result;
+  });
+  ipcMain.handle('nexo:suggest', async (_event, payload = {}) => {
+    if (!profile) return [];
+    const query = String(payload.query || '');
+    const bookmarks = profile.bookmarks.suggest(query, { limit: 4 });
+    const history = profile.history.suggest(query, { limit: 6 });
+    const seen = new Set();
+    return [...bookmarks, ...history].filter((item) => {
+      if (seen.has(item.url)) return false;
+      seen.add(item.url);
+      return true;
+    }).slice(0, 8);
+  });
+
+  /* ---------------- marcadores ---------------- */
+  ipcMain.handle('nexo:bookmarks:list', (_event, payload = {}) => profile?.bookmarks.list(payload) || []);
+  ipcMain.handle('nexo:bookmarks:folders', () => profile?.bookmarks.folders() || []);
+  ipcMain.handle('nexo:bookmarks:is', (_event, url) => Boolean(profile?.bookmarks.isBookmarked(url)));
+  ipcMain.handle('nexo:bookmarks:toggle', (_event, payload = {}) => {
+    const result = profile?.bookmarks.toggle(payload) || { added: false, bookmark: null };
+    profile?.bookmarks.save({ force: true });
+    broadcast('nexo:bookmarks-changed', { url: payload.url, added: result.added });
+    return result;
+  });
+  ipcMain.handle('nexo:bookmarks:clear', () => {
+    const result = profile?.bookmarks.clear() || { removed: 0 };
+    profile?.bookmarks.save({ force: true });
+    broadcast('nexo:bookmarks-changed', {});
+    return result;
+  });
+  ipcMain.handle('nexo:bookmarks:remove', (_event, id) => {
+    const ok = Boolean(profile?.bookmarks.remove(id));
+    profile?.bookmarks.save({ force: true });
+    broadcast('nexo:bookmarks-changed', {});
+    return { ok };
+  });
+
+  /* ---------------- descargas ---------------- */
+  ipcMain.handle('nexo:downloads:list', () => profile?.downloads.list({ limit: 100 }) || []);
+  ipcMain.handle('nexo:downloads:open', async (_event, id) => {
+    const item = profile?.downloads.get(id);
+    if (!item?.savePath) return { ok: false };
+    const error = await shell.openPath(item.savePath);
+    return { ok: !error, error: error || null };
+  });
+  ipcMain.handle('nexo:downloads:show', (_event, id) => {
+    const item = profile?.downloads.get(id);
+    if (!item?.savePath) return { ok: false };
+    shell.showItemInFolder(item.savePath);
+    return { ok: true };
+  });
+  ipcMain.handle('nexo:downloads:cancel', (_event, id) => {
+    const entry = downloadItems.get(id);
+    if (!entry) return { ok: false };
+    entry.item.cancel();
+    return { ok: true };
+  });
+  ipcMain.handle('nexo:downloads:clear', () => {
+    const result = profile?.downloads.clearFinished() || { removed: 0 };
+    profile?.downloads.save({ force: true });
+    broadcast('nexo:downloads-changed', profile?.downloads.stats() || null);
+    return result;
+  });
+
+  /* ---------------- permisos y zoom ---------------- */
+  ipcMain.handle('nexo:permissions:for', (_event, host) => profile?.permissions.rulesFor(host) || []);
+  ipcMain.handle('nexo:permissions:set', (_event, payload = {}) => {
+    const ok = Boolean(profile?.permissions.set(payload.host, payload.permission, payload.value));
+    profile?.permissions.save({ force: true });
+    return { ok };
+  });
+  ipcMain.handle('nexo:permissions:sites', () => profile?.permissions.list() || []);
+  ipcMain.handle('nexo:permissions:clear', (_event, host) => {
+    const result = profile?.permissions.clear(host);
+    profile?.permissions.save({ force: true });
+    return { ok: Boolean(result) };
+  });
+  ipcMain.handle('nexo:zoom:get', (_event, target) => profile?.zoom.get(target) ?? 1);
+  ipcMain.handle('nexo:zoom:set', (_event, payload = {}) => {
+    const level = profile?.zoom.set(payload.target, payload.level) ?? 1;
+    profile?.zoom.save();
+    return { level };
+  });
+  ipcMain.handle('nexo:zoom:list', () => profile?.zoom.list() || []);
+
+  /* ---------------- datos del sitio ---------------- */
+  ipcMain.handle('nexo:data:clear', async (_event, scope = {}) => {
+    const target = session.fromPartition('persist:nexo');
+    const done = { ok: true, cookies: false, cache: false };
+    try {
+      if (scope.cookies) {
+        await target.clearStorageData({
+          storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage'],
+        });
+        done.cookies = true;
+      }
+      if (scope.cache) {
+        await target.clearCache();
+        done.cache = true;
+      }
+    } catch (error) {
+      done.ok = false;
+      done.error = error.message;
+    }
+    return done;
+  });
+
+  /* ---------------- sesión ---------------- */
+  ipcMain.handle('nexo:session:capture', (_event, payload = {}) => {
+    profile?.session.capture(payload.windows || []);
+    return { ok: true };
+  });
+  ipcMain.handle('nexo:session:restore', () => profile?.session.restore() || null);
+  ipcMain.handle('nexo:session:clear', () => {
+    profile?.session.clear();
+    return { ok: true };
+  });
+}
+
+/** Guarda el perfil poco después del último cambio, no en cada navegación. */
+function scheduleProfileSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      profile?.saveAll();
+    } catch (error) {
+      console.error('[nexo] no se pudo guardar el perfil:', error.message);
+    }
+  }, 4000);
+}
+
+/** Milisegundos de los rangos de borrado que ofrece el historial. */
+function rangeMs(range) {
+  const hour = 3_600_000;
+  switch (range) {
+    case 'hour':
+      return hour;
+    case 'day':
+      return 24 * hour;
+    case 'week':
+      return 7 * 24 * hour;
+    case 'month':
+      return 30 * 24 * hour;
+    default:
+      return 0;
+  }
+}
+
+/** Aplica el zoom guardado del sitio a una pestaña. */
+function applyZoom(contents) {
+  if (!profile) return;
+  try {
+    const level = profile.zoom.get(contents.getURL());
+    if (Math.abs(contents.getZoomFactor() - level) > 0.001) contents.setZoomFactor(level);
+  } catch {
+    /* una pestaña destruida no debería tumbar el proceso principal */
+  }
 }
 
 // Un único perfil persistente: las sesiones de los sitios de IA sobreviven al
 // cierre de la aplicación, igual que en un navegador normal.
 function configureSession() {
   const s = session.fromPartition('persist:nexo');
-  s.setPermissionRequestHandler((_wc, permission, callback) => {
-    // Solo se conceden permisos que los chats necesitan de verdad.
-    callback(['clipboard-read', 'clipboard-sanitized-write', 'notifications'].includes(permission));
+
+  // Permisos por sitio: la política del perfil decide, y todo lo denegado queda
+  // registrado para que el usuario sepa por qué un sitio no funciona como espera.
+  s.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const host = hostOf(webContents?.getURL() || '') || hostOf(details?.requestingUrl || '');
+    const decision = profile ? profile.permissions.decide(host, permission) : 'deny';
+    const granted = decision === 'allow';
+    if (!granted && profile) {
+      const entry = {
+        kind: 'system',
+        code: 'permission-denied',
+        severity: 'info',
+        title: `Permiso «${permission}» no concedido a ${host || 'sitio desconocido'}`,
+        detail: 'Podés habilitarlo en Panel → Sitios cuando quieras.',
+        ts: Date.now(),
+      };
+      store.pushLog(entry);
+      broadcast('nexo:event', { type: 'intervention', payload: entry });
+    }
+    callback(granted);
   });
+  s.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
+    if (!profile) return false;
+    return profile.permissions.decide(hostOf(requestingOrigin), permission) === 'allow';
+  });
+
+  // Descargas: se reflejan en el gestor del perfil.
+  s.on('will-download', (_event, item) => {
+    if (!profile) return;
+    downloadSeq += 1;
+    const id = `dl-${Date.now().toString(36)}-${downloadSeq}`;
+    const entry = profile.downloads.start({
+      id,
+      url: item.getURL(),
+      filename: sanitizeFilename(item.getFilename()),
+      totalBytes: item.getTotalBytes(),
+    });
+    downloadItems.set(id, { item, entry });
+    broadcast('nexo:downloads-changed', profile.downloads.stats());
+
+    item.on('updated', (_e, state) => {
+      if (state === 'interrupted') {
+        profile.downloads.finish(id, { state: 'interrupted' });
+      } else if (state === 'progressing') {
+        profile.downloads.progress(id, { receivedBytes: item.getReceivedBytes(), totalBytes: item.getTotalBytes() });
+      }
+      broadcast('nexo:downloads-changed', profile.downloads.stats());
+    });
+
+    item.once('done', (_e, state) => {
+      const savePath = item.getSavePath() || null;
+      profile.downloads.finish(id, {
+        state: state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'interrupted',
+        savePath,
+      });
+      profile.downloads.save({ force: true });
+      downloadItems.delete(id);
+      broadcast('nexo:downloads-changed', profile.downloads.stats());
+      broadcast('nexo:download-done', { id, state, filename: item.getFilename() });
+    });
+  });
+
   return s;
 }
 
@@ -191,6 +463,8 @@ app.whenReady().then(async () => {
     episodeEvery: store.settings.memory?.episodeEvery,
   });
   memory = created;
+  profile = createProfile({ dir: app.getPath('userData') });
+  profile.history.prune();
   engine = new Engine({
     store,
     memory: created.memory,
@@ -209,6 +483,17 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// La sesión y el perfil se guardan al salir, incluso si la ventana se cerró de
+// golpe: son datos que el usuario espera recuperar.
+app.on('before-quit', () => {
+  try {
+    profile?.saveAll();
+    memory?.flush?.();
+  } catch (error) {
+    console.error('[nexo] no se pudo guardar el perfil:', error.message);
+  }
 });
 
 // Endurecimiento: ninguna pestaña puede pedir Node ni cambiar su preload.

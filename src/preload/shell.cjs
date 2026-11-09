@@ -5,7 +5,17 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-const ALLOWED_EVENTS = new Set(['nexo:event', 'nexo:settings-changed', 'nexo:command', 'nexo:open-tab', 'nexo:memory-changed']);
+const ALLOWED_EVENTS = new Set([
+  'nexo:event',
+  'nexo:settings-changed',
+  'nexo:command',
+  'nexo:open-tab',
+  'nexo:memory-changed',
+  'nexo:profile-changed',
+  'nexo:bookmarks-changed',
+  'nexo:downloads-changed',
+  'nexo:download-done',
+]);
 
 contextBridge.exposeInMainWorld('nexo', {
   getConfig: () => ipcRenderer.invoke('nexo:shell:config'),
@@ -19,6 +29,60 @@ contextBridge.exposeInMainWorld('nexo', {
   getStats: () => ipcRenderer.invoke('nexo:stats'),
 
   openExternal: (url) => ipcRenderer.invoke('nexo:open-external', url),
+
+  profile: {
+    stats: () => ipcRenderer.invoke('nexo:profile:stats'),
+    clear: (scope) => ipcRenderer.invoke('nexo:profile:clear', scope),
+  },
+
+  history: {
+    list: (payload) => ipcRenderer.invoke('nexo:history:list', payload),
+    top: (payload) => ipcRenderer.invoke('nexo:history:top', payload),
+    remove: (id) => ipcRenderer.invoke('nexo:history:remove', id),
+    clear: (range) => ipcRenderer.invoke('nexo:history:clear', { range }),
+  },
+
+  suggest: (query) => ipcRenderer.invoke('nexo:suggest', { query }),
+
+  bookmarks: {
+    list: (payload) => ipcRenderer.invoke('nexo:bookmarks:list', payload),
+    folders: () => ipcRenderer.invoke('nexo:bookmarks:folders'),
+    is: (url) => ipcRenderer.invoke('nexo:bookmarks:is', url),
+    toggle: (payload) => ipcRenderer.invoke('nexo:bookmarks:toggle', payload),
+    remove: (id) => ipcRenderer.invoke('nexo:bookmarks:remove', id),
+    clear: () => ipcRenderer.invoke('nexo:bookmarks:clear'),
+  },
+
+  downloads: {
+    list: () => ipcRenderer.invoke('nexo:downloads:list'),
+    open: (id) => ipcRenderer.invoke('nexo:downloads:open', id),
+    show: (id) => ipcRenderer.invoke('nexo:downloads:show', id),
+    cancel: (id) => ipcRenderer.invoke('nexo:downloads:cancel', id),
+    clear: () => ipcRenderer.invoke('nexo:downloads:clear'),
+  },
+
+  permissions: {
+    for: (host) => ipcRenderer.invoke('nexo:permissions:for', host),
+    set: (payload) => ipcRenderer.invoke('nexo:permissions:set', payload),
+    sites: () => ipcRenderer.invoke('nexo:permissions:sites'),
+    clear: (host) => ipcRenderer.invoke('nexo:permissions:clear', host),
+  },
+
+  zoom: {
+    get: (target) => ipcRenderer.invoke('nexo:zoom:get', target),
+    set: (target, level) => ipcRenderer.invoke('nexo:zoom:set', { target, level }),
+    list: () => ipcRenderer.invoke('nexo:zoom:list'),
+  },
+
+  data: {
+    clear: (scope) => ipcRenderer.invoke('nexo:data:clear', scope),
+  },
+
+  session: {
+    capture: (windows) => ipcRenderer.invoke('nexo:session:capture', { windows }),
+    restore: () => ipcRenderer.invoke('nexo:session:restore'),
+    clear: () => ipcRenderer.invoke('nexo:session:clear'),
+  },
 
   memory: {
     stats: () => ipcRenderer.invoke('nexo:memory:stats'),
