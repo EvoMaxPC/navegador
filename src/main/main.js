@@ -14,6 +14,7 @@ import { Store } from './store.js';
 import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
 import { CdpObserver } from './cdp.js';
+import { isAiHost } from '../core/cdp.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
@@ -216,9 +217,12 @@ async function servirArchivo(request) {
  * no debe llenar el registro.
  */
 const diagnosticSeen = new Map();
-function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {} }) {
+function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
   if (!store) return null;
-  const key = `${code}|${title}`;
+  // La clave agrupa lo que es el mismo aviso. Por omisión, código y título; el
+  // vigilante de red pasa una clave con la ruta, para que dos endpoints
+  // distintos del mismo proveedor no se pisen.
+  const key = explicitKey || `${code}|${title}`;
   const now = Date.now();
   if (now - (diagnosticSeen.get(key) || 0) < 30_000) return null;
   diagnosticSeen.set(key, now);
@@ -682,12 +686,97 @@ function applyZoom(contents) {
 
 // Un único perfil persistente: las sesiones de los sitios de IA sobreviven al
 // cierre de la aplicación, igual que en un navegador normal.
+/** Ruta corta de una URL, para el registro. */
+function shortPath(url) {
+  try {
+    return new URL(url).pathname.slice(0, 120);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Vigilancia de red de los proveedores, **sólo lectura**.
+ *
+ * `webRequest.onCompleted` y `onErrorOccurred` son notificaciones: no pueden
+ * modificar ni retener una petición, así que no cambian lo que el sitio ve. Y a
+ * diferencia del observador CDP, no dependen de que la mediación esté encendida.
+ *
+ * Es la respuesta al caso que hasta ahora no dejaba rastro: ChatGPT cargando bien
+ * pero contestando «No se pudo conectar» con la mediación apagada. El registro
+ * dirá qué endpoint respondió qué código.
+ */
+const WATCHED_RESOURCE_TYPES = new Set(['xhr', 'fetch', 'other']);
+
+function watchProviderNetwork(s) {
+  const seen = new Map();
+  const once = (key) => {
+    const now = Date.now();
+    if (now - (seen.get(key) || 0) < 60_000) return false;
+    seen.set(key, now);
+    if (seen.size > 200) seen.delete(seen.keys().next().value);
+    return true;
+  };
+
+  s.webRequest.onCompleted({ urls: ['*://*/*'] }, (details = {}) => {
+    const url = String(details.url || '');
+    const host = hostOf(url);
+    if (!isAiHost(host)) return;
+    if (!WATCHED_RESOURCE_TYPES.has(String(details.resourceType || 'other'))) return;
+    const status = Number(details.statusCode) || 0;
+    if (status < 400) return;
+    const path = shortPath(url);
+    const key = `${host}|${status}|${path}`;
+    if (!once(key)) return;
+    noteDiagnostic({
+      code: 'http-error',
+      key: `http-error|${key}`,
+      title: `${host} respondió ${status}`,
+      detail: `${details.method || 'GET'} ${path}: el servidor del proveedor rechazó la petición.`,
+      meta: { host, status, path, method: details.method || 'GET', resourceType: details.resourceType || null },
+    });
+  });
+
+  s.webRequest.onErrorOccurred({ urls: ['*://*/*'] }, (details = {}) => {
+    const url = String(details.url || '');
+    const host = hostOf(url);
+    if (!isAiHost(host)) return;
+    if (!WATCHED_RESOURCE_TYPES.has(String(details.resourceType || 'other'))) return;
+    const error = String(details.error || '');
+    // `net::ERR_ABORTED` es lo normal cuando el sitio cancela: no es un fallo.
+    if (!error || error.includes('ERR_ABORTED')) return;
+    const path = shortPath(url);
+    const key = `${host}|${error}|${path}`;
+    if (!once(key)) return;
+    noteDiagnostic({
+      code: 'net-failed',
+      key: `net-failed|${key}`,
+      title: `${host} no llegó a responder`,
+      detail: `${details.method || 'GET'} ${path}: ${error}.`,
+      meta: { host, error, path, method: details.method || 'GET', resourceType: details.resourceType || null },
+    });
+  });
+}
+
 function configureSession() {
   const s = session.fromPartition('persist:nexo');
 
   // Mismo `User-Agent` limpio que el resto de la aplicación: si la sesión
   // tuviera otro, las peticiones de las pestañas volverían a delatarse.
   if (USER_AGENT) s.setUserAgent(USER_AGENT);
+  // Se anota el UA efectivo una vez: es el dato que permite comprobar, en el
+  // registro, que la compilación que corre ya no lleva las marcas de Electron.
+  noteDiagnostic({
+    code: 'user-agent',
+    severity: 'info',
+    key: 'user-agent',
+    title: 'Cliente que se presenta al sitio',
+    detail: USER_AGENT || '(el de Chromium por omisión)',
+    meta: { userAgent: USER_AGENT },
+  });
+  // `NEXO_NETWATCH=0` la apaga sin tocar nada más, para poder descartarla como
+  // variable al comparar dos arranques.
+  if (process.env.NEXO_NETWATCH !== '0') watchProviderNetwork(s);
 
   // Sin corrector ortográfico: Chromium levanta un proceso aparte y descarga
   // diccionarios por idioma. En un navegador de chat el texto que se escribe

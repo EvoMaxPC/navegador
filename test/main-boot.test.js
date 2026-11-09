@@ -317,3 +317,49 @@ test('el navegador no se delata como cliente automatizado en el User-Agent', asy
   assert.ok(nexo.length >= 1, 'la sesión de las pestañas fija su User-Agent');
   for (const item of nexo) assert.equal(item.ua, app.userAgentFallback);
 });
+
+test('la red del proveedor se vigila sin poder modificarla', async () => {
+  const { journal: j } = await import('./harness/electron-stub.mjs');
+
+  // El vigilante se registra en la sesión de las pestañas y no devuelve nada:
+  // `onCompleted` y `onErrorOccurred` son notificaciones, no interceptores.
+  const completed = j.webRequest.completed.get('persist:nexo');
+  const errors = j.webRequest.errors.get('persist:nexo');
+  assert.ok(completed, 'se escucha el fin de cada petición');
+  assert.ok(errors, 'se escuchan los fallos de red');
+  assert.deepEqual(completed.filter.urls, ['*://*/*']);
+
+  const before = (await callIpc('nexo:log')).length;
+
+  completed.listener({ url: 'https://chatgpt.com/backend-api/conversation', method: 'POST', statusCode: 403, resourceType: 'xhr' });
+  let log = await callIpc('nexo:log');
+  const fallo = log.find((entry) => entry.code === 'http-error');
+  assert.ok(fallo, 'un 403 del proveedor queda anotado');
+  assert.equal(fallo.meta.status, 403);
+  assert.equal(fallo.meta.host, 'chatgpt.com');
+  assert.equal(fallo.meta.path, '/backend-api/conversation');
+  assert.match(fallo.title, /chatgpt\.com respondió 403/);
+
+  // Lo que no es un fallo del proveedor no ensucia el registro: ni un 200, ni un
+  // host cualquiera, ni un aborto provocado por el propio sitio.
+  completed.listener({ url: 'https://chatgpt.com/backend-api/me', method: 'GET', statusCode: 200, resourceType: 'xhr' });
+  completed.listener({ url: 'https://ejemplo.com/api/x', method: 'POST', statusCode: 500, resourceType: 'xhr' });
+  errors.listener({ url: 'https://chatgpt.com/backend-api/otra', method: 'POST', resourceType: 'xhr', error: 'net::ERR_ABORTED' });
+  log = await callIpc('nexo:log');
+  assert.equal(log.length, before + 1, 'sólo se sumó la entrada del 403');
+
+  // Un fallo de red real sí se anota, con su código.
+  errors.listener({ url: 'https://chatgpt.com/backend-api/conversation', method: 'POST', resourceType: 'xhr', error: 'net::ERR_CONNECTION_RESET' });
+  log = await callIpc('nexo:log');
+  const red = log.find((entry) => entry.code === 'net-failed');
+  assert.ok(red, 'el corte de conexión queda anotado');
+  assert.equal(red.meta.error, 'net::ERR_CONNECTION_RESET');
+});
+
+test('el registro dice con qué cliente se presenta el navegador', async () => {
+  const log = await callIpc('nexo:log');
+  const entrada = log.find((entry) => entry.code === 'user-agent');
+  assert.ok(entrada, 'queda constancia del User-Agent efectivo');
+  assert.doesNotMatch(entrada.detail, /Electron\//);
+  assert.doesNotMatch(entrada.detail, /Nexo\//);
+});

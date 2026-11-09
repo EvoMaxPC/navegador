@@ -184,9 +184,28 @@ Reglas que los gobiernan:
   tal cual llegó y avisa una sola vez (`page-error`): un `throw` dentro del
   `TransformStream` cerraría el cuerpo y la página vería la petición rota.
 
-`NEXO_CDP=0` apaga toda la observación sin tocar la mediación.
+### Vigilante de red (no depende de la mediación)
+
+Mientras CDP necesita el depurador —y por lo tanto un sitio habilitado—, el
+vigilante de la sesión escucha siempre: `webRequest.onCompleted` y
+`onErrorOccurred` son **notificaciones**, no interceptores, así que no pueden
+modificar ni retener una petición y no cambian lo que el sitio ve. Anota los
+mismos `http-error` y `net-failed` de la tabla, sólo para hosts con perfil y sólo
+para XHR/Fetch, con `meta.path` para distinguir endpoints. `net::ERR_ABORTED` y
+los 2xx/3xx se ignoran.
+
+Es el camino que sirve cuando la mediación está apagada: la página carga, el
+sitio contesta «No se pudo conectar» y el registro dice exactamente qué endpoint
+respondió qué código.
+
+`NEXO_CDP=0` apaga la observación por depurador y `NEXO_NETWATCH=0` el vigilante
+de red; ninguno de los dos toca la mediación.
 
 ### Huella del cliente
+
+Al arrancar queda una entrada `user-agent` (severidad `info`) con el texto
+efectivo: es la forma de comprobar que la compilación que corre ya no lleva las
+marcas de Electron.
 
 Chromium en Electron se presenta con `Electron/x` y el nombre de la aplicación
 en el `User-Agent`. Los proveedores con protección anti-bot (ChatGPT y Claude
