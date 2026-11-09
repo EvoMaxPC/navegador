@@ -107,6 +107,13 @@ window.addEventListener('message', async (event) => {
     return;
   }
 
+  // «La capa quedó instalada»: sin este aviso no había forma de distinguir una
+  // página que nunca se medió de una página donde la inyección no corrió.
+  if (data.__nexo === 'ready') {
+    ipcRenderer.send('nexo:event', { type: 'ready', payload: data.payload || {}, href: location.href });
+    return;
+  }
+
   if (data.__nexo === 'event') {
     const { type, payload } = data;
     if (type === 'stream-end') {

@@ -510,3 +510,17 @@ test('cada mensaje enviado y cada respuesta quedan registrados', async () => {
   assert.equal(respuesta.kind, 'receiving');
   assert.match(respuesta.detail, /40 caracteres/);
 });
+
+test('la capa anuncia que quedó instalada', async () => {
+  const { journal: j } = await import('./harness/electron-stub.mjs');
+  const listener = j.ipcListeners.get('nexo:event');
+  const sender = { getType: () => 'webview', getURL: () => 'https://claude.ai/chat/1' };
+
+  listener({ sender }, { type: 'ready', payload: { site: 'claude', host: 'claude.ai', version: '0.1.0' } });
+
+  const log = await callIpc('nexo:log');
+  const entrada = log.find((entry) => entry.code === 'layer-active');
+  assert.ok(entrada, 'la instalación de la capa queda registrada');
+  assert.equal(entrada.severity, 'info');
+  assert.match(entrada.title, /claude\.ai/);
+});

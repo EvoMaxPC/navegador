@@ -592,6 +592,21 @@ function registerIpc() {
       return;
     }
 
+    // La capa avisa al instalarse. Es la señal que separa «el sitio no se está
+    // mediando» de «la inyección no llegó a correr».
+    if (clean.type === 'ready') {
+      const host = hostOf(href) || String(clean.payload.host || 'la página');
+      noteDiagnostic({
+        code: 'layer-active',
+        severity: 'info',
+        key: `layer-active|${host}`,
+        title: `Capa de mediación activa en ${host}`,
+        detail: `Perfil ${clean.payload.site || 'genérico'} · versión ${clean.payload.version || '0.1.0'}`,
+        meta: { host, site: clean.payload.site || null, version: clean.payload.version || null },
+      });
+      return;
+    }
+
     // Un envío reconocido se anota siempre, se haya mediado o no: es la prueba
     // de que el mensaje salió, y hasta ahora el panel sólo veía el caso en el
     // que el motor inyectaba algo.
