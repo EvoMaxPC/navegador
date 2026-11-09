@@ -190,6 +190,38 @@ Ocho métricas independientes, cada una con su hecho, expuestas por
 | `loopsSeen` | bucles observados | centinelas de cada guardián + observación CDP |
 | `loopsCut` | bucles cortados | cierre de stream con `stopped: true` |
 
+### De dónde sale cada hecho
+
+La entrada (mensaje del usuario) se reconoce por **tres caminos independientes**,
+y basta con uno:
+
+1. **El gesto de enviar** en la página: clic en el botón de enviar o Enter en el
+   cuadro, con texto escrito. No depende de cómo venga el cuerpo de la petición.
+2. **La petición de la capa**: el cuerpo JSON que sale hacia el sitio, leído
+   dentro de la página.
+3. **La petición observada por CDP**: el mismo cuerpo, leído desde el proceso
+   principal con `Network.requestWillBeSent`. Es el camino que sigue funcionando
+   si la capa no se instaló o el sitio la bloqueó.
+
+Un envío tiene un `messageId` y se cuenta **una sola vez**: el gesto y la
+petición se enlazan por ese identificador, y si los dos caminos lo anuncian con
+identificadores distintos, el motor los reconoce por la huella del texto
+(`fingerprint` de la misma función que usa el resto del motor) y por la cercanía
+en el tiempo. Dos mensajes iguales seguidos desde la misma fuente son dos
+mensajes.
+
+La salida (respuesta) se captura por:
+
+- el **stream SSE** que envuelve la capa de la página;
+- **CDP**, con los frames de WebSocket, los cuerpos JSON de una petición propia
+  del sitio y —cuando la capa no está viva en esa pestaña— el cuerpo completo del
+  SSE, que el depurador entrega al terminar.
+
+Un `GET` del historial de la conversación devuelve JSON con todos los mensajes
+anteriores: **no es una respuesta nueva** y no se cuenta. Una respuesta que llega
+en pedazos se acumula y se cuenta al cerrarse; mientras crece no suma respuestas,
+sólo corrige los tokens de salida.
+
 Reglas que sostienen la cuenta:
 
 - **La captura no depende de la mediación.** La capa envuelve la respuesta de

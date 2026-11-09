@@ -18,6 +18,7 @@ import { isAiHost } from '../core/cdp.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
+import { estimateTokens } from '../core/text.js';
 import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
@@ -607,6 +608,9 @@ function registerIpc() {
     // La capa avisa al instalarse. Es la señal que separa «el sitio no se está
     // mediando» de «la inyección no llegó a correr».
     if (clean.type === 'ready') {
+      // Con la capa viva, el stream lo captura ella y CDP no lo lee: así una
+      // respuesta no se cuenta dos veces.
+      engine.noteLayer(event.sender.id);
       const host = hostOf(href) || String(clean.payload.host || 'la página');
       noteDiagnostic({
         code: 'layer-active',
@@ -633,13 +637,19 @@ function registerIpc() {
         title: `Mensaje enviado en ${host}`,
         detail: clean.payload.mediated
           ? 'El texto salió mediado por el motor.'
-          : 'El texto salió sin cambios: el motor no modificó este mensaje.',
+          : clean.payload.textFound === false
+            ? 'Envío contado: la petición salió, pero su texto no se pudo leer.'
+            : 'El texto salió sin cambios: el motor no modificó este mensaje.',
         meta: {
           host,
           site: clean.payload.site || null,
           url: clean.payload.url || '',
           messageId: clean.payload.messageId || null,
           conversationId: clean.payload.conversationId || null,
+          // `composer` = lo detectó el gesto de enviar; `request` = la petición.
+          source: clean.payload.source || 'request',
+          // Si no se pudo leer el texto del cuerpo, el mensaje se cuenta igual.
+          textFound: clean.payload.textFound !== false,
           mediated: Boolean(clean.payload.mediated),
           chars: Number(clean.payload.chars) || 0,
           tokens: Number(clean.payload.tokens) || 0,
@@ -1057,6 +1067,61 @@ app.whenReady().then(async () => {
     // Se vuelve a consultar al leer cuerpos, por si el interruptor cambia con la
     // pestaña ya abierta.
     contentAllowed: (host) => engine.isEnabledFor(host),
+    // Lo que CDP cuenta se ve al instante y queda en el registro con su origen:
+    // sin esto, una respuesta contada por observación no refrescaba el panel.
+    onEvent: (id, event) => {
+      try {
+        if (event?.type === 'send') {
+          if (event.duplicate) return;
+          const entry = {
+            kind: 'sending',
+            code: 'outgoing-cdp',
+            severity: 'info',
+            title: `Mensaje enviado en ${event.host}`,
+            detail: 'Envío leído de la petición del sitio (observación CDP).',
+            meta: {
+              host: event.host,
+              site: event.site || null,
+              url: event.url || '',
+              source: 'cdp',
+              chars: event.chars,
+              tokens: event.tokens,
+            },
+            ts: Date.now(),
+          };
+          if (store) store.pushLog(entry);
+          broadcast('nexo:event', { type: 'intervention', payload: entry });
+        } else if (event?.type === 'capture' && !event.duplicate) {
+          const capture = event.capture || {};
+          const host = capture.host || 'el sitio';
+          const chars = String(capture.text || '').length;
+          const entry = {
+            kind: 'receiving',
+            code: 'incoming-cdp',
+            severity: 'info',
+            title: `Respuesta recibida en ${host}`,
+            detail: `${chars} caracteres leídos por ${capture.source === 'websocket' ? 'el socket' : 'el cuerpo JSON'}.`,
+            meta: {
+              host,
+              site: capture.site || null,
+              url: capture.url || '',
+              source: capture.source === 'websocket' ? 'cdp-ws' : 'cdp-json',
+              chars,
+              tokens: estimateTokens(String(capture.text || '')),
+              conversationId: capture.conversationId || null,
+            },
+            ts: Date.now(),
+          };
+          if (store) store.pushLog(entry);
+          broadcast('nexo:event', { type: 'intervention', payload: entry });
+        } else {
+          return;
+        }
+        broadcast('nexo:stats-changed', engine.stats());
+      } catch (error) {
+        console.log('[cdp] al avisar:', error?.message || error);
+      }
+    },
   });
   registerProtocol();
   registerIpc();

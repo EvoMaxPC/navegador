@@ -30,7 +30,8 @@ import {
   promptOf,
   terminalOf,
 } from '../core/cdp.js';
-import { detectSite } from '../core/sites.js';
+import { detectSite, locateUserText } from '../core/sites.js';
+import { estimateTokens, fingerprint } from '../core/text.js';
 
 /** Versión del protocolo que expone Electron/Chromium. */
 const CDP_VERSION = '1.3';
@@ -53,6 +54,12 @@ export class CdpObserver {
   constructor(opts = {}) {
     this.engine = opts.engine || null;
     this.log = opts.log || (() => {});
+    /**
+     * Aviso de lo que se cuenta: `{type:'send'|'capture'}`. Lo usa el proceso
+     * principal para dejarlo en el registro y refrescar los contadores de la
+     * interfaz sin esperar a que el usuario cambie de pestaña.
+     */
+    this.onEvent = opts.onEvent || (() => {});
     this.enabled = opts.enabled !== false;
     /**
      * ¿Está permitido observar este sitio? Con la mediación apagada, no: ni se
@@ -311,13 +318,102 @@ export class CdpObserver {
   #requestStarted(state, params) {
     const type = String(params.type || '');
     if (!OBSERVED_RESOURCE_TYPES.has(type)) return;
-    const url = String(params.request?.url || '');
+    const request = params.request || {};
+    const url = String(request.url || '');
     const host = hostOf(url);
     if (!isAiHost(host)) return;
-    state.requests.set(params.requestId, { url, host, site: detectSite(host).id, type });
+    const method = String(request.method || 'GET').toUpperCase();
+    const entry = {
+      url,
+      host,
+      site: detectSite(host).id,
+      type,
+      method,
+      post: method === 'POST',
+      send: false,
+      prompt: null,
+    };
+    state.requests.set(params.requestId, entry);
     if (state.requests.size > 200) {
       const first = state.requests.keys().next().value;
       state.requests.delete(first);
+    }
+
+    // El cuerpo de la petición trae el mensaje del usuario. Leerlo acá es lo que
+    // hace que la entrada se cuente aunque la capa de la página no esté activa.
+    if (entry.post && this.contentAllowed(host)) {
+      this.#noteSend(state, params.requestId, String(request.postData || '')).catch((error) =>
+        this.log(`CDP: al leer el envío: ${error?.message || error}`),
+      );
+    }
+  }
+
+  /**
+   * Anota el mensaje del usuario de una petición POST.
+   *
+   * Es el mismo dato que la capa lee dentro de la página, pero desde el proceso
+   * principal. Sirve de camino independiente: si la capa no está instalada, la
+   * entrada se cuenta igual. Cuando los dos caminos ven el mismo envío, el motor
+   * lo descarta por la huella del texto y la cercanía en el tiempo.
+   */
+  async #noteSend(state, requestId, postData) {
+    const entry = state.requests.get(requestId);
+    if (!entry || entry.send) return;
+
+    let body = postData;
+    if (!body) {
+      try {
+        const got = await this.#send(state, 'Network.getRequestPostData', { requestId });
+        body = typeof got?.postData === 'string' ? got.postData : '';
+      } catch {
+        body = '';
+      }
+    }
+    if (!body || !body.trimStart().startsWith('{')) return;
+
+    let json;
+    try {
+      json = JSON.parse(body);
+    } catch {
+      return;
+    }
+
+    // Regenerar o continuar son peticiones de conversación, pero no un mensaje
+    // nuevo del usuario.
+    if (typeof json?.action === 'string' && json.action && json.action !== 'next') return;
+
+    const site = detectSite(entry.host);
+    const located = locateUserText(json, site);
+    const text = located && typeof located.value === 'string' ? located.value.trim() : '';
+    if (!text) return;
+
+    entry.send = true;
+    entry.prompt = text;
+    if (!this.engine || typeof this.engine.onUserMessage !== 'function') return;
+    try {
+      const counted = this.engine.onUserMessage(state.id, {
+        messageId: `cdp-${requestId}`,
+        source: 'cdp',
+        site: site.id,
+        host: entry.host,
+        url: entry.url,
+        chars: text.length,
+        tokens: estimateTokens(text),
+        promptHash: fingerprint(text),
+        textFound: true,
+      });
+      this.onEvent(state.id, {
+        type: 'send',
+        duplicate: Boolean(counted?.duplicate),
+        host: entry.host,
+        site: site.id,
+        url: entry.url,
+        chars: text.length,
+        tokens: estimateTokens(text),
+        promptHash: fingerprint(text),
+      });
+    } catch (error) {
+      this.log(`CDP: al anotar el mensaje: ${error?.message || error}`);
     }
   }
 
@@ -363,9 +459,15 @@ export class CdpObserver {
     const host = hostOf(url);
     if (!isAiHost(host)) return;
     const mimeType = String(response.mimeType || '');
-    // Los SSE de estos sitios ya los media la página: contarlos acá sería
-    // contarlos dos veces.
-    if (isStreamMime(mimeType) || !isJsonMime(mimeType)) {
+    const stream = isStreamMime(mimeType);
+    if (!stream && !isJsonMime(mimeType)) {
+      this.stats.ignored += 1;
+      return;
+    }
+    // El stream lo captura la capa de la página mientras está viva; leerlo acá
+    // sería contarlo dos veces. Si la capa no está activa en esta pestaña, el
+    // stream es el único camino que queda y CDP lo lee al terminar.
+    if (stream && this.engine?.hasRecentLayer?.(state.id)) {
       this.stats.ignored += 1;
       return;
     }
@@ -390,14 +492,24 @@ export class CdpObserver {
       host,
       site: detectSite(host),
       status: Number(response.status) || 200,
+      stream,
     });
   }
 
   async #loadingFinished(state, params) {
     const pending = state.pending.get(params.requestId);
+    const request = state.requests.get(params.requestId);
     state.requests.delete(params.requestId);
     if (!pending) return;
     state.pending.delete(params.requestId);
+    // Sólo la respuesta a una petición que la página envió puede ser una
+    // respuesta nueva. Un GET (por ejemplo, abrir el historial de la
+    // conversación) devuelve JSON con todos los mensajes anteriores: contarlo
+    // sería sumar el historial como si la IA acabara de contestar.
+    if (request && !request.post) {
+      this.stats.ignored += 1;
+      return;
+    };
     if (!this.contentAllowed(pending.host)) {
       this.stats.ignored += 1;
       return;
@@ -418,6 +530,32 @@ export class CdpObserver {
     }
     if (body.body.length > MAX_BODY_BYTES) return;
 
+    // Respuesta en streaming (SSE): se arma igual que en la página, con los
+    // mismos adaptadores, y se cuenta una sola vez al terminar.
+    if (pending.stream) {
+      const capture = new CdpCapture({
+        site: pending.site,
+        host: pending.host,
+        url: pending.url,
+        source: 'sse',
+        conversationId: `${pending.site.id}#${state.id}#${params.requestId}`,
+      });
+      const prompt = request?.prompt || null;
+      if (prompt) capture.prompt(prompt);
+      for (const linea of body.body.split(/\r?\n/)) {
+        const limpia = linea.trim();
+        if (!limpia.startsWith('data:')) continue;
+        const dato = limpia.slice(5).trim();
+        if (!dato || dato === '[DONE]') continue;
+        const evento = safeJson(dato);
+        if (evento) capture.add(evento);
+      }
+      this.stats.bodies += 1;
+      const listo = capture.take();
+      this.#deliver(state, listo);
+      return;
+    }
+
     const json = safeJson(body.body);
     if (!json) {
       this.stats.ignored += 1;
@@ -433,7 +571,7 @@ export class CdpObserver {
     });
     // En el camino WebSocket el prompt llega en un frame saliente; acá se busca
     // dentro del propio cuerpo (algunos sitios devuelven el mensaje del usuario).
-    const prompt = promptOf(json);
+    const prompt = request?.prompt || promptOf(json);
     if (prompt) capture.prompt(prompt);
     const { added } = capture.add(json);
     if (!added) {
@@ -467,6 +605,7 @@ export class CdpObserver {
     try {
       const result = this.engine.onCdpCapture(state.id, capture);
       if (result?.duplicate) this.stats.duplicates += 1;
+      this.onEvent(state.id, { type: 'capture', capture, duplicate: Boolean(result?.duplicate) });
     } catch (error) {
       this.log(`CDP: al entregar al motor: ${error?.message || error}`);
     }

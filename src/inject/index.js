@@ -20,7 +20,7 @@
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isMediable, locateUserText, patchUserText } from '../core/sites.js';
-import { estimateTokens } from '../core/text.js';
+import { estimateTokens, fingerprint } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
@@ -143,6 +143,144 @@ function conversationIdOf() {
 }
 
 /* ------------------------------------------------------------------ */
+/* 0. un envío del usuario = un mensaje contado                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Estado del envío en curso.
+ *
+ * Un envío tiene **un solo** identificador y se cuenta **una sola vez**, venga
+ * el aviso del gesto (pulsar Enviar o Enter) o de la petición que sale después.
+ * Si vienen los dos, se enlazan: la petición reutiliza el identificador del gesto.
+ */
+const envio = {
+  /** Gesto visto, esperando la petición que lo confirme. */
+  pendiente: null,
+  /** Envío que ya se contó sólo con el gesto, por si la petición no aparece. */
+  porGesto: null,
+};
+
+/** Margen para que aparezca la petición antes de contar el gesto por su cuenta. */
+const ESPERA_PETICION_MS = 2500;
+/** Dos gestos seguidos del mismo envío (click y Enter, por ejemplo). */
+const VENTANA_GESTO_MS = 800;
+/** Distancia máxima entre gesto y petición para considerarlos el mismo envío. */
+const VENTANA_ENLACE_MS = 10_000;
+
+function nuevoMessageId() {
+  state.messageSeq += 1;
+  return `m${Date.now().toString(36)}-${state.messageSeq}`;
+}
+
+/** La capa actúa sólo si el navegador y el sitio están habilitados. */
+function sitioActivo() {
+  if (!state.enabled) return false;
+  return state.settings.sites?.[site.id]?.enabled !== false;
+}
+
+/**
+ * Anuncia un mensaje del usuario al proceso principal.
+ *
+ * Único camino: lo llaman el gesto de enviar o la petición, nunca los dos para
+ * el mismo envío. `chars` y `tokens` pueden ser 0 cuando la petición es de
+ * conversación pero no se puede leer el texto: el mensaje existe igual y el
+ * contador lo tiene que ver. No se inventan cifras en ese caso.
+ */
+function anunciarEnvio(datos = {}) {
+  const payload = {
+    messageId: datos.messageId || nuevoMessageId(),
+    site: site.id,
+    host: CONFIG.host || location.hostname,
+    conversationId: conversationIdOf(),
+    url: String(datos.url || location.href).slice(0, 200),
+    mediated: Boolean(datos.mediated),
+    // De dónde salió el aviso: el gesto del usuario o la petición del sitio.
+    source: datos.source === 'composer' ? 'composer' : 'request',
+    // Si el texto se pudo leer del cuerpo. Con `false`, `chars` es 0.
+    textFound: datos.textFound !== false,
+    chars: Math.max(0, Number(datos.chars) || 0),
+    tokens: Math.max(0, Number(datos.tokens) || 0),
+    // Huella del texto enviado: permite reconocer el mismo envío cuando lo
+    // anuncia también la observación CDP, sin mandar el texto por el puente.
+    promptHash: datos.promptHash || (datos.texto ? fingerprint(datos.texto) : ''),
+  };
+  bridge.event('outgoing', payload);
+  return payload;
+}
+
+/** Texto que hay ahora mismo en el cuadro de diálogo. */
+function textoDelCuadro() {
+  for (const selector of site.composer || []) {
+    let el = null;
+    try {
+      el = document.querySelector(selector);
+    } catch {
+      el = null;
+    }
+    if (!el) continue;
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') return String(el.value || '');
+    return String(el.innerText || el.textContent || '');
+  }
+  return '';
+}
+
+/**
+ * El usuario pulsó Enviar (o Enter) en el cuadro.
+ *
+ * Se cuenta siempre, aunque la petición no se pueda leer: es el gesto más
+ * directo que existe de «envié un mensaje». Se espera un momento a la petición
+ * porque su cuerpo trae el texto exacto; si no aparece (la página envía desde un
+ * worker, o cambió el formato del cuerpo), el gesto cuenta solo.
+ */
+function gestoDeEnvio(razon) {
+  if (!sitioActivo()) return null;
+  const texto = textoDelCuadro().trim();
+  if (!texto) return null; // sin texto no hay mensaje que contar
+
+  const ahora = Date.now();
+  const pendiente = envio.pendiente;
+  // El mismo envío visto dos veces: el click que dispara el Enter, o al revés.
+  if (pendiente && ahora - pendiente.at < VENTANA_GESTO_MS) return pendiente;
+
+  const nuevo = {
+    id: nuevoMessageId(),
+    at: ahora,
+    chars: texto.length,
+    tokens: estimateTokens(texto),
+    promptHash: fingerprint(texto),
+    razon,
+    timer: null,
+  };
+  nuevo.timer = setTimeout(() => {
+    if (envio.pendiente !== nuevo) return;
+    envio.pendiente = null;
+    envio.porGesto = { at: nuevo.at, chars: nuevo.chars, id: nuevo.id };
+    anunciarEnvio({ ...nuevo, source: 'composer', textFound: true });
+  }, ESPERA_PETICION_MS);
+
+  envio.pendiente = nuevo;
+  return nuevo;
+}
+
+/** ¿Este envío ya se contó por el gesto? Entonces la petición no lo repite. */
+function yaContadoPorGesto(chars) {
+  const gesto = envio.porGesto;
+  if (!gesto) return false;
+  if (Date.now() - gesto.at > VENTANA_ENLACE_MS) return false;
+  // Sin texto en el cuerpo se acepta el del gesto; con texto, tiene que coincidir.
+  return !chars || chars === gesto.chars;
+}
+
+/** Toma el gesto pendiente y lo desactiva: su petición llegó. */
+function tomarEnvioPendiente() {
+  const pendiente = envio.pendiente;
+  if (!pendiente) return null;
+  clearTimeout(pendiente.timer);
+  envio.pendiente = null;
+  return pendiente;
+}
+
+/* ------------------------------------------------------------------ */
 /* 1 + 2. petición saliente                                            */
 /* ------------------------------------------------------------------ */
 
@@ -172,18 +310,28 @@ async function planRequest(input, init) {
     text === null && init?.body === undefined && typeof Request !== 'undefined' && input instanceof Request;
   if (desdeRequest) text = await input.clone().text();
 
+  // Sin cuerpo legible sigue siendo una conversación: se captura la respuesta y
+  // el envío se cuenta igual (lo confirma el gesto o la propia petición).
   const parsed = safeJson(text);
-  if (!parsed) return { chat: true };
+  if (!parsed) return { chat: true, send: true, reason: 'cuerpo-no-legible' };
+
+  // «Regenerar» y «continuar» son peticiones de conversación, pero no son un
+  // mensaje nuevo del usuario: se captura la respuesta y no se cuenta mensaje.
+  if (site.id === 'chatgpt' && typeof parsed.action === 'string' && parsed.action && parsed.action !== 'next') {
+    return { chat: true, send: false, reason: `accion-${parsed.action}` };
+  }
 
   const located = locateUserText(parsed, site);
-  if (!located || !located.value) return { chat: true };
+  if (!located || !located.value) return { chat: true, send: true, reason: 'sin-texto' };
 
   const prompt = located.value;
   const report = await bridge.request('prepare', { prompt, url, site: site.id });
   const base = {
     chat: true,
+    send: true,
     promptChars: prompt.length,
     promptTokens: estimateTokens(prompt),
+    promptHash: fingerprint(prompt),
     url,
   };
   if (!report?.text) return { ...base, plan: null };
@@ -296,7 +444,6 @@ if (!window.__NEXO_HOOKED__) {
   window.fetch = async function nexoFetch(input, init) {
     const url = absoluteUrl(urlOf(input));
     const method = methodOf(input, init);
-    const messageId = `m${Date.now().toString(36)}-${(state.messageSeq += 1)}`;
 
     // 1) Preparar: no envía nada. Cualquier fallo → petición original.
     let prepared = { chat: false };
@@ -306,20 +453,32 @@ if (!window.__NEXO_HOOKED__) {
       bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
     }
 
-    // Un envío reconocido se anota siempre: con o sin intervención. De acá sale
-    // el contador de mensajes del usuario y la asociación con su respuesta.
-    if (prepared.chat && prepared.promptChars > 0) {
-      bridge.event('outgoing', {
-        messageId,
-        site: site.id,
-        host: CONFIG.host,
-        conversationId: conversationIdOf(),
-        url: url.slice(0, 200),
-        mediated: Boolean(prepared.mediated),
-        chars: prepared.promptChars,
-        tokens: prepared.promptTokens || 0,
-      });
+    // Un envío se anota siempre: con o sin mediación, y aunque no se pueda leer
+    // el texto del cuerpo. De acá sale el contador de mensajes del usuario y el
+    // identificador con el que se empareja su respuesta.
+    let messageId = null;
+    if (prepared.chat && prepared.send !== false) {
+      const gesto = tomarEnvioPendiente();
+      const chars = prepared.promptChars || gesto?.chars || 0;
+      if (yaContadoPorGesto(chars)) {
+        // Ya lo contó el gesto: la respuesta tiene que usar su identificador.
+        messageId = envio.porGesto.id;
+      } else {
+        messageId = anunciarEnvio({
+          messageId: gesto?.id,
+          source: 'request',
+          mediated: prepared.mediated,
+          chars,
+          tokens: prepared.promptTokens || gesto?.tokens || 0,
+          promptHash: prepared.promptHash || gesto?.promptHash || '',
+          textFound: Boolean(prepared.promptChars),
+          url,
+        }).messageId;
+      }
     }
+    // Sin mensaje propio (regenerar, o una petición que no es conversación) la
+    // respuesta igual necesita un identificador único para no duplicarse.
+    if (!messageId) messageId = nuevoMessageId();
 
     const target = prepared.plan || { input, init };
 
@@ -367,6 +526,62 @@ if (!window.__NEXO_HOOKED__) {
 
 const COMPOSER = site.composer || [];
 const SEND = site.sendButton || [];
+
+/* ------------------------------------------------------------------ */
+/* 4b. gesto de envío: pulsar Enviar o Enter en el cuadro              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Es el aviso más directo que hay de «el usuario envió un mensaje», y no
+ * depende de cómo venga el cuerpo de la petición ni de que se pueda leer.
+ * La petición que salga después se enlaza con este gesto por identificador.
+ */
+function esBotonDeEnvio(nodo) {
+  if (!nodo || typeof nodo.closest !== 'function') return false;
+  const boton = nodo.closest('button, [role="button"]');
+  if (!boton || boton.disabled) return false;
+  return SEND.some((selector) => {
+    try {
+      return boton.matches(selector);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function estaEnElCuadro(nodo) {
+  if (!nodo || typeof nodo.closest !== 'function') return false;
+  return COMPOSER.some((selector) => {
+    try {
+      return Boolean(nodo.closest(selector));
+    } catch {
+      return false;
+    }
+  });
+}
+
+try {
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (esBotonDeEnvio(event.target)) gestoDeEnvio('boton');
+    },
+    true,
+  );
+
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      // Enter sin modificadores envía. Shift+Enter e IME no.
+      if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+      if (!estaEnElCuadro(event.target)) return;
+      gestoDeEnvio('enter');
+    },
+    true,
+  );
+} catch {
+  /* sin DOM accesible el gesto no existe; la petición sigue contando */
+}
 
 function findFirst(selectors) {
   for (const selector of selectors) {

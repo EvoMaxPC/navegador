@@ -45,13 +45,20 @@ function fakeTab(id, url) {
 }
 
 function fakeEngine() {
-  return {
+  const engine = {
     captures: [],
+    // Pestañas donde la capa de la página está viva (vacío = ninguna).
+    layerSeen: new Map(),
+    hasRecentLayer(id) {
+      const at = engine.layerSeen.get(id);
+      return Boolean(at && Date.now() - at < 180_000);
+    },
     onCdpCapture(tabId, capture) {
       this.captures.push({ tabId, capture });
       return { ok: true, duplicate: false };
     },
   };
+  return engine;
 }
 
 function makeObserver({ engine = fakeEngine(), enabled = true } = {}) {
@@ -285,10 +292,12 @@ test('respuesta JSON sin SSE: se pide el cuerpo y se entrega como captura', asyn
   );
 });
 
-test('los SSE NO se procesan por CDP: ya los media la página', async () => {
+test('con la capa activa, el SSE no se procesa por CDP: ya lo captura la página', async () => {
   const { observer, engine } = makeObserver();
   const tab = fakeTab(14, 'https://claude.ai/');
   observer.attach(tab);
+  // La capa de la página se anunció: es ella la que lee el stream.
+  engine.layerSeen = new Map([[tab.id, Date.now()]]);
 
   tab.debugger.bodies.set('req-2', 'data: {"type":"content_block_delta"}\n\n');
   tab.debugger.emitEvent('Network.responseReceived', {
@@ -404,7 +413,17 @@ test('soltar la pestaña entrega lo pendiente antes de desconectar', () => {
 function fakeEngineConFallos() {
   const engine = {
     fallos: [],
-    onCdpCapture: () => ({ ok: true, duplicate: false }),
+    captures: [],
+    // Pestañas donde la capa de la página está viva (vacío = ninguna).
+    layerSeen: new Map(),
+    hasRecentLayer(id) {
+      const at = engine.layerSeen.get(id);
+      return Boolean(at && Date.now() - at < 180_000);
+    },
+    onCdpCapture(tabId, capture) {
+      engine.captures.push({ tabId, capture });
+      return { ok: true, duplicate: false };
+    },
     onCdpFailure(_tabId, failure) {
       engine.fallos.push(failure);
     },

@@ -42,6 +42,14 @@ function crearMundo(options = {}) {
     return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
   };
 
+  // Cuadro de diálogo y botón de enviar falsos, lo mínimo que toca la capa.
+  const cuadro = options.cuadro || null;
+  const boton = { disabled: false, matches: (sel) => /send-button|Send|Enviar/i.test(String(sel)), closest: () => boton };
+  const objetivo = {
+    closest: (sel) => (String(sel) === 'button, [role="button"]' ? boton : cuadro ? cuadro.closest(sel) : null),
+  };
+  const manejadores = { click: [], keydown: [] };
+
   const window = {
     __NEXO_CONFIG__: { host, enabled: true, settings: {}, language: 'es', version: '0.1.0', site: 'chatgpt' },
     location: { href: `https://${host}${pathname}`, hostname: host, pathname, protocol: 'https:' },
@@ -74,12 +82,40 @@ function crearMundo(options = {}) {
     URL,
     console,
     navigator: { userAgent: 'Chrome' },
-    document: { querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {} },
+    document: {
+      querySelector: (sel) => (cuadro && /prompt|textarea|contenteditable/i.test(String(sel)) ? cuadro : null),
+      querySelectorAll: () => [],
+      addEventListener: (tipo, fn) => {
+        if (!manejadores[tipo]) manejadores[tipo] = [];
+        manejadores[tipo].push(fn);
+      },
+    },
   };
   window.window = window;
 
   vm.runInContext(fuente, vm.createContext(window), { filename: 'inject.js' });
-  return { window, salientes, peticiones };
+
+  /** Un cuadro con texto, como el del sitio. */
+  const pulsar = (tipo, evento) => {
+    for (const fn of manejadores[tipo] || []) fn(evento);
+  };
+  const pulsarEnviar = () => pulsar('click', { target: objetivo });
+  const pulsarEnter = () =>
+    pulsar('keydown', { key: 'Enter', shiftKey: false, isComposing: false, target: objetivo });
+
+  return { window, salientes, peticiones, pulsarEnviar, pulsarEnter };
+}
+
+/** Cuadro de diálogo falso con el texto que el usuario escribió. */
+function cuadroCon(texto) {
+  const el = {
+    tagName: 'DIV',
+    innerText: texto,
+    textContent: texto,
+    focus() {},
+    closest: (sel) => (/contenteditable|prompt/i.test(String(sel)) ? el : null),
+  };
+  return el;
 }
 
 /** Cuerpo de un envío normal de ChatGPT. */
@@ -203,4 +239,75 @@ test('al cargarse, la capa avisa que quedó activa', { skip: !fuente && 'falta b
   const listo = mundo.salientes.find((m) => m.__nexo === 'ready');
   assert.ok(listo, 'la capa se anuncia al instalarse');
   assert.equal(listo.payload.host, 'chatgpt.com');
+});
+
+/* ------------------------------------------------------------------ */
+/* el gesto de enviar: la señal que no depende del cuerpo              */
+/* ------------------------------------------------------------------ */
+
+test('pulsar Enviar y luego salir la petición cuenta un solo mensaje', { skip: !fuente && 'falta build/inject.js' }, async () => {
+  const mundo = crearMundo({ stream: sse('Hola mundo'), cuadro: cuadroCon('hola mundo') });
+
+  mundo.pulsarEnviar();
+  // El mismo envío visto dos veces (el click que dispara el Enter, y el Enter).
+  mundo.pulsarEnter();
+  await new Promise((r) => setTimeout(r, 20));
+
+  const respuesta = await mundo.window.fetch('/backend-api/conversation', {
+    method: 'POST',
+    body: cuerpoChatGPT('hola mundo'),
+  });
+  await respuesta.text();
+  await new Promise((r) => setTimeout(r, 60));
+
+  const envios = eventos(mundo, 'outgoing');
+  assert.equal(envios.length, 1, 'un envío, un mensaje');
+  assert.equal(envios[0].payload.source, 'request', 'lo confirmó la petición, con su texto');
+  assert.equal(envios[0].payload.chars, 10);
+  assert.ok(envios[0].payload.promptHash, 'lleva la huella del texto para deduplicar con CDP');
+});
+
+test('si la petición no aparece, el gesto cuenta el mensaje solo', { skip: !fuente && 'falta build/inject.js' }, async () => {
+  const mundo = crearMundo({ cuadro: cuadroCon('¿me ayudás?') });
+
+  mundo.pulsarEnviar();
+  await new Promise((r) => setTimeout(r, 2700));
+
+  const envios = eventos(mundo, 'outgoing');
+  assert.equal(envios.length, 1, 'el gesto alcanza para contar el mensaje');
+  assert.equal(envios[0].payload.source, 'composer');
+  assert.equal(envios[0].payload.chars, '¿me ayudás?'.length);
+  assert.ok(envios[0].payload.tokens > 0, 'con sus tokens estimados');
+});
+
+test('un envío sin cuerpo legible se cuenta igual, sin inventar caracteres', { skip: !fuente && 'falta build/inject.js' }, async () => {
+  const mundo = crearMundo({ stream: sse('ok') });
+
+  const respuesta = await mundo.window.fetch('/backend-api/conversation', {
+    method: 'POST',
+    body: 'esto-no-es-json',
+  });
+  await respuesta.text();
+  await new Promise((r) => setTimeout(r, 40));
+
+  const envios = eventos(mundo, 'outgoing');
+  assert.equal(envios.length, 1, 'el mensaje existe aunque no se pueda leer el texto');
+  assert.equal(envios[0].payload.chars, 0, 'sin caracteres inventados');
+  assert.equal(envios[0].payload.tokens, 0, 'ni tokens inventados');
+  assert.equal(envios[0].payload.textFound, false, 'y se dice que no se leyó el texto');
+  assert.equal(eventos(mundo, 'stream-end').length, 1, 'la respuesta se captura igual');
+});
+
+test('regenerar no es un mensaje del usuario', { skip: !fuente && 'falta build/inject.js' }, async () => {
+  const mundo = crearMundo({ stream: sse('otra versión') });
+
+  const respuesta = await mundo.window.fetch('/backend-api/conversation', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'variant', conversation_id: 'abc-12345678', messages: [] }),
+  });
+  await respuesta.text();
+  await new Promise((r) => setTimeout(r, 40));
+
+  assert.equal(eventos(mundo, 'outgoing').length, 0, 'no hay mensaje nuevo');
+  assert.equal(eventos(mundo, 'stream-end').length, 1, 'pero la respuesta nueva sí se captura');
 });

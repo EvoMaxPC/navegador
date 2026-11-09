@@ -14,6 +14,15 @@ import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
 import { estimateTokens, fingerprint } from '../core/text.js';
 
 /** Cómo se llama cada canal en los textos que ve el usuario. */
+/**
+ * Ventana en la que dos avisos del mismo envío se consideran el mismo mensaje:
+ * la capa avisa al enviar y CDP cuando Chromium informa la petición.
+ */
+const VENTANA_ENVIO_MS = 10_000;
+
+/** Ventana en la que dos textos son la misma respuesta todavía creciendo. */
+const VENTANA_RESPUESTA_MS = 120_000;
+
 const CHANNEL_LABEL = {
   websocket: 'WebSocket',
   json: 'respuesta JSON',
@@ -71,6 +80,19 @@ export class Engine {
     this.seenResponses = new Map();
     /** Último envío de cada pestaña esperando respuesta. */
     this.awaiting = new Map();
+    /**
+     * Último envío de cada pestaña, con su huella. Segunda barrera contra el
+     * mismo mensaje anunciado por dos caminos (gesto de la página, petición de
+     * la capa, petición observada por CDP) cuando el identificador no coincide.
+     */
+    this.lastSend = new Map();
+    /** Última señal de vida de la capa de la página, por pestaña. */
+    this.layerSeen = new Map();
+    /**
+     * Textos ya contados como respuesta, por pestaña. Permite reconocer la misma
+     * respuesta entregada en pedazos: mientras crece, no es otra respuesta.
+     */
+    this.recentTexts = new Map();
     /** Fallos de red ya informados, para no repetirlos en cada reintento. */
     this.cdpFailures = new Map();
   }
@@ -169,12 +191,35 @@ export class Engine {
   onUserMessage(webContentsId, payload = {}) {
     const messageId = String(payload.messageId || '');
     if (!messageId) return { ok: false, skipped: 'sin-id' };
+    const now = Date.now();
     const key = `${webContentsId}|${messageId}`;
     if (this.seenMessages.has(key)) return { ok: true, duplicate: true };
 
-    const now = Date.now();
+    // El mismo envío puede llegar por dos caminos con identificadores distintos:
+    // el gesto de la página, la petición de la capa y la petición que ve CDP. Se
+    // reconoce por la huella del texto y el momento, no por el texto solo: dos
+    // envíos iguales seguidos desde la misma fuente son dos mensajes.
+    const hash = payload.promptHash ? String(payload.promptHash) : '';
+    const source = String(payload.source || 'request');
+    const previo = this.lastSend.get(webContentsId);
+    if (previo && now - previo.at < VENTANA_ENVIO_MS) {
+      const mismaHuella = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
+      if (mismaHuella && previo.source !== source) {
+        this.seenMessages.set(key, now);
+        return { ok: true, duplicate: true, merged: true };
+      }
+    }
+
     this.seenMessages.set(key, now);
     this.#prune(this.seenMessages, now);
+    // Ojo: acá NO se marca la capa como viva. Este aviso también llega desde
+    // CDP, y creerlo capa activa dejaría el stream sin nadie que lo lea.
+    this.lastSend.set(webContentsId, {
+      at: now,
+      hash,
+      source,
+      chars: Math.max(0, Number(payload.chars) || 0),
+    });
 
     const chars = Math.max(0, Number(payload.chars) || 0);
     const tokens = Number.isFinite(Number(payload.tokens)) ? Math.max(0, Number(payload.tokens)) : estimateTokens(' ');
@@ -207,11 +252,22 @@ export class Engine {
       : `${webContentsId}|sse|${String(payload.text || '').length}|${fingerprint(String(payload.text || ''))}`;
     if (this.seenResponses.has(key)) return { ok: true, duplicate: true };
 
+    // Misma respuesta vista antes (por CDP o por otro cierre del stream): no se
+    // cuenta, aunque el identificador del envío haya cambiado.
+    const texto = String(payload.text || '');
+    this.noteLayer(webContentsId);
+    const merge = this.#mergeResponse(webContentsId, texto);
+    if (merge.duplicate) {
+      this.seenResponses.set(key, now);
+      return { ok: true, duplicate: true, merged: true };
+    }
+
     this.seenResponses.set(key, now);
     this.#prune(this.seenResponses, now);
 
     this.counters.responses += 1;
-    this.counters.outputTokens += Math.max(0, Number(payload.tokens) || 0);
+    const tokens = Number.isFinite(Number(payload.tokens)) ? Math.max(0, Number(payload.tokens)) : merge.tokens;
+    this.counters.outputTokens += tokens;
     if (payload.stopped) this.counters.loopsCut += 1;
 
     const awaiting = this.awaiting.get(webContentsId);
@@ -221,6 +277,56 @@ export class Engine {
     }
 
     return { ok: true, duplicate: false };
+  }
+
+  /**
+   * ¿Es la misma respuesta que ya se contó, llegando en pedazos?
+   *
+   * Una captura parcial es un prefijo de la respuesta completa: no es otra
+   * respuesta. Si más tarde llega el texto completo, se corrige el conteo de
+   * tokens en vez de sumar una respuesta nueva.
+   *
+   * Devuelve `{duplicate, tokens, sameText}`; `tokens` es lo que hay que sumar
+   * al contador de salida cuando la respuesta es nueva.
+   */
+  #mergeResponse(webContentsId, text) {
+    const now = Date.now();
+    const vistos = (this.recentTexts.get(webContentsId) || []).filter((v) => now - v.at < VENTANA_RESPUESTA_MS);
+    for (const visto of vistos) {
+      const crece = text.length > visto.text.length && text.startsWith(visto.text);
+      const esPrefijo = visto.text.length > text.length && visto.text.startsWith(text);
+      const igual = visto.text === text;
+      if (!crece && !esPrefijo && !igual) continue;
+      if (crece) {
+        const tokens = estimateTokens(text);
+        this.counters.outputTokens += Math.max(0, tokens - visto.tokens);
+        visto.text = text;
+        visto.tokens = tokens;
+        visto.at = now;
+      }
+      this.recentTexts.set(webContentsId, vistos);
+      return { duplicate: true, sameText: igual, tokens: 0 };
+    }
+
+    // Sin un mensaje esperando respuesta, una llegada nueva no es una respuesta
+    // nueva: es la misma, por otro canal o en otro trozo. Se acumula el texto
+    // (sin repetir lo ya visto) y se corrige el conteo de tokens.
+    const ultima = vistos[vistos.length - 1];
+    if (!this.awaiting.has(webContentsId) && ultima && !ultima.text.includes(text)) {
+      const junto = `${ultima.text}${text}`;
+      const tokens = estimateTokens(junto);
+      this.counters.outputTokens += Math.max(0, tokens - ultima.tokens);
+      ultima.text = junto;
+      ultima.tokens = tokens;
+      ultima.at = now;
+      this.recentTexts.set(webContentsId, vistos);
+      return { duplicate: true, sameText: false, tokens: 0, joined: true };
+    }
+
+    const tokens = estimateTokens(text);
+    vistos.push({ at: now, text, tokens });
+    this.recentTexts.set(webContentsId, vistos.slice(-6));
+    return { duplicate: false, sameText: false, tokens };
   }
 
   /** Descarta claves viejas de un mapa de deduplicación. */
@@ -298,6 +404,28 @@ export class Engine {
   }
 
   /**
+   * La capa de la página avisó que está viva: se instaló, o contó un envío o una
+   * respuesta. Es lo que decide quién captura el stream: la página o CDP.
+   */
+  noteLayer(webContentsId) {
+    if (webContentsId === undefined || webContentsId === null) return;
+    this.layerSeen.set(webContentsId, Date.now());
+  }
+
+  /**
+   * ¿La capa de la página sigue viva en esa pestaña?
+   *
+   * Si lo está, el stream lo captura la página y CDP no debe leerlo (sería
+   * contarlo dos veces). Si no lo está —la capa no se instaló, quedó bloqueada
+   * por el sitio o la pestaña se restauró sin ella—, CDP es el único camino y
+   * tiene que leer también los cuerpos `text/event-stream`.
+   */
+  hasRecentLayer(webContentsId, withinMs = 180_000) {
+    const at = this.layerSeen.get(webContentsId);
+    return Boolean(at && Date.now() - at < withinMs);
+  }
+
+  /**
    * Turno observado por CDP (frame de WebSocket o cuerpo JSON sin streaming).
    *
    * Este camino **no media**: cuando CDP ve la respuesta, el sitio ya la mostró.
@@ -333,9 +461,16 @@ export class Engine {
     this.#markSeen(webContentsId, keys);
 
     // Una respuesta que sólo vio CDP también es una respuesta: se cuenta igual.
-    // Si ya la había contado el camino SSE, la huella de arriba la descartó.
+    // Si ya la había contado el camino SSE, la huella de arriba la descartó. Y si
+    // es la misma respuesta llegando en pedazos, se corrige el conteo de tokens
+    // en vez de sumar otra respuesta.
+    const merge = this.#mergeResponse(webContentsId, text);
+    if (merge.duplicate) {
+      this.cdp.duplicates += 1;
+      return { ok: true, duplicate: true, merged: true };
+    }
     this.counters.responses += 1;
-    this.counters.outputTokens += estimateTokens(text);
+    this.counters.outputTokens += merge.tokens;
     const awaiting = this.awaiting.get(webContentsId);
     if (awaiting) {
       this.counters.turns += 1;
@@ -480,6 +615,9 @@ export class Engine {
     this.guards.delete(webContentsId);
     this.cdpSeen.delete(webContentsId);
     this.awaiting.delete(webContentsId);
+    this.lastSend.delete(webContentsId);
+    this.recentTexts.delete(webContentsId);
+    this.layerSeen.delete(webContentsId);
     for (const map of [this.seenMessages, this.seenResponses]) {
       for (const key of [...map.keys()]) if (key.startsWith(`${webContentsId}|`)) map.delete(key);
     }

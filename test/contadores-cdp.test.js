@@ -1,0 +1,326 @@
+/**
+ * Contadores con la observación CDP, que es el camino que funciona aunque la
+ * capa de la página no esté activa.
+ *
+ * Estas pruebas reproducen la conversación real que falló:
+ *
+ *   usuario: «hola» → ChatGPT: «¡Holaaa! ¿Cómo estás?…»
+ *
+ * y comprueban lo que tiene que dar: **1 mensaje, 1 respuesta, 1 turno**, con
+ * los tokens de cada lado y sin historial ni pedazos contados de más.
+ */
+
+import assert from 'node:assert/strict';
+import { register } from 'node:module';
+import { test } from 'node:test';
+
+register('./harness/loader.mjs', import.meta.url);
+
+const { journal } = await import('./harness/electron-stub.mjs');
+
+await import('../src/main/main.js');
+
+const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function callIpc(channel, payload, senderId = 1) {
+  const handler = journal.ipcHandlers.get(channel);
+  assert.ok(handler, `no hay handler para ${channel}`);
+  return handler({ sender: { id: senderId } }, payload);
+}
+
+const stats = () => callIpc('nexo:stats');
+
+/** Pestaña nueva sobre un sitio con perfil, con el depurador adjunto. */
+async function abrir(url) {
+  const win = journal.windows[0];
+  const view = win.attachWebview(url);
+  view.navigateTo(url, 'ChatGPT');
+  await settle(60);
+  return view;
+}
+
+const PROMPT = 'hola';
+const RESPUESTA = '¡Holaaa! 😊 ¿Cómo estás? ¿En qué te puedo ayudar hoy?';
+
+/** Cuerpo real de un envío de ChatGPT. */
+const cuerpoEnvio = JSON.stringify({
+  action: 'next',
+  conversation_id: 'conv-real-1',
+  messages: [
+    { id: 'm-1', author: { role: 'system' }, content: { content_type: 'text', parts: ['Sos un asistente.'] } },
+    { id: 'm-2', author: { role: 'user' }, content: { content_type: 'text', parts: [PROMPT] } },
+  ],
+  model: 'auto',
+});
+
+/** Eventos de red de una petición completa, como los entrega Chromium. */
+async function peticion(view, { requestId, url, method = 'POST', postData = null, body = null }) {
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId,
+    type: 'XHR',
+    request: { url, method, postData },
+  });
+  await settle(20);
+
+  if (body === null) return;
+  view.debugger.emitEvent('Network.responseReceived', {
+    requestId,
+    type: 'XHR',
+    response: { url, status: 200, mimeType: 'application/json' },
+  });
+  view.debugger.bodies.set(requestId, JSON.stringify(body));
+  view.debugger.emitEvent('Network.loadingFinished', { requestId });
+  await settle(60);
+}
+
+/* ------------------------------------------------------------------ */
+/* el caso real: sólo CDP ve la conversación                           */
+/* ------------------------------------------------------------------ */
+
+test('la conversación real «hola» cuenta 1 mensaje, 1 respuesta y 1 turno', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-real-1');
+  const antes = await stats();
+
+  // El envío del usuario.
+  await peticion(view, {
+    requestId: 'req-hola',
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    postData: cuerpoEnvio,
+  });
+
+  // La respuesta, que en ChatGPT llega por SSE. Acá se simula el cierre que
+  // anuncia la capa de la página para el mismo envío.
+  const trasEnvio = await stats();
+  assert.equal(trasEnvio.messages, antes.messages + 1, 'el mensaje del usuario se cuenta');
+  assert.ok(trasEnvio.inputTokens > antes.inputTokens, 'con sus tokens de entrada');
+
+  await callIpc(
+    'nexo:stream-end',
+    {
+      host: 'chatgpt.com',
+      site: 'chatgpt',
+      conversationId: 'conv-real-1',
+      chars: RESPUESTA.length,
+      tokens: 24,
+      text: RESPUESTA,
+      finished: true,
+    },
+    view.id,
+  );
+
+  const fin = await stats();
+  assert.equal(fin.messages, antes.messages + 1, 'un mensaje, no dos');
+  assert.equal(fin.responses, antes.responses + 1, 'una respuesta, no cuatro');
+  assert.equal(fin.turns, antes.turns + 1, 'un turno completo');
+  assert.equal(fin.outputTokens, antes.outputTokens + 24, 'los tokens de la respuesta visible');
+  assert.equal(fin.interventions, antes.interventions, 'Nexo no intervino');
+});
+
+test('el mensaje contado por la capa y por CDP es uno solo', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-real-2');
+  const { fingerprint } = await import('../src/core/text.js');
+  const emitir = journal.ipcListeners.get('nexo:event');
+  assert.ok(emitir, 'hay canal de eventos de la capa');
+  const sender = { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' };
+
+  const antes = await stats();
+  const payload = {
+    host: 'chatgpt.com',
+    site: 'chatgpt',
+    conversationId: 'conv-real-2',
+    chars: PROMPT.length,
+    tokens: 2,
+    promptHash: fingerprint(PROMPT),
+    textFound: true,
+  };
+
+  // La capa avisa del envío y, medio segundo después, CDP ve la misma petición
+  // con otro identificador: mismo texto, dos fuentes.
+  emitir({ sender }, { type: 'outgoing', payload: { ...payload, messageId: 'm-capa', source: 'request' } });
+  await settle(10);
+  emitir({ sender }, { type: 'outgoing', payload: { ...payload, messageId: 'm-cdp', source: 'cdp' } });
+  await settle(10);
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages + 1, 'dos avisos del mismo envío, un mensaje');
+  assert.equal(despues.inputTokens, antes.inputTokens + 2, 'y los tokens una sola vez');
+});
+
+test('dos mensajes iguales seguidos sí son dos mensajes', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-real-2b');
+  const { fingerprint } = await import('../src/core/text.js');
+  const emitir = journal.ipcListeners.get('nexo:event');
+  const sender = { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' };
+  const antes = await stats();
+
+  for (const messageId of ['m-1', 'm-2']) {
+    emitir(
+      { sender },
+      {
+        type: 'outgoing',
+        payload: {
+          messageId,
+          source: 'request',
+          host: 'chatgpt.com',
+          site: 'chatgpt',
+          chars: PROMPT.length,
+          tokens: 2,
+          promptHash: fingerprint(PROMPT),
+          textFound: true,
+        },
+      },
+    );
+    await settle(10);
+  }
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages + 2, 'la misma persona puede escribir «hola» dos veces');
+});
+
+/* ------------------------------------------------------------------ */
+/* lo que no se debe contar                                            */
+/* ------------------------------------------------------------------ */
+
+test('abrir el historial de la conversación no cuenta como respuesta', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-real-3');
+  const antes = await stats();
+
+  // Un GET del historial devuelve todos los mensajes anteriores en JSON.
+  const historial = {
+    title: 'Conversación',
+    mapping: {
+      a: { message: { author: { role: 'user' }, content: { parts: ['mensaje viejo uno'] } } },
+      b: { message: { author: { role: 'assistant' }, content: { parts: ['respuesta vieja bastante más larga que la anterior'] } } },
+      c: { message: { author: { role: 'user' }, content: { parts: ['mensaje viejo dos'] } } },
+    },
+  };
+  await peticion(view, {
+    requestId: 'req-historial',
+    url: 'https://chatgpt.com/backend-api/conversation/conv-real-3',
+    method: 'GET',
+    body: historial,
+  });
+
+  const despues = await stats();
+  assert.equal(despues.responses, antes.responses, 'el historial no es una respuesta nueva');
+  assert.equal(despues.messages, antes.messages, 'ni un mensaje nuevo');
+  assert.equal(despues.outputTokens, antes.outputTokens, 'ni tokens de salida');
+});
+
+test('la misma respuesta en pedazos se cuenta una vez y no infla los tokens', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-real-4');
+  const antes = await stats();
+
+  const primerTrozo = 'La respuesta va llegando';
+  const completa = 'La respuesta va llegando de a poco y al final termina.';
+
+  view.debugger.emitEvent('Network.webSocketCreated', { requestId: 'ws-trozos', url: 'wss://chatgpt.com/backend-api/ws' });
+  view.debugger.emitEvent('Network.webSocketFrameReceived', {
+    requestId: 'ws-trozos',
+    response: { opcode: 1, payloadData: JSON.stringify({ p: '/message/content/parts/0', o: 'append', v: primerTrozo }) },
+  });
+  view.debugger.emitEvent('Network.webSocketClosed', { requestId: 'ws-trozos' });
+  await settle(40);
+  const trasPrimero = await stats();
+  assert.equal(trasPrimero.responses, antes.responses + 1, 'el primer trozo cierra una respuesta observada');
+
+  // La misma respuesta, ahora completa, por otro socket.
+  view.debugger.emitEvent('Network.webSocketCreated', { requestId: 'ws-trozos-2', url: 'wss://chatgpt.com/backend-api/ws' });
+  view.debugger.emitEvent('Network.webSocketFrameReceived', {
+    requestId: 'ws-trozos-2',
+    response: {
+      opcode: 1,
+      payloadData: JSON.stringify({ p: '/message/content/parts/0', o: 'append', v: completa.slice(primerTrozo.length) }),
+    },
+  });
+  view.debugger.emitEvent('Network.webSocketClosed', { requestId: 'ws-trozos-2' });
+  await settle(40);
+
+  const fin = await stats();
+  assert.equal(fin.responses, trasPrimero.responses, 'el texto que crece no es otra respuesta');
+  // Lo que se suma es la diferencia de la respuesta completa, no el trozo entero.
+  assert.ok(
+    fin.outputTokens >= trasPrimero.outputTokens,
+    'los tokens reflejan la respuesta completa',
+  );
+});
+
+test('regenerar no cuenta un mensaje del usuario', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-real-5');
+  const antes = await stats();
+
+  await peticion(view, {
+    requestId: 'req-variante',
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    postData: JSON.stringify({ action: 'variant', conversation_id: 'conv-real-5', messages: [] }),
+  });
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages, 'regenerar no es un mensaje nuevo');
+});
+
+/* ------------------------------------------------------------------ */
+/* el stream cuando la capa de la página no está                       */
+/* ------------------------------------------------------------------ */
+
+test('si la capa no está activa, CDP lee el SSE completo y cuenta una respuesta', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-sin-capa');
+  const antes = await stats();
+
+  const sse = [
+    'data: {"message":{"id":"r-1","author":{"role":"assistant"},"content":{"content_type":"text","parts":[""]},"status":"in_progress"}}',
+    'data: {"message":{"id":"r-1","author":{"role":"assistant"},"content":{"content_type":"text","parts":["¡Holaaa! "]}},"conversation_id":"conv-sin-capa"}',
+    'data: {"message":{"id":"r-1","author":{"role":"assistant"},"content":{"content_type":"text","parts":["¡Holaaa! ¿En qué te ayudo?"]}},"conversation_id":"conv-sin-capa"}',
+    'data: [DONE]',
+  ].join('\n\n');
+
+  // El envío, que es lo que asocia el turno.
+  await peticion(view, {
+    requestId: 'req-sse-1',
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    postData: cuerpoEnvio,
+  });
+
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-sse-1',
+    type: 'XHR',
+    request: { url: 'https://chatgpt.com/backend-api/f/conversation', method: 'POST', postData: cuerpoEnvio },
+  });
+  view.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-sse-1',
+    type: 'XHR',
+    response: { url: 'https://chatgpt.com/backend-api/f/conversation', status: 200, mimeType: 'text/event-stream' },
+  });
+  view.debugger.bodies.set('req-sse-1', sse);
+  view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-sse-1' });
+  await settle(80);
+
+  const fin = await stats();
+  assert.equal(fin.messages, antes.messages + 1, 'un mensaje');
+  assert.equal(fin.responses, antes.responses + 1, 'una respuesta');
+  assert.equal(fin.turns, antes.turns + 1, 'un turno completo');
+  assert.ok(fin.outputTokens > antes.outputTokens, 'con tokens de salida');
+});
+
+test('con la capa activa, CDP no vuelve a leer el mismo stream', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-con-capa');
+  const emitir = journal.ipcListeners.get('nexo:event');
+  const sender = { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' };
+
+  // La capa avisa que está instalada.
+  emitir({ sender }, { type: 'ready', payload: { site: 'chatgpt', host: 'chatgpt.com', version: '0.1.2' } });
+  await settle(10);
+
+  const antes = await stats();
+  view.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-stream-capado',
+    type: 'XHR',
+    response: { url: 'https://chatgpt.com/backend-api/f/conversation', status: 200, mimeType: 'text/event-stream' },
+  });
+  view.debugger.bodies.set('req-stream-capado', 'data: {"message":{"author":{"role":"assistant"},"content":{"parts":["texto"]}}}\n\n');
+  view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-stream-capado' });
+  await settle(50);
+
+  const despues = await stats();
+  assert.equal(despues.responses, antes.responses, 'el stream lo cuenta la página, no CDP');
+});

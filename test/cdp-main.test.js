@@ -169,8 +169,15 @@ test('un bucle observado se registra como observación, no como corte', async ()
   assert.equal(entrada.meta.observed, true);
 });
 
-test('los SSE no pasan por CDP: no se pide su cuerpo', async () => {
+test('con la capa activa, los SSE no pasan por CDP: no se pide su cuerpo', async () => {
   const view = await abrirPestana('https://claude.ai/chat/cdp-6');
+  // La capa de la página avisa que está viva: el stream lo captura ella.
+  journal.ipcListeners.get('nexo:event')(
+    { sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://claude.ai/chat/cdp-6' } },
+    { type: 'ready', payload: { site: 'claude', host: 'claude.ai', version: '0.1.2' } },
+  );
+  await settle(10);
+
   view.debugger.bodies.set('req-cdp-6', 'data: {"type":"content_block_delta"}\n\n');
   view.debugger.emitEvent('Network.responseReceived', {
     requestId: 'req-cdp-6',
@@ -179,7 +186,10 @@ test('los SSE no pasan por CDP: no se pide su cuerpo', async () => {
   });
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-cdp-6' });
   await settle();
-  assert.ok(!view.debugger.commands.some((command) => command.params?.requestId === 'req-cdp-6'));
+  assert.ok(
+    !view.debugger.commands.some((command) => command.params?.requestId === 'req-cdp-6'),
+    'no se pide el cuerpo de un stream que la página ya captura',
+  );
 });
 
 test('una negativa del modelo queda registrada con su sugerencia', async () => {
