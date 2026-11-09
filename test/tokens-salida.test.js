@@ -1,4 +1,4 @@
-import { estimateTokens } from '../src/core/text.js';
+const contarPalabras = (text) => (String(text || '').match(/[\p{L}\p{N}_]+/gu) || []).length;
 /**
  * Tokens de salida: lo que GPT generó, contado una sola vez.
  *
@@ -99,7 +99,7 @@ function capaStreamEnd(view, texto, extra = {}) {
     {
       text: texto,
       chars: texto.length,
-      tokens: estimateTokens(texto),
+      tokens: contarPalabras(texto),
       host: 'chatgpt.com',
       site: 'chatgpt',
       url: 'https://chatgpt.com/backend-api/f/conversation',
@@ -146,8 +146,8 @@ test('1. una respuesta normal suma sus tokens de salida', async () => {
   const despues = await stats();
 
   assert.equal(despues.responses, antes.responses + 1, 'una respuesta');
-  assert.equal(despues.outputTokens, antes.outputTokens + estimateTokens(texto), 'con sus tokens de salida');
-  assert.ok(estimateTokens(texto) > 0, 'y la estimación no es cero');
+  assert.equal(despues.outputTokens, antes.outputTokens + contarPalabras(texto), 'con sus tokens de salida');
+  assert.ok(contarPalabras(texto) > 0, 'y la estimación no es cero');
 });
 
 /* ------------------------------------------------------------------ */
@@ -165,7 +165,7 @@ test('2. una respuesta capturada por CDP suma sus tokens de salida', async () =>
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses + 1, 'una respuesta');
-  assert.equal(despues.outputTokens, antes.outputTokens + estimateTokens(texto), 'con sus tokens');
+  assert.equal(despues.outputTokens, antes.outputTokens + contarPalabras(texto), 'con sus tokens');
 });
 
 test('3. una respuesta que Chromium informa como Other también suma tokens', async () => {
@@ -179,7 +179,7 @@ test('3. una respuesta que Chromium informa como Other también suma tokens', as
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses + 1, 'una respuesta');
-  assert.equal(despues.outputTokens, antes.outputTokens + estimateTokens(texto), 'con sus tokens');
+  assert.equal(despues.outputTokens, antes.outputTokens + contarPalabras(texto), 'con sus tokens');
 });
 
 test('3b. el canal de actualizaciones en JSON por líneas también aporta tokens', async () => {
@@ -205,7 +205,7 @@ test('3b. el canal de actualizaciones en JSON por líneas también aporta tokens
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses + 1, 'una respuesta');
-  assert.equal(despues.outputTokens, antes.outputTokens + estimateTokens(texto), 'con sus tokens, sin contar dos veces el mismo texto');
+  assert.equal(despues.outputTokens, antes.outputTokens + contarPalabras(texto), 'con sus tokens, sin contar dos veces el mismo texto');
 });
 
 /* ------------------------------------------------------------------ */
@@ -225,7 +225,7 @@ test('4. la misma respuesta por la capa y por CDP suma una vez sus tokens', asyn
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses + 1, 'una respuesta, no dos');
-  assert.equal(despues.outputTokens, antes.outputTokens + estimateTokens(texto), 'y sus tokens, no el doble');
+  assert.equal(despues.outputTokens, antes.outputTokens + contarPalabras(texto), 'y sus tokens, no el doble');
 });
 
 /* ------------------------------------------------------------------ */
@@ -243,12 +243,12 @@ test('5. una respuesta que crece corrige los tokens sin duplicarlos', async () =
   await respuestaPorCDP(view, { requestId: 'req-tk5-a', texto: parcial });
   const trasParcial = await stats();
   assert.equal(trasParcial.responses, antes.responses + 1, 'el primer tramo es la respuesta');
-  assert.equal(trasParcial.outputTokens, antes.outputTokens + estimateTokens(parcial), 'con lo que hay hasta ahí');
+  assert.equal(trasParcial.outputTokens, antes.outputTokens + contarPalabras(parcial), 'con lo que hay hasta ahí');
 
   await respuestaPorCDP(view, { requestId: 'req-tk5-b', texto: completo });
   const fin = await stats();
   assert.equal(fin.responses, trasParcial.responses, 'el tramo que crece no es otra respuesta');
-  assert.equal(fin.outputTokens, antes.outputTokens + estimateTokens(completo), 'los tokens quedan en el texto completo');
+  assert.equal(fin.outputTokens, antes.outputTokens + contarPalabras(completo), 'los tokens quedan en el texto completo');
 });
 
 /* ------------------------------------------------------------------ */
@@ -289,7 +289,7 @@ test('6b. si el texto aparece después del cierre de red, se suman sus tokens si
   const fin = await stats();
 
   assert.equal(fin.responses, sinTexto.responses, 'no se cuenta una segunda respuesta');
-  assert.equal(fin.outputTokens, antes.outputTokens + estimateTokens(texto), 'y los tokens sí se suman');
+  assert.equal(fin.outputTokens, antes.outputTokens + contarPalabras(texto), 'y los tokens sí se suman');
 
   const log = await callIpc('nexo:log');
   assert.ok(
@@ -316,7 +316,7 @@ test('7. los tokens de salida no mueven la entrada, los mensajes ni las respuest
   assert.equal(trasEnviar.inputTokens > antes.inputTokens, true, 'el envío suma entrada');
   assert.equal(fin.inputTokens, trasEnviar.inputTokens, 'la respuesta no toca la entrada');
   assert.equal(fin.messages, trasEnviar.messages, 'ni los mensajes del usuario');
-  assert.equal(fin.outputTokens, trasEnviar.outputTokens + estimateTokens(texto), 'sólo los tokens de salida');
+  assert.equal(fin.outputTokens, trasEnviar.outputTokens + contarPalabras(texto), 'sólo los tokens de salida');
 });
 
 
@@ -330,7 +330,7 @@ test('8. CDP primero e inyección después no duplican tokens ni respuestas', as
   capaStreamEnd(view, texto);
   const fin = await stats();
   assert.equal(fin.responses, antes.responses + 1);
-  assert.equal(fin.outputTokens, antes.outputTokens + estimateTokens(texto));
+  assert.equal(fin.outputTokens, antes.outputTokens + contarPalabras(texto));
 });
 
 test('9. un cierre de la inyección sin texto no impide el respaldo CDP', async () => {
@@ -345,7 +345,7 @@ test('9. un cierre de la inyección sin texto no impide el respaldo CDP', async 
   });
   const fin = await stats();
   assert.equal(fin.responses, antes.responses + 1);
-  assert.equal(fin.outputTokens, antes.outputTokens + estimateTokens(texto));
+  assert.equal(fin.outputTokens, antes.outputTokens + contarPalabras(texto));
   assert.equal(fin.inputTokens, antes.inputTokens + countGptTokens('control de cierre vacío'));
 });
 
@@ -362,7 +362,7 @@ test('10. CDP recupera texto plano y NDJSON con MIME JSON sin duplicar acumulado
     await respuestaPorCDP(view, { requestId: `req-tk10-${mimeType}`, texto, cuerpo, mimeType });
     const fin = await stats();
     assert.equal(fin.responses, antes.responses + 1);
-    assert.equal(fin.outputTokens, antes.outputTokens + estimateTokens(texto));
+    assert.equal(fin.outputTokens, antes.outputTokens + contarPalabras(texto));
   }
 });
 
@@ -392,13 +392,13 @@ test('12. los tokens de salida se actualizan en tiempo real y el cierre no los d
 
   progreso(view, messageId, parte1);
   const durante1 = await stats();
-  assert.equal(durante1.outputTokens, antes.outputTokens + estimateTokens(parte1),
+  assert.equal(durante1.outputTokens, antes.outputTokens + contarPalabras(parte1),
     'el contador suma los tokens mientras llega el primer fragmento');
 
   progreso(view, messageId, parte2);
   const completo = parte1 + parte2;
   const durante2 = await stats();
-  assert.equal(durante2.outputTokens, antes.outputTokens + estimateTokens(completo),
+  assert.equal(durante2.outputTokens, antes.outputTokens + contarPalabras(completo),
     'el contador se actualiza con el texto acumulado, sin duplicar');
 
   capaStreamEnd(view, completo, { messageId });
@@ -417,10 +417,10 @@ test('13. el cierre recortado conserva todo el texto entregado y estima el acumu
   for (const part of parts) {
     full += part;
     progreso(view, messageId, part);
-    assert.equal((await stats()).outputTokens, antes.outputTokens + estimateTokens(full));
+    assert.equal((await stats()).outputTokens, antes.outputTokens + contarPalabras(full));
   }
   capaStreamEnd(view, full.slice(0, 3), { messageId });
-  assert.equal((await stats()).outputTokens, antes.outputTokens + estimateTokens(full));
+  assert.equal((await stats()).outputTokens, antes.outputTokens + contarPalabras(full));
   assert.equal((await stats()).responses, antes.responses + 1);
 });
 
@@ -437,5 +437,5 @@ test('14. red primero y texto en vivo después finalizan una sola respuesta', as
   capaStreamEnd(view, text, { messageId });
   const fin = await stats();
   assert.equal(fin.responses, antes.responses + 1);
-  assert.equal(fin.outputTokens, antes.outputTokens + estimateTokens(text));
+  assert.equal(fin.outputTokens, antes.outputTokens + contarPalabras(text));
 });
