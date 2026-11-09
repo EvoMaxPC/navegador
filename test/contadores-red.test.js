@@ -342,6 +342,52 @@ test('la telemetría POST no se cuenta como respuesta de GPT', async () => {
   assert.equal(fin.turns, antes.turns, 'telemetría no cierra turnos');
 });
 
+test('CDP lee el texto y los tokens del stream unauth-mweb de ChatGPT', async () => {
+  const view = await abrir('https://chatgpt.com/c/red-unauth-mweb-cdp');
+  const antes = await stats();
+
+  journal.ipcListeners.get('nexo:event')(
+    { sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' } },
+    {
+      type: 'outgoing',
+      payload: {
+        messageId: 'm-unauth-mweb-cdp',
+        source: 'request',
+        host: 'chatgpt.com',
+        site: 'chatgpt',
+        chars: 4,
+        tokens: 1,
+        promptHash: 'prompt-unauth-mweb-cdp',
+        textFound: true,
+      },
+    },
+  );
+
+  const url = 'https://chatgpt.com/unauth-mweb/conversation/updates';
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-unauth-mweb-cdp',
+    type: 'XHR',
+    request: { url, method: 'POST', postData: '{}' },
+  });
+  view.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-unauth-mweb-cdp',
+    type: 'XHR',
+    response: { url, status: 200, mimeType: 'text/event-stream' },
+  });
+  view.debugger.bodies.set(
+    'req-unauth-mweb-cdp',
+    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta GPT capturada por CDP.'] } } })}\\n\\ndata: [DONE]\\n\\n`,
+  );
+  view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-unauth-mweb-cdp' });
+  await settle(80);
+
+  const fin = await stats();
+  assert.equal(fin.messages, antes.messages + 1, 'se conserva un único mensaje');
+  assert.equal(fin.responses, antes.responses + 1, 'CDP cuenta la respuesta');
+  assert.equal(fin.turns, antes.turns + 1, 'CDP cierra el turno');
+  assert.ok(fin.outputTokens > antes.outputTokens, 'se calculan tokens a partir del texto real');
+});
+
 test('ChatGPT unauth-mweb conversation/updates cuenta la respuesta sin contar otro mensaje', async () => {
   const view = await abrir('https://chatgpt.com/c/red-unauth-mweb');
   const antes = await stats();
