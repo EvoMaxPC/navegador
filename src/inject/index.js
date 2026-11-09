@@ -19,7 +19,8 @@
 
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
-import { detectSite, isMediable, locateUserText, patchUserText } from '../core/sites.js';
+import { detectSite, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
+import { extractChatGptDpuAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
 import { estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
@@ -292,7 +293,14 @@ function gestoDeEnvio(razon) {
   nuevo.timer = setTimeout(() => {
     if (envio.pendiente !== nuevo) return;
     envio.pendiente = null;
-    envio.porGesto = { at: nuevo.at, chars: nuevo.chars, id: nuevo.id };
+    envio.porGesto = {
+      at: nuevo.at,
+      chars: nuevo.chars,
+      id: nuevo.id,
+      tokenText: nuevo.tokenText,
+      tokens: nuevo.tokens,
+      promptHash: nuevo.promptHash,
+    };
     anunciarEnvio({ ...nuevo, source: 'composer', textFound: true });
   }, ESPERA_PETICION_MS);
 
@@ -318,6 +326,27 @@ function tomarEnvioPendiente() {
   return pendiente;
 }
 
+/** Lee el campo `prompt` del formulario del transporte DPU anónimo. */
+async function promptDeChatGptDpu(input, init) {
+  let body = init?.body;
+  if (body === undefined && typeof Request !== 'undefined' && input instanceof Request) {
+    try { body = await input.clone().text(); } catch { body = null; }
+  }
+  try {
+    if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+      return String(body.get('prompt') || '');
+    }
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      const value = body.get('prompt');
+      return typeof value === 'string' ? value : '';
+    }
+    if (typeof body === 'string') return String(new URLSearchParams(body).get('prompt') || '');
+  } catch {
+    /* el texto del gesto de envío sigue siendo una fuente de respaldo */
+  }
+  return '';
+}
+
 /* ------------------------------------------------------------------ */
 /* 1 + 2. petición saliente                                            */
 /* ------------------------------------------------------------------ */
@@ -340,7 +369,30 @@ function tomarEnvioPendiente() {
  */
 async function planRequest(input, init) {
   const url = absoluteUrl(urlOf(input));
-  if (!shouldMediate(url, methodOf(input, init))) return { chat: false };
+  const method = methodOf(input, init);
+
+  // ChatGPT sin cuenta envía el prompt y la respuesta por /conversation/updates.
+  // Es un formulario DPU, no el JSON /conversation que procesa el filtro SSE.
+  if (site.id === 'chatgpt' && isResponseRequest(site, url, method)) {
+    const formPrompt = await promptDeChatGptDpu(input, init);
+    const gesture = envio.pendiente || (
+      envio.porGesto && Date.now() - envio.porGesto.at <= VENTANA_ENLACE_MS ? envio.porGesto : null
+    );
+    const prompt = formPrompt || gesture?.tokenText || '';
+    return {
+      chat: true,
+      send: true,
+      dpu: true,
+      promptChars: gesture?.chars || prompt.length,
+      promptText: prompt,
+      promptTokens: gesture?.tokens ?? estimateTokens(prompt),
+      model: '',
+      promptHash: gesture?.promptHash || (prompt ? fingerprint(prompt) : ''),
+      url,
+    };
+  }
+
+  if (!shouldMediate(url, method)) return { chat: false };
 
   // El cuerpo viaja como string en `init`, o dentro de un objeto `Request`.
   let text = typeof init?.body === 'string' ? init.body : null;
@@ -413,6 +465,76 @@ const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
  * respuestas largas de verdad; ahora entra una conversación entera.
  */
 const MAX_CAPTURE_CHARS = 200_000;
+const MAX_DPU_RESPONSE_BYTES = 12_000_000;
+
+/**
+ * ChatGPT anónimo aplica la respuesta como HTML DPU al documento. Se lee una
+ * copia del stream (sin alterar el que consume el sitio) y, al llegar EOF, se
+ * toma el último bloque de respuesta visible asociado al prompt actual.
+ */
+async function captureChatGptDpuResponse(response, capture = {}, generation = null) {
+  let reader = null;
+  try {
+    if (!response?.body || typeof response.clone !== 'function') {
+      throw new Error('el cuerpo DPU no está disponible para lectura');
+    }
+    const copy = response.clone();
+    reader = copy.body?.getReader?.();
+    if (!reader) throw new Error('no se pudo abrir una copia del stream DPU');
+
+    let bytes = 0;
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += Number(chunk.value?.byteLength) || 0;
+      if (bytes > MAX_DPU_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`respuesta DPU supera el límite de lectura (${bytes} bytes)`);
+      }
+    }
+    if (!bytes) throw new Error('ChatGPT devolvió un stream DPU vacío');
+
+    // El consumidor original termina de aplicar el último template al DOM.
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const bodyText = String(document.body?.innerText || '');
+    const answer = extractChatGptDpuAnswer(bodyText, capture.promptText || '');
+    if (!answer) {
+      throw new Error(`el stream DPU terminó (${bytes} bytes), pero no se encontró la respuesta del prompt actual en el DOM (${bodyText.length} caracteres visibles)`);
+    }
+
+    const clipped = answer.length > MAX_CAPTURE_CHARS;
+    const { promptText: _promptText, ...metadata } = capture;
+    bridge.event('stream-end', {
+      ...metadata,
+      site: 'chatgpt',
+      host: CONFIG.host || location.hostname,
+      source: 'dpu',
+      outcome: generation?.stoppedByUser ? 'cancelled' : 'completed',
+      stoppedByUser: Boolean(generation?.stoppedByUser),
+      finished: true,
+      interrupted: false,
+      stopped: false,
+      truncated: false,
+      deliveredChars: answer.length,
+      droppedChars: 0,
+      chars: answer.length,
+      tokens: estimateTokens(answer),
+      clipped,
+      text: clipped ? answer.slice(0, MAX_CAPTURE_CHARS) : answer,
+      dropped: '',
+    });
+  } catch (error) {
+    bridge.event('turn-result', { messageId: capture.messageId, site: 'chatgpt', host: CONFIG.host || location.hostname,
+      outcome: generation?.stoppedByUser ? 'cancelled' : 'unknown', stoppedByUser: Boolean(generation?.stoppedByUser) });
+    bridge.event('error', {
+      stage: 'dpu-capture',
+      message: String(error?.message || error).slice(0, 300),
+    });
+  } finally {
+    if (state.response === generation) state.response = null;
+    try { reader?.releaseLock?.(); } catch { /* stream ya cerrado */ }
+  }
+}
 
 function wrapResponse(response, capture = {}, generation = null) {
   if (!response || !response.body || !looksLikeStream(response.headers)) return response;
@@ -585,14 +707,23 @@ if (!window.__NEXO_HOOKED__) {
     //    página cualquiera no se toca. Si el filtro fallara, se entrega la
     //    original sin reenviar nada (el cuerpo todavía no se consumió).
     if (!prepared.chat) return response;
+    const capture = {
+      messageId,
+      conversationId: conversationIdOf(),
+      mediated: Boolean(prepared.mediated),
+      promptChars: prepared.promptChars || 0,
+      model: prepared.model || '',
+      url,
+    };
+    const mime = String(response.headers?.get?.('content-type') || '');
+    if (prepared.dpu || isChatGptDpuMime(mime)) {
+      // No se reemplaza el Response: Chromium y ChatGPT deben aplicar los DPU
+      // originales al DOM sin que Nexo altere ni consuma el flujo visible.
+      void captureChatGptDpuResponse(response, { ...capture, promptText: prepared.promptText || '' }, generation);
+      return response;
+    }
     try {
-      return wrapResponse(response, {
-        messageId,
-        conversationId: conversationIdOf(),
-        mediated: Boolean(prepared.mediated),
-        promptChars: prepared.promptChars || 0,
-        model: prepared.model || '',
-      }, generation);
+      return wrapResponse(response, capture, generation);
     } catch (error) {
       bridge.event('error', { stage: 'stream', message: String(error?.message || error) });
       return response;
