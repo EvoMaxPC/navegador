@@ -1071,6 +1071,10 @@ function watchProviderNetwork(s) {
     if (seen.size > 200) seen.delete(seen.keys().next().value);
     return true;
   };
+  // Relaciona el requestId de Electron entre onBeforeRequest y onCompleted.
+  // Así la respuesta cierra el mensaje que originó ESA petición, aunque uno de
+  // los dos eventos llegue sin webContentsId o la pestaña cambie de foco.
+  const requestTurns = new Map();
 
   // El cuerpo de la petición de conversación trae el mensaje del usuario. Se
   // lee acá, en el proceso principal, antes de que salga: es el camino que no
@@ -1085,6 +1089,25 @@ function watchProviderNetwork(s) {
       const note = noteUserMessageFromNetwork(details);
       if (note?.seen) capture.chatRequests += 1;
       if (note?.counted) capture.counted += 1;
+      const url = String(details.url || '');
+      const host = hostOf(url);
+      const requestId = String(details.id || '');
+      if (
+        requestId &&
+        String(details.method || '').toUpperCase() === 'POST' &&
+        isAiHost(host) &&
+        isMediable(detectSite(host), url, 'POST') &&
+        note?.responseEligible !== false &&
+        engine.isEnabledFor(host)
+      ) {
+        const rawId = Number(details.webContentsId);
+        const tabId = Number.isFinite(rawId) ? rawId : -1;
+        const messageId = engine.currentSendId(tabId);
+        if (messageId) {
+          requestTurns.set(requestId, { tabId, messageId, host, url });
+          if (requestTurns.size > 500) requestTurns.delete(requestTurns.keys().next().value);
+        }
+      }
     } catch (error) {
       console.log('[red] al leer el envío:', error?.message || error);
     }
@@ -1109,15 +1132,18 @@ function watchProviderNetwork(s) {
     if (method === 'POST' && isMediable(detectSite(host), url, method)) {
       const status = Number(details.statusCode) || 0;
       if (status >= 200 && status < 300 && engine.isEnabledFor(host)) {
-        const id = Number(details.webContentsId);
-        const tabId = Number.isFinite(id) ? id : -1;
-        const esperaba = engine.currentSendId(tabId);
+        const requestId = String(details.id || '');
+        const asociada = requestId ? requestTurns.get(requestId) : null;
+        if (requestId) requestTurns.delete(requestId);
+        const rawId = Number(details.webContentsId);
+        const tabId = asociada?.tabId ?? (Number.isFinite(rawId) ? rawId : -1);
+        const esperaba = asociada?.messageId || engine.currentSendId(tabId);
         if (esperaba) {
           setTimeout(() => {
             try {
               // Si en el medio llegó otra pregunta, este cierre ya no es suyo.
               if (engine.currentSendId(tabId) !== esperaba) return;
-              const contada = engine.onNetworkResponse(tabId, { host, url });
+              const contada = engine.onNetworkResponse(tabId, { host, url, messageId: esperaba });
               if (!contada?.counted) return;
               const entry = {
                 kind: 'receiving',
