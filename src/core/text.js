@@ -1,7 +1,5 @@
 import { countTokens as countO200k } from 'gpt-tokenizer';
 import { countTokens as countCl100k } from 'gpt-tokenizer/encoding/cl100k_base';
-import { countTokens as countP50k } from 'gpt-tokenizer/encoding/p50k_base';
-import { countTokens as countR50k } from 'gpt-tokenizer/encoding/r50k_base';
 
 /**
  * Utilidades de texto del motor de mediación.
@@ -166,8 +164,6 @@ export function estimateTokens(text) {
 export function countGptTokens(text, model = '') {
   if (typeof text !== 'string' || text.length === 0) return 0;
   const id = String(model || '').toLowerCase();
-  if (/^(text-davinci-001|davinci|curie|babbage|ada)(-|$)/.test(id)) return countR50k(text);
-  if (/^(text-davinci-002|text-davinci-003|code-davinci|code-cushman)(-|$)/.test(id)) return countP50k(text);
   if (/^(gpt-3\.5|gpt-4(?:-|$))/.test(id) && !/^gpt-4(?:\.1|o)/.test(id)) return countCl100k(text);
   return countO200k(text);
 }
