@@ -430,7 +430,9 @@ function createWindow() {
     // con perfil conocido y se suelta si la pestaña navega a otro lado.
     cdp?.sync(contents);
     contents.on('did-start-navigation', (_e, url, _inPage, isMainFrame) => {
-      if (!isMainFrame) return;
+      if (!isMainFrame || _inPage) return;
+      engine?.onTurnInterrupted(contents.id);
+      broadcast('nexo:stats-changed', engine.stats());
       if (cdp && CdpObserver.wants(url)) cdp.attach(contents, url);
       else cdp?.release(contents);
     });
@@ -450,6 +452,7 @@ function createWindow() {
     contents.on('destroyed', () => {
       cdp?.release(contents);
       engine?.dropTab(contents.id);
+      broadcast('nexo:stats-changed', engine.stats());
       if (profile) profile.saveAll();
     });
     if (isDev) contents.on('console-message', (_e, level, message) => console.log('[pestaña]', message));
@@ -496,6 +499,15 @@ function registerIpc() {
         meta: { host, url: String(payload?.url || '').slice(0, 300), site: payload?.site || null },
       });
     }
+    return result;
+  });
+  ipcMain.handle('nexo:turn-result', (event, payload) => {
+    if (event.sender?.getType?.() !== 'webview' || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { skipped: 'resultado-invalido' };
+    }
+    if (payload.phase === 'started') return engine.onTurnStarted(event.sender.id, payload);
+    const result = engine.onTurnResult(event.sender.id, payload);
+    broadcast('nexo:stats-changed', engine.stats());
     return result;
   });
   ipcMain.handle('nexo:stream-end', (event, payload) => {
@@ -1198,6 +1210,7 @@ function watchProviderNetwork(s) {
         isResponseRequest(site, url, method))
     ) {
       const status = Number(details.statusCode) || 0;
+      if (status >= 400 && asociada) engine.onTurnResult(asociada.tabId, { ...asociada, outcome: 'failed' });
       if (status >= 200 && status < 300 && engine.isEnabledFor(host)) {
         const wcId = Number(details.webContentsId);
         const tabId = asociada?.tabId ?? (Number.isFinite(wcId) ? wcId : -1);
@@ -1248,7 +1261,10 @@ function watchProviderNetwork(s) {
   });
 
   s.webRequest.onErrorOccurred({ urls: ['*://*/*'] }, (details = {}) => {
-    if (details.id) requestTurns.delete(String(details.id));
+    const associated = details.id != null ? requestTurns.get(String(details.id)) : null;
+    if (details.id != null) requestTurns.delete(String(details.id));
+    if (associated) engine.onTurnResult(associated.tabId, { ...associated,
+      outcome: String(details.error || '').includes('ERR_ABORTED') ? 'unknown' : 'failed' });
     const url = String(details.url || '');
     const host = hostOf(url);
     if (!isAiHost(host)) return;
@@ -1379,7 +1395,10 @@ app.whenReady().then(async () => {
   engine = new Engine({
     store,
     memory: created.memory,
-    onEvent: (entry) => broadcast('nexo:event', { type: 'intervention', payload: entry }),
+    onEvent: (entry) => {
+      broadcast('nexo:event', { type: 'intervention', payload: entry });
+      if (entry.code === 'turn-result') broadcast('nexo:stats-changed', engine.stats());
+    },
   });
   mark('motor');
   cdp = new CdpObserver({
@@ -1543,6 +1562,7 @@ app.on('web-contents-created', (_event, contents) => {
   // una página que rompe el proceso de render deja la aplicación inusable.
   contents.on('render-process-gone', (_event, details) => {
     if (details?.reason === 'clean-exit') return;
+    engine?.onTurnInterrupted(contents.id);
     const entry = crashRecovery.get(contents.id) || { attempts: 0, timer: null };
     entry.attempts += 1;
     console.error(`[nexo] la pestaña se cayó (${details?.reason || 'desconocido'})`);

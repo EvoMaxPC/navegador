@@ -253,7 +253,7 @@ test('6. una respuesta sin texto se cuenta y no inventa tokens', async () => {
   const despues = await stats();
   assert.equal(despues.responses, antes.responses + 1, 'la respuesta se cuenta');
   assert.equal(despues.outputTokens, antes.outputTokens, 'sin tokens inventados');
-  assert.equal(despues.turns, antes.turns + 1, 'y el turno se cierra');
+  assert.equal(despues.turnsUnknown, antes.turnsUnknown + 1, 'interrupción sin confirmación: un turno desconocido');
 });
 
 test('6b. si el texto aparece después del cierre de red, se suman sus tokens sin contar otra respuesta', async () => {

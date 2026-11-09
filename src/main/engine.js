@@ -13,6 +13,7 @@ import { StreamSentinel } from '../core/streamSentinel.js';
 import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
 import { fingerprint } from '../core/text.js';
 import { countOutputTokens } from './tokens.js';
+import { TURN_OUTCOMES, turnOutcome } from '../core/turnOutcome.js';
 import { looksEncrypted } from '../memory/item.js';
 
 /** Cómo se llama cada canal en los textos que ve el usuario. */
@@ -52,15 +53,15 @@ export class Engine {
      * cuente dos veces si llega por los dos canales.
      */
     this.cdpSeen = new Map();
-    this.cdp = { captures: 0, duplicates: 0, loops: 0, truncated: 0, failures: 0 };
+    this.cdp = { captures: 0, duplicates: 0, truncated: 0, failures: 0 };
 
     /**
      * Contadores de conversación.
      *
      * Cuentan hechos, no actividad: un mensaje es un envío que la capa reconoció
      * como texto del usuario, una respuesta es un stream que se cerró, y un turno
-     * es el par de los dos. **Ninguno depende de que el motor intervenga**: un
-     * mensaje sin mediación cuenta igual.
+     * clasifica el resultado de ChatGPT. Ninguno depende de que el motor
+     * intervenga: un mensaje sin mediación cuenta igual.
      *
      * Los tokens visibles de texto se cuentan con BPE GPT según el modelo detectado.
      * No incluyen contenido multimodal ni tokens internos no expuestos por el proveedor.
@@ -68,7 +69,10 @@ export class Engine {
     this.counters = {
       messages: 0,
       responses: 0,
-      turns: 0,
+      turnsCompleted: 0,
+      turnsCancelled: 0,
+      turnsFailed: 0,
+      turnsUnknown: 0,
       inputTokens: 0,
       outputTokens: 0,
       /**
@@ -82,8 +86,6 @@ export class Engine {
        * «intervenciones»: dos intercambios completos suman cuatro.
        */
       activity: 0,
-      loopsSeen: 0,
-      loopsCut: 0,
     };
     this.tokensEstimated = true;
     /** Envíos vistos, por pestaña: `${pestaña}|${messageId}`. */
@@ -259,7 +261,9 @@ export class Engine {
     // CDP o del vigilante de red no dicen nada de la capa: creerlos capa activa
     // dejaría el stream sin nadie que lo lea.
     if (source === 'composer' || source === 'request') this.noteLayer(webContentsId);
+    this.onTurnInterrupted(webContentsId);
     this.lastSend.set(webContentsId, {
+      host: payload.host || safeHost(payload.url),
       at: now,
       hash,
       source,
@@ -287,6 +291,64 @@ export class Engine {
     });
 
     return { ok: true, duplicate: false, messageId, chars, tokens };
+  }
+
+  /** Regenerar/continuar inicia otra respuesta, pero no otro mensaje de entrada.
+   * Reutiliza el turno pendiente para distinguir respuestas de texto idéntico.
+   */
+  onTurnStarted(webContentsId, payload = {}) {
+    if (payload.site !== 'chatgpt' || !payload.messageId) return { skipped: 'fuera-de-alcance' };
+    const messageId = String(payload.messageId);
+    if (this.awaiting.get(webContentsId)?.messageId === messageId ||
+      this.seenResponses.has(`${webContentsId}|outcome|${messageId}`)) return { duplicate: true };
+    this.onTurnInterrupted(webContentsId);
+    this.awaiting.set(webContentsId, { messageId, host: payload.host || 'chatgpt.com', at: Date.now(), model: payload.model || '' });
+    return { started: true };
+  }
+
+  /** Resultado exclusivo del turno, almacenado en la deduplicación existente.
+   * Una señal tardía puede confirmar un desconocido: se mueve, no se suma otro.
+   * Nunca convierte un aborto de transporte en una cancelación del usuario.
+   */
+  onTurnResult(webContentsId, payload = {}) {
+    const pending = this.#pendingTurn(webContentsId, Date.now());
+    const host = payload.host || safeHost(payload.url) || pending?.entry.host || this.lastSend.get(webContentsId)?.host;
+    if (detectSite(host || '').id !== 'chatgpt' && payload.site !== 'chatgpt') return { skipped: 'otro-proveedor' };
+    const text = String(payload.text || '');
+    const id = String(payload.messageId || pending?.entry.messageId || this.lastSend.get(webContentsId)?.messageId ||
+      (text ? `sse|${text.length}|${fingerprint(text)}` : ''));
+    if (!id) return { skipped: 'sin-turno' };
+    const tabId = pending && (!payload.messageId || this.resolveMessageId(pending.id, id) === pending.entry.messageId)
+      ? pending.id : webContentsId;
+    let canonical = this.resolveMessageId(tabId, id);
+    // El mismo texto recuperado por CDP y por la capa utiliza la identidad ya
+    // resuelta por el motor, no crea otro turno con el ID del otro transporte.
+    if (text) {
+      const seen = (this.recentTexts.get(webContentsId) || []).findLast((item) =>
+        item.messageId && (item.text === text || item.text.startsWith(text) || text.startsWith(item.text)) &&
+        (!pending || item.messageId === pending.entry.messageId));
+      if (seen) canonical = seen.messageId;
+    }
+    if (canonical !== id) this.messageAliases.set(`${tabId}|${id}`, canonical);
+    let key = `${tabId}|outcome|${canonical}`;
+    // Chromium puede atribuir el envío a un worker (-1) y la capa al webview.
+    if (tabId !== -1 && this.seenResponses.has(`-1|outcome|${canonical}`)) key = `-1|outcome|${canonical}`;
+    const previous = this.seenResponses.get(key);
+    const outcome = turnOutcome(payload);
+    if (previous && (previous.outcome !== 'unknown' || outcome === 'unknown')) return { duplicate: true, outcome: previous.outcome };
+    if (previous) this.counters[TURN_OUTCOMES[previous.outcome]] -= 1;
+    this.counters[TURN_OUTCOMES[outcome]] += 1;
+    this.seenResponses.set(key, { at: Date.now(), outcome });
+    this.onEvent({ kind: 'system', code: 'turn-result', severity: 'info',
+      title: 'Resultado del turno actualizado', meta: { messageId: canonical, outcome }, ts: Date.now() });
+    return { counted: true, outcome, reclassified: Boolean(previous) };
+  }
+
+  /** Navegación/cierre o reemplazo del envío sin resultado confirmado. */
+  onTurnInterrupted(webContentsId) {
+    const pending = this.awaiting.get(webContentsId);
+    if (!pending) return { skipped: 'sin-turno' };
+    return this.onTurnResult(webContentsId, { ...pending, outcome: 'unknown' });
   }
 
   /**
@@ -349,14 +411,12 @@ export class Engine {
     // silenciosamente el recuento que #mergeResponse ya calculó con el texto.
     const tokens = merge.tokens;
     this.counters.outputTokens += tokens;
-    if (payload.stopped) this.counters.loopsCut += 1;
 
     if (
       pendiente &&
       now - pendiente.entry.at <= VENTANA_RESPUESTA_MS &&
       (!pendiente.entry.messageId || !awaitId || pendiente.entry.messageId === awaitId)
     ) {
-      this.counters.turns += 1;
       this.awaiting.delete(pendiente.id);
     }
 
@@ -389,9 +449,9 @@ export class Engine {
     if (this.seenResponses.has(key)) return { ok: true, duplicate: true };
     this.seenResponses.set(key, now);
 
+    this.onTurnResult(pendiente.id, { ...pendiente.entry, host: payload.host || pendiente.entry.host, outcome: 'unknown' });
     this.counters.responses += 1;
     this.counters.activity += 1;
-    this.counters.turns += 1;
     this.awaiting.delete(pendiente.id);
     // Queda anotado que esta respuesta se contó sin texto: si CDP o la capa
     // consiguen el texto un instante después, suman sus tokens a **esta**
@@ -546,7 +606,7 @@ export class Engine {
   /** Descarta claves viejas de un mapa de deduplicación. */
   #prune(map, now = Date.now(), ttl = 30 * 60_000) {
     if (map.size < 500) return;
-    for (const [key, ts] of map) if (now - ts > ttl) map.delete(key);
+    for (const [key, ts] of map) if (now - (typeof ts === 'object' ? ts.at : ts) > ttl && !key.includes('|outcome|')) map.delete(key);
   }
 
   /**
@@ -573,6 +633,7 @@ export class Engine {
    * actualiza el historial de la conversación.
    */
   onStreamEnd(webContentsId, payload) {
+    this.onTurnResult(webContentsId, { ...payload, finished: payload?.finished ?? true });
     // La capa cerró un stream: desde acá, esa respuesta ya la contó ella.
     this.layerEnded.set(webContentsId, Date.now());
     if (String(payload?.text || '').trim()) this.layerEndedText.set(webContentsId, Date.now());
@@ -729,7 +790,10 @@ export class Engine {
    */
   onCdpCapture(webContentsId, capture = {}) {
     const text = String(capture.text || '');
-    if (!text.trim()) return { ok: false, skipped: 'empty' };
+    if (!text.trim()) {
+      this.onTurnResult(webContentsId, capture);
+      return { ok: false, skipped: 'empty' };
+    }
     const now = Date.now();
 
     const host = capture.host || safeHost(capture.url) || 'desconocido';
@@ -737,6 +801,8 @@ export class Engine {
       // El usuario apagó el sitio: tampoco se observa.
       return { ok: false, skipped: 'disabled' };
     }
+
+    this.onTurnResult(webContentsId, capture);
 
     // Un mismo turno puede aparecer dos veces (frame repetido, cuerpo pedido de
     // nuevo, socket reabierto) y también puede haberlo contado ya el camino
@@ -750,7 +816,7 @@ export class Engine {
     const pendiente = this.#pendingTurn(webContentsId, now);
     const awaitId = capture.messageId
       ? this.resolveMessageId(pendiente?.id ?? webContentsId, capture.messageId)
-      : null;
+      : pendiente?.entry.messageId || null;
 
     // ¿Es el texto de una respuesta que la red ya contó sin texto? Entonces lo
     // que falta son los tokens, no otra respuesta.
@@ -787,7 +853,6 @@ export class Engine {
       const vigente = now - pendiente.entry.at <= VENTANA_RESPUESTA_MS;
       const coincide = awaitId ? pendiente.entry.messageId === awaitId : true;
       if (vigente && coincide) {
-        this.counters.turns += 1;
         this.awaiting.delete(pendiente.id);
         paired = true;
       }
@@ -827,7 +892,6 @@ export class Engine {
     const channel = CHANNEL_LABEL[capture.source] || 'CDP';
 
     if (verdict.stopped) {
-      this.cdp.loops += 1;
       const unit = (verdict.interventions.find((item) => item.unit) || {}).unit || '';
       const repeats = (verdict.interventions.find((item) => item.repeats) || {}).repeats || null;
       guard.note({
@@ -898,36 +962,32 @@ export class Engine {
   /**
    * Contadores para la interfaz.
    *
-   * `turns` son turnos **completos** (mensaje y respuesta emparejados), no
+   * Los cuatro resultados clasifican respuestas de ChatGPT, no
    * envíos preparados: `guardTurns` conserva la cuenta interna de los guardianes
    * para quien la necesite, pero no se muestra como «turnos».
    */
   stats() {
     let guardTurns = 0;
-    let loopsSeen = 0;
     for (const guard of this.guards.values()) {
       const s = guard.stats();
       guardTurns += s.turns;
-      loopsSeen += s.loopsSeen;
     }
     const c = this.counters;
-    const observed = loopsSeen + this.cdp.loops;
     return {
       tabs: this.guards.size,
-      // Ocho métricas independientes.
+      // Métricas de sesión; los cuatro resultados de turno son exclusivos.
       messages: c.messages,
       responses: c.responses,
-      turns: c.turns,
+      turnsCompleted: c.turnsCompleted,
+      turnsCancelled: c.turnsCancelled,
+      turnsFailed: c.turnsFailed,
+      turnsUnknown: c.turnsUnknown,
       inputTokens: c.inputTokens,
       outputTokens: c.outputTokens,
       // El panel muestra la actividad de la conversación: +1 al enviar y +1 al
       // recibir. Lo que hizo el mediador va aparte, para no mezclar dos cosas.
       interventions: c.activity,
       mediatedInterventions: c.interventions,
-      loopsSeen: observed,
-      loopsCut: c.loopsCut,
-      // Compatibilidad con lo anterior.
-      loops: observed,
       guardTurns,
       tokensEstimated: this.tokensEstimated,
       cdp: { ...this.cdp },
@@ -935,6 +995,7 @@ export class Engine {
   }
 
   dropTab(webContentsId) {
+    this.onTurnInterrupted(webContentsId);
     this.guards.delete(webContentsId);
     this.cdpSeen.delete(webContentsId);
     this.awaiting.delete(webContentsId);
@@ -972,6 +1033,8 @@ export class Engine {
     const url = String(failure.url || '');
     const host = failure.host || safeHost(url) || 'desconocido';
     const site = failure.site || detectSite(host).id;
+    if (failure.chat) this.onTurnResult(webContentsId, { ...failure,
+      outcome: failure.canceled || /ERR_ABORTED/.test(failure.errorText || '') ? 'unknown' : 'failed' });
     const key = `${webContentsId}|${failure.kind}|${failure.status || failure.errorText}|${url}`;
     const now = Date.now();
     if (now - (this.cdpFailures.get(key) || 0) < 60_000) return { ok: true, duplicate: true };

@@ -27,6 +27,7 @@
  *     stream, `[DONE]` va último.
  */
 
+import { outcomeFromEvent } from './turnOutcome.js';
 import { parseSSE, passthroughSSE, rewriteSSE, serializeSSE } from './sse.js';
 import { StreamSentinel } from './streamSentinel.js';
 import { createAdapter } from './streamAdapters.js';
@@ -67,6 +68,12 @@ export function createStreamFilter(opts = {}) {
   let ended = false;
   const chatgpt = opts.adapter === 'chatgpt' || opts.provider === 'chatgpt';
   let protocolEnded = false;
+  let outcome = null;
+  const observeOutcome = (json) => {
+    const next = outcomeFromEvent(json);
+    if (next && (!outcome || outcome === 'completed')) outcome = next;
+    if (chatgpt && (next === 'failed' || next === 'cancelled')) protocolEnded = true;
+  };
   const pendingChunks = [];
   let plainText = '';
   let lineText = '';
@@ -77,6 +84,7 @@ export function createStreamFilter(opts = {}) {
     for (const line of lines) {
       const json = safeJson(line);
       if (!json) continue;
+      observeOutcome(json);
       const plan = adapter.read(json);
       lineText += (plan.segments || []).map((segment) => segment.newText).join('');
       if (chatgpt && json.type === 'end') protocolEnded = true;
@@ -100,6 +108,8 @@ export function createStreamFilter(opts = {}) {
       deliveredChars: text.length,
       droppedChars: format === 'sse' ? verdict.droppedChars : 0,
       text, dropped: format === 'sse' ? verdict.dropped : '',
+      outcome: outcome === 'failed' || outcome === 'cancelled' ? outcome
+        : (interrupted || verdict.stopped) ? 'unknown' : outcome || 'completed',
       interrupted, model: adapter.model?.() || '',
     });
   };
@@ -175,6 +185,7 @@ export function createStreamFilter(opts = {}) {
     if (evt.data === '[DONE]' || evt.data === 'DONE') {
       if (chatgpt) {
         protocolEnded = true;
+        outcome ||= 'completed';
         return flushPending() + passthroughSSE(evt);
       }
       delayed.push(evt);
@@ -184,9 +195,14 @@ export function createStreamFilter(opts = {}) {
     // Latidos, `retry:` y comentarios: sin datos que interpretar.
     if (!evt.hasData) return passthroughSSE(evt);
 
+    if (chatgpt && evt.event === 'error') {
+      outcome = 'failed';
+      protocolEnded = true;
+    }
     const json = safeJson(evt.data);
     if (!json) return passthroughSSE(evt);
 
+    observeOutcome(json);
     const plan = adapter.read(json);
     // Sólo el cierre de la conversación: un mensaje oculto o una herramienta
     // puede finalizar antes de que llegue la respuesta visible.

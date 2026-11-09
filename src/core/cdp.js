@@ -15,6 +15,7 @@
  * mediado.
  */
 
+import { outcomeFromEvent } from './turnOutcome.js';
 import { extractDeltas } from './sse.js';
 import { createAdapter } from './streamAdapters.js';
 import { detectSite } from './sites.js';
@@ -164,6 +165,7 @@ export class CdpCapture {
       this.adapter = this.site.streamAdapter ? createAdapter(this.site.streamAdapter) : null;
     }
     this.model = '';
+    this.outcome = null;
     this.parts = [];
     this.length = 0;
     this.frames = 0;
@@ -197,13 +199,15 @@ export class CdpCapture {
     if (!json || typeof json !== 'object') return { added: '', terminal: null };
     if (roleOf(json) === 'user') return { added: '', terminal: null };
 
+    const outcome = outcomeFromEvent(json);
+    if (outcome && (!this.outcome || this.outcome === 'completed')) this.outcome = outcome;
     let pieces = [];
-    let terminal = null;
+    let terminal = outcome === 'failed' || outcome === 'cancelled' ? 'message' : null;
 
     if (this.adapter) {
       const plan = this.adapter.read(json);
       pieces = (plan.segments || []).map((segment) => segment.newText).filter(Boolean);
-      terminal = plan.terminal ? String(plan.terminal) : null;
+      terminal = terminal || (plan.terminal ? String(plan.terminal) : null);
       if (plan.model) this.model = plan.model;
       // Un JSON que el adaptador del sitio no reconoce —cuerpo de otra forma,
       // respuesta no-streaming de otro proveedor— se lee con la extracción
@@ -266,13 +270,14 @@ export class CdpCapture {
    * @returns {null|{text: string, prompt: string|null, frames: number, controls: string[], conversationId: string, source: string, url: string, host: string, site: string, seq: number}}
    */
   take() {
-    if (this.empty) {
+    if (this.empty && !this.outcome) {
       this.reset();
       return null;
     }
     this.seq += 1;
     const capture = {
       text: this.text,
+      outcome: this.outcome || 'unknown',
       model: this.model,
       prompt: this.promptText,
       frames: this.frames,

@@ -98,7 +98,7 @@ test('1. un mensaje sin mediación cuenta una sola vez y suma actividad', async 
     'sin mediación el motor no intervino',
   );
   assert.equal(despues.responses, antes.responses, 'todavía no hay respuesta');
-  assert.equal(despues.turns, antes.turns, 'un mensaje suelto no es un turno');
+  assert.equal(despues.turnsCompleted, antes.turnsCompleted, 'un mensaje suelto no es un turno');
 });
 
 test('el mismo mensaje repetido por la capa no se cuenta dos veces', async () => {
@@ -141,8 +141,8 @@ test('3. una respuesta SSE corta cierra el turno', async () => {
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 1);
   assert.equal(despues.responses, antes.responses + 1);
-  assert.equal(despues.turns, antes.turns + 1, 'mensaje y respuesta emparejados');
-  assert.equal(despues.loopsCut, antes.loopsCut, 'una respuesta normal no corta nada');
+  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 1, 'mensaje y respuesta emparejados');
+  assert.equal(Object.hasOwn(despues, 'loopsCut'), false);
 });
 
 test('4. una respuesta de más de 8 000 caracteres se registra entera', async () => {
@@ -155,7 +155,7 @@ test('4. una respuesta de más de 8 000 caracteres se registra entera', async ()
   const despues = await stats();
 
   assert.equal(despues.responses, antes.responses + 1);
-  assert.equal(despues.turns, antes.turns + 1);
+  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 1);
   assert.equal(despues.outputTokens, antes.outputTokens + countGptTokens(largo), 'cuenta los tokens de toda la respuesta');
   assert.ok(resultado.counted && !resultado.counted.duplicate, 'el cierre informa que contó');
 
@@ -184,14 +184,14 @@ test('5. una respuesta interrumpida se cuenta como respuesta, una sola vez', asy
   const despues = await stats();
 
   assert.equal(despues.responses, antes.responses + 1, 'la respuesta existió aunque se cortara');
-  assert.equal(despues.turns, antes.turns + 1, 'el turno quedó asociado');
-  assert.equal(despues.loopsCut, antes.loopsCut + 1, 'se contó el corte');
+  assert.equal(despues.turnsCompleted, antes.turnsCompleted, 'un corte del motor no es un fin normal');
+  assert.equal(despues.turnsUnknown, antes.turnsUnknown + 1, 'interrupción sin confirmación: un turno desconocido');
 
   // El mismo cierre repetido (reintento del sitio) no vuelve a contar.
   await responder(206, { messageId: 'a6', text: 'Se cortó a mitad de fra', stopped: true, tokens: 40 });
   const otra = await stats();
   assert.equal(otra.responses, despues.responses, 'sin duplicados');
-  assert.equal(otra.loopsCut, despues.loopsCut, 'ni cortes duplicados');
+  assert.equal(otra.turnsUnknown, despues.turnsUnknown, 'interrupción sin confirmación: un turno desconocido');
 });
 
 /* ------------------------------------------------------------------ */
@@ -208,11 +208,11 @@ test('6. dos conversaciones simultáneas en pestañas distintas no se mezclan', 
   let medio = await stats();
   assert.equal(medio.messages, antes.messages + 2);
   assert.equal(medio.responses, antes.responses + 1);
-  assert.equal(medio.turns, antes.turns + 1, 'cerró el turno de la pestaña que respondió');
+  assert.equal(medio.turnsCompleted, antes.turnsCompleted + 1, 'cerró el turno de la pestaña que respondió');
 
   await responder(207, { messageId: 'b1', text: 'Respuesta de la pestaña A.' });
   const fin = await stats();
-  assert.equal(fin.turns, antes.turns + 2, 'cada pestaña cerró el suyo');
+  assert.equal(fin.turnsCompleted, antes.turnsCompleted + 2, 'cada pestaña cerró el suyo');
 });
 
 test('8. varios mensajes consecutivos se cuentan todos', async () => {
@@ -224,7 +224,7 @@ test('8. varios mensajes consecutivos se cuentan todos', async () => {
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 3);
   assert.equal(despues.responses, antes.responses + 3);
-  assert.equal(despues.turns, antes.turns + 3);
+  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 3);
 });
 
 /* ------------------------------------------------------------------ */
@@ -273,7 +273,7 @@ test('7. una respuesta vista por SSE y por CDP cuenta una sola vez', async () =>
 
   const despues = await stats();
   assert.equal(despues.responses, trasSse.responses, 'CDP no vuelve a contar la misma respuesta');
-  assert.equal(despues.turns, trasSse.turns, 'ni cierra un segundo turno');
+  assert.equal(despues.turnsCompleted, trasSse.turnsCompleted, 'ni cierra un segundo turno');
   assert.equal(despues.messages, antes.messages + 1);
   assert.ok(despues.cdp.duplicates >= 1, 'el motor marcó el duplicado');
 });
@@ -300,7 +300,7 @@ test('una respuesta que sólo vio CDP también cuenta', async () => {
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses + 1, 'la observación cuenta como respuesta');
-  assert.equal(despues.turns, antes.turns + 1, 'y cierra el turno pendiente de esa pestaña');
+  assert.equal(despues.turnsUnknown, antes.turnsUnknown + 1, 'interrupción sin confirmación: un turno desconocido');
 });
 
 /* ------------------------------------------------------------------ */

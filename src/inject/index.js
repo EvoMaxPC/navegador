@@ -31,6 +31,8 @@ const state = {
   language: CONFIG.language || 'es',
   continuations: 0,
   active: 0,
+  response: null,
+  currentMessageId: null,
   /** Identificador de cada envío reconocido: asocia mensaje, respuesta y turno. */
   messageSeq: 0,
 };
@@ -207,6 +209,7 @@ function anunciarEnvio(datos = {}) {
     // anuncia también la observación CDP, sin reenviar el texto al proceso principal.
     promptHash: datos.promptHash || (datos.texto ? fingerprint(datos.texto) : ''),
   };
+  state.currentMessageId = payload.messageId;
   bridge.event('outgoing', payload);
   return payload;
 }
@@ -411,7 +414,7 @@ const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
  */
 const MAX_CAPTURE_CHARS = 200_000;
 
-function wrapResponse(response, capture = {}) {
+function wrapResponse(response, capture = {}, generation = null) {
   if (!response || !response.body || !looksLikeStream(response.headers)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
@@ -439,6 +442,8 @@ function wrapResponse(response, capture = {}) {
           ...capture,
           site: site.id,
           host: CONFIG.host,
+          outcome: generation?.stoppedByUser ? 'cancelled' : info.outcome,
+          stoppedByUser: Boolean(generation?.stoppedByUser),
           finished: !info.interrupted,
           interrupted: Boolean(info.interrupted),
           model: info.model || capture.model || '',
@@ -454,6 +459,7 @@ function wrapResponse(response, capture = {}) {
           text: recortado ? text.slice(0, MAX_CAPTURE_CHARS) : text,
           dropped: info.dropped.slice(0, 600),
         });
+        if (state.response === generation) state.response = null;
       },
     });
   response.body.pipeTo(filter.writable).catch((error) => {
@@ -540,10 +546,24 @@ if (!window.__NEXO_HOOKED__) {
     // 2) Enviar, UNA sola vez. Un error de red o un AbortError (el usuario pulsó
     //    «Detener») se propaga a la página, que ya sabe qué hacer: reenviar desde
     //    acá duplicaría el mensaje en el servidor.
+    const generation = prepared.chat ? { messageId, stoppedByUser: false } : null;
+    if (generation) {
+      state.response = generation;
+      if (prepared.send === false) bridge.event('turn-result', { phase: 'started', messageId, site: site.id,
+        host: CONFIG.host || location.hostname, model: prepared.model || '' });
+    }
+    const reportResult = (outcome) => bridge.event('turn-result', { messageId, host: CONFIG.host || location.hostname,
+      site: site.id, url, outcome, stoppedByUser: Boolean(generation?.stoppedByUser) });
     state.active += 1;
     let response;
     try {
       response = await nativeFetch(target.input, target.init);
+    } catch (error) {
+      if (generation) {
+        reportResult(generation.stoppedByUser ? 'cancelled' : error?.name === 'AbortError' ? 'unknown' : 'failed');
+        if (state.response === generation) state.response = null;
+      }
+      throw error;
     } finally {
       state.active -= 1;
     }
@@ -551,6 +571,10 @@ if (!window.__NEXO_HOOKED__) {
     // Un rechazo del proveedor (403, 429…) se informa con su código: es el dato
     // que explica «no se pudo conectar» sin abrir las herramientas del sitio.
     if (response.ok === false) {
+      if (generation) {
+        reportResult('failed');
+        if (state.response === generation) state.response = null;
+      }
       bridge.event('error', {
         stage: 'http',
         message: `${response.status} ${method} ${url.slice(0, 160)}`,
@@ -568,7 +592,7 @@ if (!window.__NEXO_HOOKED__) {
         mediated: Boolean(prepared.mediated),
         promptChars: prepared.promptChars || 0,
         model: prepared.model || '',
-      });
+      }, generation);
     } catch (error) {
       bridge.event('error', { stage: 'stream', message: String(error?.message || error) });
       return response;
@@ -620,6 +644,12 @@ try {
   document.addEventListener(
     'click',
     (event) => {
+      if (site.id === 'chatgpt' && sitioActivo() && event.isTrusted && (state.response || state.currentMessageId) &&
+        event.target?.closest?.('[data-testid="stop-button"], [data-testid="stop-generating-button"]')) {
+        if (state.response) state.response.stoppedByUser = true;
+        bridge.event('turn-result', { messageId: state.response?.messageId || state.currentMessageId, host: CONFIG.host || location.hostname,
+          site: site.id, outcome: 'cancelled', stoppedByUser: true });
+      }
       if (esBotonDeEnvio(event.target)) gestoDeEnvio('boton');
     },
     true,

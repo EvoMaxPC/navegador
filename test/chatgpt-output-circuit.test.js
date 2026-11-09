@@ -53,7 +53,7 @@ function thinkingExpected() {
 // Ejecuta las funciones reales de la shell y su suscripción IPC sobre elementos
 // mínimos. Es integración con DOM simulado, NO una prueba visual en Chromium.
 const appSource = readFileSync(new URL('../src/ui/shell/app.js', import.meta.url), 'utf8');
-const elements = Object.fromEntries(['messages', 'responses', 'turns', 'inTokens', 'outTokens', 'interventions', 'loopsSeen', 'loops', 'capture'].map((key) => [key, { textContent: '0' }]));
+const elements = Object.fromEntries(['messages', 'responses', 'turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsUnknown', 'inTokens', 'outTokens', 'interventions', 'capture'].map((key) => [key, { textContent: '0' }]));
 let refreshFromIpc;
 const ui = vm.createContext({
   nexo: { getStats: stats, on: (_channel, listener) => { refreshFromIpc = listener; } },
@@ -74,7 +74,7 @@ async function openTab() {
 
 // Capa de producción + preload real + IPC real del principal, sin copiar su
 // extracción/tokenización. Sólo se sustituye el transporte externo por replay.
-function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null } = {}) {
+function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null, fetchError = null, status = 200 } = {}) {
   const listeners = [];
   const bytes = new TextEncoder().encode(body);
   let offset = 0;
@@ -84,6 +84,7 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     postMessage(data) { queueMicrotask(() => { for (const listener of listeners) listener({ source: page, data }); }); },
     fetch: async () => {
       if (beforeResponse) await beforeResponse();
+      if (fetchError) throw fetchError;
       return new Response(new ReadableStream({
       async pull(controller) {
         if (offset < bytes.length) { controller.enqueue(bytes.slice(offset, offset += chunkSize)); return; }
@@ -91,10 +92,15 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
         if (abort) controller.error(new DOMException('Detenido por el usuario', 'AbortError'));
         else controller.close();
       },
-    }), { headers: { 'content-type': mime } });
+    }), { status, headers: { 'content-type': mime } });
     },
   };
-  const document = { querySelector: () => null, querySelectorAll: () => [], addEventListener() {} };
+  const domListeners = new Map();
+  const document = { querySelector: () => null, querySelectorAll: () => [],
+    addEventListener(name, handler) { domListeners.set(name, handler); } };
+  page.stop = (isTrusted = true) => domListeners.get('click')?.({ isTrusted, target: {
+    closest: (selector) => selector.includes('stop-button') ? {} : null,
+  } });
   const context = vm.createContext({ window: page, location: page.location, document, console,
     setTimeout, clearTimeout, TextEncoder, TextDecoder, ReadableStream, WritableStream, TransformStream, Response, Headers, Request, URL });
   const requireBridge = createRequire(new URL('../src/preload/bridge.cjs', import.meta.url));
@@ -358,3 +364,151 @@ for (const [name, body, mime, expected] of [
     assert.equal(stats().responses - before.responses, 1, 'CDP tardío no duplica respuestas');
   });
 }
+
+
+const outcomes = ['turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsUnknown'];
+function outcomeDelta(before) { return outcomes.map((key) => stats()[key] - before[key]); }
+function assertOutcomeUi() {
+  for (const key of outcomes) assert.equal(elements[key].textContent, stats()[key].toLocaleString('es-AR'), key);
+}
+function requestReply(page) {
+  return page.fetch('/backend-api/f/conversation', { method: 'POST', body: JSON.stringify({ action: 'next',
+    model: 'gpt-6', messages: [{ author: { role: 'user' }, content: { parts: ['Test'] } }],
+  }) });
+}
+
+test('resultados: SSE y NDJSON normales actualizan sólo turnos completos', async () => {
+  for (const [body, mime] of [[fixture('normal-reply.sse'), 'text/event-stream'],
+    [fixture('logged-out-reply.ndjson'), 'application/x-ndjson']]) {
+    const view = await openTab(), before = stats();
+    await replayPrimary(view, body, { mime });
+    assert.deepEqual(outcomeDelta(before), [1, 0, 0, 0]);
+    assertOutcomeUi();
+    await replayCdp(view, body, mime);
+    assert.deepEqual(outcomeDelta(before), [1, 0, 0, 0]);
+  }
+});
+
+test('resultados: Stop confirmado actualiza UI antes del aborto; no se confunde con el centinela', async () => {
+  const view = await openTab(), before = stats();
+  let release;
+  const holdOpen = new Promise((resolve) => { release = resolve; });
+  const page = pageFor(view, fixture('aborted.sse'), { holdOpen, abort: true });
+  const response = await requestReply(page);
+  const reading = response.text().catch((error) => { assert.equal(error.name, 'AbortError'); });
+  try {
+    await pause(60);
+    page.stop(false);
+    await pause();
+    assert.deepEqual(outcomeDelta(before), [0, 0, 0, 0], 'un clic programático no confirma Stop');
+    page.stop();
+    await pause();
+    assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+    assert.equal(stats().outputTokens, before.outputTokens, 'clasificar Stop no modifica los tokens');
+    assertOutcomeUi();
+  } finally { release(); await reading; await pause(50); }
+  assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+  assert.ok(stats().outputTokens > before.outputTokens, 'el cierre conserva el conteo parcial existente');
+  assertOutcomeUi();
+});
+
+test('resultados: AbortError sin Stop confirmado queda desconocido y se refresca solo', async () => {
+  const view = await openTab(), before = stats();
+  await replayPrimary(view, fixture('aborted.sse'), { abort: true });
+  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+  assertOutcomeUi();
+});
+
+test('resultados: error de generación en SSE con HTTP 200 no se marca completo', async () => {
+  const view = await openTab(), before = stats();
+  const body = fixture('normal-reply.sse').split('data: {"type":"message_stream_complete"')[0] +
+    'data: {"type":"error","error":{"message":"Generation failed"}}\n\ndata: [DONE]\n\n';
+  await replayPrimary(view, body);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 1, 0]);
+  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(normal, 'gpt-6'));
+  assertOutcomeUi();
+});
+
+for (const [name, options, expected] of [
+  ['rechazo fetch', { fetchError: new TypeError('Failed to fetch') }, [0, 0, 1, 0]],
+  ['aborto antes de cabeceras', { fetchError: new DOMException('Aborted', 'AbortError') }, [0, 0, 0, 1]],
+  ['HTTP 500', { status: 500 }, [0, 0, 1, 0]],
+]) {
+  test(`resultados: ${name} se integra desde inyección/preload hasta UI`, async () => {
+    const view = await openTab(), before = stats();
+    const page = pageFor(view, '', options);
+    try { const response = await requestReply(page); await response.text(); }
+    catch (error) { assert.ok(options.fetchError); }
+    await pause(50);
+    assert.deepEqual(outcomeDelta(before), expected);
+    assert.equal(stats().inputTokens, before.inputTokens + countGptTokens('Test', 'gpt-6'));
+    assert.equal(stats().outputTokens, before.outputTokens);
+    assertOutcomeUi();
+  });
+}
+
+test('resultados: error explícito actualiza el contador sin esperar EOF ni DONE', async () => {
+  const view = await openTab(), before = stats();
+  let release;
+  const holdOpen = new Promise((resolve) => { release = resolve; });
+  const body = fixture('normal-reply.sse').split('data: {"type":"message_stream_complete"')[0] +
+    'event: error\ndata: {"message":"Generation failed"}\n\n';
+  const page = pageFor(view, body, { holdOpen });
+  const response = await requestReply(page);
+  let closed = false;
+  const reading = response.text().then(() => { closed = true; });
+  try {
+    await pause(70);
+    assert.equal(closed, false);
+    assert.deepEqual(outcomeDelta(before), [0, 0, 1, 0]);
+    assertOutcomeUi();
+    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(normal, 'gpt-6'));
+  } finally { release(); await reading; await pause(50); }
+  assert.deepEqual(outcomeDelta(before), [0, 0, 1, 0]);
+});
+
+test('resultados: CDP loadingFailed cancelado no presupone Stop y actualiza UI', async () => {
+  const view = await openTab(), before = stats();
+  const requestId = `failure-${view.id}`;
+  view.debugger.emitEvent('Network.requestWillBeSent', { requestId, type: 'Fetch', request: {
+    url: 'https://chatgpt.com/backend-api/f/conversation', method: 'POST',
+    postData: JSON.stringify({ action: 'next', messages: [{ author: { role: 'user' }, content: { parts: ['Test CDP abort'] } }] }),
+  } });
+  await pause(30);
+  view.debugger.emitEvent('Network.loadingFailed', { requestId, canceled: true, errorText: 'net::ERR_ABORTED' });
+  await pause(30);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+  assertOutcomeUi();
+});
+
+test('resultados: navegar fuera durante una generación deja un único desconocido visible', async () => {
+  const view = await openTab(), before = stats();
+  journal.ipcListeners.get('nexo:event')({ sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' } }, {
+    type: 'outgoing', payload: { messageId: `navigate-${view.id}`, host: 'chatgpt.com', chars: 4, tokens: 2 },
+  });
+  view.emit('did-start-navigation', {}, 'https://example.org/', false, true);
+  await pause();
+  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+  assertOutcomeUi();
+  view.emit('destroyed');
+  await pause();
+  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+});
+
+test('resultados: regenerar dos veces el mismo texto cuenta dos turnos, no otros mensajes', async () => {
+  const view = await openTab();
+  await replayPrimary(view, fixture('normal-reply.sse'));
+  const before = stats();
+  for (let i = 0; i < 2; i++) {
+    const page = pageFor(view, fixture('normal-reply.sse'));
+    const response = await page.fetch('/backend-api/f/conversation', { method: 'POST',
+      body: JSON.stringify({ action: 'variant', model: 'gpt-6' }),
+    });
+    await response.text();
+    await pause(50);
+  }
+  assert.deepEqual(outcomeDelta(before), [2, 0, 0, 0]);
+  assert.equal(stats().messages, before.messages);
+  assert.equal(stats().inputTokens, before.inputTokens);
+  assertOutcomeUi();
+});

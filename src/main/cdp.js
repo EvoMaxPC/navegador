@@ -501,10 +501,14 @@ export class CdpObserver {
     const request = state.requests.get(params.requestId);
     state.requests.delete(params.requestId);
     state.pending.delete(params.requestId);
-    // `canceled` es lo normal: el usuario cambió de página o el sitio abortó.
-    if (!request || params.canceled) return;
+    // canceled no demuestra Stop: también ocurre al navegar o por decisión del sitio.
+    if (!request) return;
+    if (params.canceled && !request.chat) return;
     this.#failure(state, {
       kind: 'net',
+      chat: request.chat,
+      messageId: request.messageId,
+      canceled: Boolean(params.canceled),
       url: request.url,
       host: request.host,
       site: request.site,
@@ -517,13 +521,14 @@ export class CdpObserver {
   /** Informa un fallo al motor. Se descarta el contenido: sólo el hecho. */
   #failure(state, failure) {
     const key = `${failure.kind}|${failure.status || failure.errorText}|${failure.url}`;
-    if (state.failures.has(key)) return;
+    if (state.failures.has(key) && !failure.chat) return;
     state.failures.add(key);
     if (state.failures.size > 100) state.failures.delete(state.failures.values().next().value);
     this.stats.failures += 1;
     if (!this.engine || typeof this.engine.onCdpFailure !== 'function') return;
     try {
       this.engine.onCdpFailure(state.id, failure);
+      this.onEvent(state.id, { type: 'turn-result' });
     } catch (error) {
       this.log(`CDP: al informar un fallo: ${error?.message || error}`);
     }
@@ -559,6 +564,22 @@ export class CdpObserver {
           meta: { host, tipo: params.type || null, url },
         });
       }
+      return;
+    }
+    if (response.status && (response.status < 200 || response.status > 299)) {
+      // Un 403 en `/backend-api/conversation` es exactamente el motivo por el que
+      // la interfaz del sitio dice «no se pudo conectar».
+      this.#failure(state, {
+        kind: 'http',
+        chat: Boolean(origenTipo?.chat),
+        messageId: origenTipo?.messageId || null,
+        url,
+        host,
+        site: detectSite(host).id,
+        resourceType: params.type,
+        status: Number(response.status),
+        mimeType: String(response.mimeType || ''),
+      });
       return;
     }
     const mimeType = String(response.mimeType || '');
@@ -600,21 +621,6 @@ export class CdpObserver {
     // haya cerrado ESE stream (se decide al terminar la carga, cuando ya se
     // sabe). Que la capa cuente el envío no garantiza que capture la
     // contestación: si se calla, la respuesta se perdería.
-    if (response.status && (response.status < 200 || response.status > 299)) {
-      // Un 403 en `/backend-api/conversation` es exactamente el motivo por el que
-      // la interfaz del sitio dice «no se pudo conectar».
-      this.#failure(state, {
-        kind: 'http',
-        url,
-        host,
-        site: detectSite(host).id,
-        resourceType: params.type,
-        status: Number(response.status),
-        mimeType,
-      });
-      return;
-    }
-
     state.pending.set(requestId, {
       requestId,
       url,
@@ -782,7 +788,10 @@ export class CdpObserver {
       }
       this.stats.bodies += 1;
       const listo = capture.take();
-      if (listo) listo.model = listo.model || request?.model || '';
+      if (listo) {
+        listo.model = listo.model || request?.model || '';
+        if (listo && listo.outcome === 'unknown') listo.outcome = 'completed';
+      }
       if (!listo) {
         // El cuerpo se leyó y los eventos se parsearon, pero ninguno trajo
         // texto del asistente. Es la forma silenciosa de perder una respuesta:
@@ -823,6 +832,7 @@ export class CdpObserver {
         const listoNd = captureNd.take();
         if (listoNd) {
           listoNd.model = listoNd.model || request?.model || '';
+          if (listoNd.outcome === 'unknown') listoNd.outcome = 'completed';
           this.#deliver(state, listoNd);
           return;
         }
@@ -879,6 +889,7 @@ export class CdpObserver {
     this.stats.bodies += 1;
     const listo = capture.take();
     if (listo) listo.model = listo.model || request?.model || '';
+    if (listo && listo.outcome === 'unknown') listo.outcome = 'completed';
     this.#deliver(state, listo);
   }
 
@@ -890,6 +901,7 @@ export class CdpObserver {
     const capture = socket.capture.take();
     if (!capture) return;
     capture.closedBy = reason;
+    if (capture.outcome === 'unknown' && reason === 'message' && capture.site !== 'chatgpt') capture.outcome = 'completed';
     // Un socket no trae el identificador de la petición HTTP, pero sí pertenece
     // a la pestaña: se asocia al mensaje que está esperando respuesta en ella.
     if (!capture.messageId && typeof this.engine?.currentSendId === 'function') {
@@ -904,7 +916,7 @@ export class CdpObserver {
   }
 
   #deliver(state, capture) {
-    if (!capture || !capture.text) return;
+    if (!capture || (!capture.text && !capture.outcome)) return;
     this.stats.captures += 1;
     if (!this.engine || typeof this.engine.onCdpCapture !== 'function') return;
     try {

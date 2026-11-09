@@ -63,7 +63,8 @@ test('las estadísticas resumen lo ocurrido', () => {
   streamAll(guard, LOOPING_ANSWER);
   const stats = guard.stats();
   assert.equal(stats.turns, 1);
-  assert.ok(stats.loopsSeen >= 1);
+  assert.equal(Object.hasOwn(stats, 'loopsSeen'), false);
+  assert.equal(Object.hasOwn(stats, 'distinctLoops'), false);
   assert.ok(stats.logbook.total > 0);
 });
 

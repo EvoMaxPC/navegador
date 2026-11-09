@@ -117,6 +117,10 @@ window.addEventListener('message', async (event) => {
 
   if (data.__nexo === 'event') {
     const { type, payload } = data;
+    if (type === 'turn-result') {
+      await ipcRenderer.invoke('nexo:turn-result', payload).catch((error) => console.warn('[nexo] resultado no notificado:', error.message));
+      return;
+    }
     if (type === 'stream-end') {
       const action = await ipcRenderer.invoke('nexo:stream-end', payload).catch(() => null);
       if (action?.nextAction && payload?.stopped) {

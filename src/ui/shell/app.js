@@ -30,12 +30,13 @@ const els = {
   stats: {
     messages: document.getElementById('statMessages'),
     responses: document.getElementById('statResponses'),
-    turns: document.getElementById('statTurns'),
+    turnsCompleted: document.getElementById('statTurnsCompleted'),
+    turnsCancelled: document.getElementById('statTurnsCancelled'),
+    turnsFailed: document.getElementById('statTurnsFailed'),
+    turnsUnknown: document.getElementById('statTurnsUnknown'),
     inTokens: document.getElementById('statInTokens'),
     outTokens: document.getElementById('statOutTokens'),
     interventions: document.getElementById('statInterventions'),
-    loopsSeen: document.getElementById('statLoopsSeen'),
-    loops: document.getElementById('statLoops'),
     capture: document.getElementById('captureLine'),
   },
   sidebar: document.getElementById('sidebar'),
@@ -743,17 +744,16 @@ function captureLine(stats = {}) {
 async function refreshStats() {
   try {
     const stats = await nexo.getStats();
-    // Ocho métricas separadas, cada una con su hecho: mensajes enviados,
-    // respuestas recibidas, turnos completos, tokens estimados y lo que hizo
-    // Nexo. Ninguna se deriva de otra para «que dé bien».
+    // Los resultados de turno son exclusivos. Mensajes, respuestas, tokens y
+    // actividad siguen siendo las métricas independientes del motor.
     els.stats.messages.textContent = num(stats.messages);
     els.stats.responses.textContent = num(stats.responses);
-    els.stats.turns.textContent = num(stats.turns);
+    for (const key of ['turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsUnknown']) {
+      els.stats[key].textContent = num(stats[key]);
+    }
     els.stats.inTokens.textContent = num(stats.inputTokens);
     els.stats.outTokens.textContent = num(stats.outputTokens);
     els.stats.interventions.textContent = num(stats.interventions);
-    els.stats.loopsSeen.textContent = num(stats.loopsSeen ?? stats.loops);
-    els.stats.loops.textContent = num(stats.loopsCut);
     if (els.stats.capture) els.stats.capture.textContent = captureLine(stats);
   } catch {
     /* la shell sigue funcionando sin estadísticas */

@@ -112,7 +112,7 @@ test('la conversación real «hola» cuenta 1 mensaje, 1 respuesta y 1 turno', a
   const fin = await stats();
   assert.equal(fin.messages, antes.messages + 1, 'un mensaje, no dos');
   assert.equal(fin.responses, antes.responses + 1, 'una respuesta, no cuatro');
-  assert.equal(fin.turns, antes.turns + 1, 'un turno completo');
+  assert.equal(fin.turnsCompleted, antes.turnsCompleted + 1, 'un turno completo');
   assert.equal(fin.outputTokens, antes.outputTokens + countGptTokens(RESPUESTA), 'los tokens de la respuesta visible');
   assert.equal(
     fin.interventions,
@@ -304,7 +304,7 @@ test('si la capa no está activa, CDP lee el SSE completo y cuenta una respuesta
   const fin = await stats();
   assert.equal(fin.messages, antes.messages + 1, 'un mensaje');
   assert.equal(fin.responses, antes.responses + 1, 'una respuesta');
-  assert.equal(fin.turns, antes.turns + 1, 'un turno completo');
+  assert.equal(fin.turnsCompleted, antes.turnsCompleted + 1, 'un turno completo');
   assert.ok(fin.outputTokens > antes.outputTokens, 'con tokens de salida');
 });
 
@@ -408,7 +408,7 @@ test('un JSON que no es del endpoint de conversación no cuenta como respuesta',
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses, 'no se cuenta');
-  assert.equal(despues.turns, antes.turns, 'ni cierra un turno');
+  assert.equal(despues.turnsCompleted, antes.turnsCompleted, 'ni cierra un turno');
   assert.equal(despues.outputTokens, antes.outputTokens, 'ni suma tokens');
 });
 
@@ -438,7 +438,7 @@ test('la respuesta del endpoint de conversación se asocia a su mensaje y cierra
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 1, 'un mensaje');
   assert.equal(despues.responses, antes.responses + 1, 'una respuesta');
-  assert.equal(despues.turns, antes.turns + 1, 'un turno, asociado por identificador');
+  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 1, 'un turno, asociado por identificador');
 
   const log = await callIpc('nexo:log');
   const entrada = log.find((item) => item.code === 'incoming-cdp');

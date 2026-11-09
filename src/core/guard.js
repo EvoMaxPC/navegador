@@ -313,8 +313,6 @@ export class ConversationGuard {
     return {
       turns: this.turns,
       historyTurns: this.history.length,
-      loopsSeen: [...this.loopSignatures.values()].reduce((a, b) => a + b, 0),
-      distinctLoops: this.loopSignatures.size,
       logbook: this.logbook.stats(),
     };
   }

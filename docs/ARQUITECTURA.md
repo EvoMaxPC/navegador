@@ -176,20 +176,21 @@ los dos caminos, así que un mismo turno no se registra dos veces.
 
 ## Contadores de conversación
 
-Ocho métricas independientes, cada una con su hecho, expuestas por
+Métricas de sesión, con cuatro resultados de turno exclusivos, expuestas por
 `nexo:stats` y dibujadas en el panel de actividad:
 
 | Métrica | Qué cuenta | De dónde sale |
 | --- | --- | --- |
 | `messages` | mensajes del usuario | evento `outgoing` de la capa, uno por envío reconocido |
 | `responses` | respuestas de la IA | cierre de stream (`nexo:stream-end`) o captura CDP |
-| `turns` | turnos completos | par mensaje↔respuesta, asociado por `messageId` |
+| `turnsCompleted` | turnos completos de ChatGPT | respuesta finalizada normalmente |
+| `turnsCancelled` | turnos cancelados de ChatGPT | Stop confirmado por un gesto real o señal explícita del proveedor |
+| `turnsFailed` | turnos fallidos de ChatGPT | error de generación o petición correlacionada fallida |
+| `turnsUnknown` | turnos desconocidos de ChatGPT | interrupción sin confirmación; red sin cuerpo |
 | `inputTokens` | tokens del mensaje | `countTokensForProvider` sobre el texto localizado (BPE local para GPT) |
 | `outputTokens` | tokens de la respuesta | `countOutputTokens` sobre el texto **real** leído (BPE local para GPT): lo entrega la capa al cerrar el stream o CDP al leer el cuerpo. Si la respuesta se contó por la red —sin texto— y el texto aparece después, sus tokens se suman a **esa** respuesta (no se cuenta otra). |
 | `interventions` | actividad de la conversación | +1 al contar un mensaje y +1 al contar una respuesta |
 | `mediatedInterventions` | intervenciones del motor | `prepare()` sólo cuando el texto cambió, más los cortes |
-| `loopsSeen` | bucles observados | centinelas de cada guardián + observación CDP |
-| `loopsCut` | bucles cortados | cierre de stream con `stopped: true` |
 
 ### De dónde sale cada hecho
 
@@ -400,3 +401,31 @@ Una captura CDP puede ser duplicada como **respuesta** pero aportar nuevos token
 En ese caso el principal también emite `nexo:stats-changed`; el listener existente
 de la shell obtiene las estadísticas y actualiza `statOutTokens` sin intervención
 manual. Ver `OUTPUT-TOKENS-AUDITORIA.md` para evidencia y límites de validación.
+
+
+### Resultado exclusivo de los turnos (0.1.16)
+
+Los resultados pertenecen a ChatGPT y arrancan en cero por sesión. Se registran
+por pestaña e ID canónico del envío en `Engine.seenResponses`, la deduplicación
+que ya utiliza el motor, incluidos los alias de red/capa/CDP. El cálculo de
+entrada/salida y la acumulación de tokens se mantienen sin cambios.
+
+`stream-end` incluye el resultado del protocolo. Un Stop real (clic confiable en
+el botón de detener de ChatGPT) o un fallo antes de recibir el stream viaja por
+el mismo puente/preload/IPC como `turn-result`. CDP y webRequest informan los
+fallos correlacionados con la petición de conversación; no se clasifican como
+turnos las peticiones de historial, autenticación ni telemetría. Un AbortError
+sin gesto confirmado, navegación completa, cierre o caída del renderizador se
+clasifica como desconocido, no como cancelación del usuario. La navegación SPA
+al asignar una URL a una conversación no interrumpe el turno.
+
+Un cierre HTTP 2xx sin cuerpo no confirma el resultado del modelo: queda como
+desconocido. Si llega una confirmación después, se mueve ese resultado a su
+categoría (−1 desconocido, +1 confirmado), nunca se agrega otro turno. Un
+resultado confirmado no se vuelve a incrementar ni se degrada con avisos débiles
+posteriores. Cada cambio emite `nexo:stats-changed` y la shell actualiza las cuatro
+celdas existentes/nuevas sin recarga ni cambios al estilo del panel.
+
+Se retiraron los contadores agregados de bucles de Engine, guard.stats, shell y
+demo. Se conserva la memoria de patrones del guardián porque decide cuándo
+continuar o regenerar: es parte de la protección, no una métrica del panel.

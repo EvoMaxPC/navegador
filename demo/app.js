@@ -34,7 +34,6 @@ const els = {
   logCount: $('logCount'),
   mDelivered: $('mDelivered'),
   mDropped: $('mDropped'),
-  mLoop: $('mLoop'),
   mContext: $('mContext'),
   memPill: $('memPill'),
   memKinds: $('memKinds'),
@@ -82,7 +81,7 @@ const state = {
   scenario: SCENARIOS[0].id,
   history: SEED_HISTORY.slice(),
   busy: false,
-  totals: { delivered: 0, dropped: 0, loops: 0, contextTokens: 0 },
+  totals: { delivered: 0, dropped: 0, contextTokens: 0 },
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -258,7 +257,6 @@ function renderLog(entries) {
 function renderMetrics() {
   els.mDelivered.textContent = state.totals.delivered.toLocaleString('es-AR');
   els.mDropped.textContent = state.totals.dropped.toLocaleString('es-AR');
-  els.mLoop.textContent = String(state.totals.loops);
   els.mContext.textContent = Math.round(state.totals.contextTokens).toLocaleString('es-AR');
 }
 
@@ -419,7 +417,6 @@ async function handleSubmit(event) {
 
   state.totals.delivered += done.repaired.text.length;
   state.totals.dropped += Math.max(0, done.verdict.droppedChars);
-  if (stopped) state.totals.loops += 1;
 
   ui.nexoFoot.textContent = [
     `${done.repaired.text.length} caracteres entregados`,
