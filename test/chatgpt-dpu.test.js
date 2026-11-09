@@ -80,7 +80,7 @@ const roleNode = (role, text, markdown = null) => ({
   querySelector: (selector) => selector === '.markdown' && markdown !== null ? { innerText: markdown } : null,
 });
 
-const { readChatGptDpuAnswer, waitForChatGptDpuAnswer } = await import('../src/core/chatgptDpu.js');
+const { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer } = await import('../src/core/chatgptDpu.js');
 
 test('DOM por rol: extrae la respuesta actual sin depender de ChatGPT said ni incluir botones', () => {
   const nodes = [roleNode('user', 'Pregunta actual'), roleNode('assistant', 'Respuesta\nCopiar\nCompartir', 'Respuesta\ncon saltos y código.')];
@@ -175,4 +175,14 @@ test('rechaza texto visible que no corresponde al prompt enviado', () => {
     },
   };
   assert.equal(extractChatGptAssistantDomText(doc, 'prompt esperado'), '');
+});
+
+test('captura DPU sin encabezados visibles y se limita al texto posterior al prompt', () => {
+  const doc = { body: { innerText: 'Pregunta actual\\nRespuesta parcial que está generándose.' }, querySelectorAll: () => [] };
+  assert.equal(extractChatGptVisibleAnswer(doc, 'Pregunta actual'), 'Respuesta parcial que está generándose.');
+});
+
+test('captura DPU sin encabezados no reutiliza texto previo al prompt actual', () => {
+  const doc = { body: { innerText: 'Pregunta anterior\\nRespuesta vieja\\nPregunta actual' }, querySelectorAll: () => [] };
+  assert.equal(extractChatGptVisibleAnswer(doc, 'Pregunta actual'), '');
 });
