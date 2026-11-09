@@ -78,6 +78,7 @@ export function formatMarkdown({ smoke = '', bench = null, meta = {} } = {}) {
   const principal = linea(smoke, /^principal:.*$/m);
   const procesos = linea(smoke, /^procesos:.*$/m);
   const tipos = linea(smoke, /^por tipo:.*$/m);
+  const notas = linea(smoke, /^notas:.*$/m);
 
   if (tiempos || principal || procesos) {
     salida.push('**Arranque y memoria (Windows, `nexo.exe --smoke`)**');
@@ -88,6 +89,7 @@ export function formatMarkdown({ smoke = '', bench = null, meta = {} } = {}) {
     if (principal) salida.push(`| proceso principal | ${principal.replace(/^principal:\s*/, '')} |`);
     if (procesos) salida.push(`| todos los procesos | ${procesos.replace(/^procesos:\s*/, '')} |`);
     if (tipos) salida.push(`| por tipo | ${tipos.replace(/^por tipo:\s*/, '')} |`);
+    if (notas) salida.push(`| notas | ${notas.replace(/^notas:\s*/, '')} |`);
     salida.push('');
   } else {
     salida.push('_El informe de humo no trajo medidas: revisar el paso «Prueba de humo del ejecutable»._');

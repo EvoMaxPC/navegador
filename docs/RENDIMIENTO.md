@@ -52,7 +52,7 @@ Una aclaración honesta: el centinela sobre 20 000 caracteres **subió** de
 hacía (ver «el chequeo que nunca corría»). Se paga 0,015 µs por carácter —un
 cuadro de pantalla son 16 000 µs— a cambio de detectar bucles de verdad.
 
-## Los cuatro cambios
+## Los cinco cambios
 
 ### 1. El historial se normalizaba entero, en cada tecla
 
@@ -158,6 +158,12 @@ análisis) y el análisis completo corre cada 1 200 caracteres o cuando la sonda
 dispara. Cuesta 0,02 µs por carácter y hace que la detección no dependa de una
 sola ventana.
 
+### 5. El arranque de la ventana
+
+Detallado más abajo, en «El arranque de la interfaz: dos tiempos». En resumen: la
+primera pestaña dejó de esperar a los paneles y se crea después del primer
+cuadro.
+
 ## Electron: lo que se apaga antes de arrancar
 
 Cada servicio de Chromium que no se usa cuesta un proceso en segundo plano o
@@ -181,6 +187,57 @@ sugerencias de exploración. Además:
   también en cada `iframe`; `npm run build:inject -- --dev` lo deja legible
   cuando hay que depurar.
 
+## El arranque de la interfaz: dos tiempos
+
+El arranque de la ventana se partió en dos, porque antes todo lo demás esperaba
+a la primera pestaña:
+
+```
+antes:  config → ajustes → registro → estadísticas → memoria → historial
+        → marcadores → descargas → sesión → recién ahí, la primera pestaña
+
+ahora:  config → sesión → marco pintado → primera pestaña navegando
+                    ↘ ajustes, registro, estadísticas, memoria, historial,
+                      marcadores, descargas y panel de sitios, en paralelo
+```
+
+Con 4 000 visitas guardadas, la primera pestaña ya no espera a que se
+serialicen el historial completo, el registro y la lista de memoria. Y la
+pestaña se crea **después del primer cuadro**: montar un `<webview>` obliga a
+Chromium a levantar un proceso invitado y su canal de composición, y mientras
+tanto la ventana no pinta nada.
+
+Medido en el runner de Windows, con estas marcas (todas en milisegundos desde el
+inicio del proceso):
+
+| Etapa | Tiempo |
+| --- | --- |
+| ventana creada | 81–115 |
+| interfaz cargada, ajustes leídos | +1,5 |
+| sesión restaurada | +2,2 |
+| primer cuadro con el marco pintado | +9 |
+| primera pestaña navegando | +29 |
+| paneles completos (historial, marcadores, memoria, sitios) | +4,5 a 118 |
+| **primer pintado de la ventana** | **868–1 044** |
+
+Ese último número no es nuestro: entre que la interfaz termina su trabajo y
+Chromium pinta el primer cuadro hay cientos de milisegundos, y el runner es una
+máquina virtual **sin aceleración por hardware** (el informe de humo ahora
+publica el estado de la GPU justamente para poder descartarlo). El proceso
+principal, en cambio, tarda 23–36 ms hasta `ready` y 81–115 ms hasta tener la
+ventana.
+
+Dos lecciones que quedaron en el código:
+
+- **Una ventana oculta no se mide igual que una visible.** La prueba de humo
+  mantenía la ventana oculta y el `load` oscilaba entre 850 y 1 900 ms: Chromium
+  pospone el trabajo de una ventana oculta, así que se estaba midiendo otra
+  cosa. Ahora se muestra sin tomar el foco.
+- **Sin números no se optimiza.** El salto de 250 a 900 ms entre
+  `domInteractive` y el primer pintado no se explicaba de ninguna forma leyendo
+  el código: hizo falta medir recursos, el protocolo y la GPU para descartar
+  nuestras tres hipótesis.
+
 ## Cómo se mide el arranque real
 
 `src/main/perf.js` deja marcas durante el arranque (`proceso`, `ready`,
@@ -189,16 +246,25 @@ de todos los procesos (`app.getAppMetrics()`). `nexo.exe --smoke` las incluye en
 su informe, así que **cada compilación de Windows publica sus propios números**:
 
 ```
-tiempos: proceso 3,1 ms · ready 214,8 ms · ajustes 219,4 ms · memoria 231,0 ms ·
-         perfil 243,7 ms · motor 251,2 ms · ventana 268,9 ms · shell 402,6 ms
-principal: 96,4 MB (heap 41,2 MB)
-procesos: 6 · 328,7 MB
-por tipo: browser 96,4 MB, Tab 78,1 MB, GPU 62,0 MB, Utility 46,3 MB
+tiempos: proceso 0,3 ms · ready 32,2 ms · ajustes 32,7 ms · memoria 33,3 ms ·
+         perfil 34,4 ms · motor 34,5 ms · ventana 114,9 ms · proto-pedidos 8 ·
+         proto-ms 27,6 · shell 963,5 ms · ui-config 2,7 · ui-sesion 7,3 ·
+         ui-pestana 15,3 · ui-nav-dom 204 · ui-nav-load 873 · ui-paneles 117,6
+principal: 112,0 MB (heap 6,5 MB)
+procesos: 5 · 404,1 MB
+por tipo: Browser 112,0 MB, GPU 67,4 MB, Utility 47,9 MB, Tab 78,4 MB
+notas: ui-gpu: composición software, webgl deshabilitado
 ```
 
-Eso es lo que permite decidir con datos en lugar de con intuición: si `shell`
-domina, el problema es la interfaz; si domina `ready`, es Electron y no hay
-mucho que hacer desde el código.
+Eso es lo que permite decidir con datos en lugar de con intuición: si `ready`
+domina, el problema es Electron; si dominan `ui-*`, es nuestro código; si domina
+`ui-nav-pintado` con todo lo demás bajo, es la GPU de la máquina.
+
+El historial completo queda en el issue
+[«Rendimiento en Windows»](https://github.com/EvoMaxPC/navegador/issues/1), que
+se completa solo en cada compilación (`scripts/reportar-rendimiento.mjs`). Los
+registros de Actions no sirven para esto: se pierden, no se pueden consultar por
+API y no quedan asociados a un commit de forma útil.
 
 ## El trinquete: presupuesto en CI
 
