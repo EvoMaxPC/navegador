@@ -17,7 +17,9 @@ const steps = [];
 
 function run(label, command, args) {
   process.stdout.write(`\n▶ ${label}\n`);
-  const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
+  // Sin `shell`: ambos comandos son `process.execPath`, y con shell el camino de
+  // node en Windows (con espacios) se parte en argumentos.
+  const result = spawnSync(command, args, { cwd: root, stdio: 'inherit' });
   const ok = result.status === 0;
   steps.push({ label, ok });
   return ok;

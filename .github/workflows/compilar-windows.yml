@@ -16,6 +16,7 @@ on:
     paths:
       - 'src/**'
       - 'scripts/**'
+      - 'test/**'
       - 'build/**'
       - 'demo/**'
       - 'package.json'
@@ -66,6 +67,9 @@ jobs:
           node --test --test-reporter=tap *> ci-fallo.txt
           $texto = Get-Content ci-fallo.txt -Raw
           if ($null -eq $texto) { $texto = 'sin salida' }
+          if (Test-Path ci-humo.txt) {
+            $texto = "===== prueba de humo =====`n" + (Get-Content ci-humo.txt -Raw) + "`n===== pruebas =====`n" + $texto
+          }
           if ($texto.Length -gt 60000) { $texto = $texto.Substring($texto.Length - 60000) }
           $cuerpo = @{
             name      = 'diagnostico'
@@ -91,8 +95,10 @@ jobs:
         run: |
           $exe = Join-Path $PWD 'dist\Nexo-win32-x64\nexo.exe'
           if (-not (Test-Path $exe)) { throw "no se generó $exe" }
-          & $exe --smoke
-          if ($LASTEXITCODE -ne 0) { throw "la prueba de humo falló con código $LASTEXITCODE" }
+          & $exe --smoke *> ci-humo.txt
+          $codigo = $LASTEXITCODE
+          Get-Content ci-humo.txt
+          if ($codigo -ne 0) { throw "la prueba de humo falló con código $codigo" }
 
       - name: Resumen
         shell: pwsh
