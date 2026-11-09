@@ -480,9 +480,23 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
   const prompt = capture.promptText || '';
   const { promptText: _promptText, ...metadata } = capture;
 
-  const readVisible = () => extractChatGptVisibleAnswer(document, prompt);
+  const readVisible = () => {
+    if (generation && state.response !== generation) return '';
+    const snapshot = readChatGptDpuAnswer(document, prompt);
+    const before = generation?.dpuBefore;
+    // El observador no puede rescatar texto anterior ni mensajes de otro user.
+    if (snapshot.user) {
+      if (!snapshot.text) return '';
+      if (before && snapshot.text === before.text && snapshot.user === before.user &&
+          snapshot.assistant === before.assistant) return '';
+      return snapshot.text;
+    }
+    if (before && snapshot.body === before.body) return '';
+    return extractChatGptVisibleAnswer(document, prompt);
+  };
   const publish = (candidate = readVisible()) => {
-    const text = String(candidate || '').slice(0, MAX_CAPTURE_CHARS);
+    if (generation && state.response !== generation) return;
+    const text = String(candidate || '');
     if (!text || text === lastText || finished) return;
     lastText = text;
     bridge.event('stream-progress', {
@@ -516,8 +530,8 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
         droppedChars: 0,
         chars: text.length,
         tokens: estimateTokens(text),
-        clipped: false,
-        text,
+        clipped: text.length > MAX_CAPTURE_CHARS,
+        text: text.slice(0, MAX_CAPTURE_CHARS),
         dropped: '',
       });
     } else {

@@ -77,6 +77,14 @@ async function openTab() {
 // extracción/tokenización. Sólo se sustituye el transporte externo por replay.
 function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null, fetchError = null, status = 200, bodyText = '', initialBodyText = '', roleNodes = null } = {}) {
   const listeners = [], captures = [];
+  let mutate = () => {};
+  class MutationObserver {
+    constructor(callback) { this.callback = callback; }
+    observe() { mutate = this.callback; }
+    disconnect() { mutate = () => {}; }
+  }
+  // Simula sólo la notificación DOM, no el extractor ni el contador.
+
   const bytes = new TextEncoder().encode(body);
   let offset = 0, transportStarted = false;
   const page = {
@@ -101,6 +109,7 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
   const document = { body: { get innerText() { if (!transportStarted) return initialBodyText; return typeof bodyText === 'function' ? bodyText() : bodyText; }, set innerText(value) { bodyText = value; } }, querySelector: () => null, querySelectorAll: (selector) => selector === '[data-message-author-role]' && roleNodes ? roleNodes(transportStarted) : [],
     addEventListener(name, handler) { domListeners.set(name, handler); } };
   page.document = document;
+  page.mutate = () => mutate();
   page.stop = (isTrusted = true, attributes = { 'data-testid': 'stop-button' }) => {
     // DOM mínimo: compara atributos reales del botón, sin copiar los selectores
     // de producción. El target puede ser el icono hijo del botón.
@@ -116,7 +125,7 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     } });
   };
   const context = vm.createContext({ window: page, location: page.location, document, console,
-    setTimeout, clearTimeout, TextEncoder, TextDecoder, ReadableStream, WritableStream, TransformStream, Response, Headers, Request, URL, URLSearchParams, FormData });
+    MutationObserver, setTimeout, clearTimeout, TextEncoder, TextDecoder, ReadableStream, WritableStream, TransformStream, Response, Headers, Request, URL, URLSearchParams, FormData });
   const requireBridge = createRequire(new URL('../src/preload/bridge.cjs', import.meta.url));
   const sender = { id: view.id, getURL: () => page.location.href, getType: () => 'webview' };
   const ipcRenderer = {
@@ -743,4 +752,34 @@ test('fallback autenticado no tokeniza una respuesta previa al repetir el prompt
   assert.equal(stats().outputTokens, before.outputTokens);
   assert.equal(stats().responses - before.responses, 1);
   assert.equal(page.captures.length, 1, 'no hay recuperación ficticia');
+});
+
+test('DPU en vivo: ignora DOM anterior, actualiza BPE con nodos nuevos y cierra sin duplicar', async () => {
+  const view = await openTab(), before = stats();
+  const node = (role, text) => ({ innerText: text, getAttribute: () => role, querySelector: () => null });
+  const old = [node('user', 'Test'), node('assistant', 'Respuesta vieja.')];
+  let nodes = old, release;
+  const holdOpen = new Promise((resolve) => { release = resolve; });
+  const page = pageFor(view, '<template>render</template>', {
+    mime: 'text/vnd.openai.web-mobile-partial+html', roleNodes: () => nodes, holdOpen,
+  });
+  const response = await requestReply(page);
+  const reading = response.text();
+  try {
+    page.mutate();
+    await pause(30);
+    assert.equal(stats().outputTokens, before.outputTokens, 'no publica la respuesta antigua');
+    const assistant = node('assistant', 'Nueva respuesta');
+    nodes = [...old, node('user', 'Test'), assistant];
+    page.mutate();
+    await pause(30);
+    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(assistant.innerText, 'gpt-6'));
+    assistant.innerText += ' completa.';
+    page.mutate();
+    await pause(30);
+    assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(assistant.innerText, 'gpt-6'));
+    assert.equal(elements.outTokens.textContent, stats().outputTokens.toLocaleString('es-AR'));
+  } finally { release(); await reading; await pause(300); }
+  assert.equal(stats().responses - before.responses, 1);
+  assert.equal(stats().outputTokens - before.outputTokens, countGptTokens('Nueva respuesta completa.', 'gpt-6'));
 });

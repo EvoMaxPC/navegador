@@ -178,11 +178,11 @@ test('rechaza texto visible que no corresponde al prompt enviado', () => {
 });
 
 test('captura DPU sin encabezados visibles y se limita al texto posterior al prompt', () => {
-  const doc = { body: { innerText: 'Pregunta actual\\nRespuesta parcial que está generándose.' }, querySelectorAll: () => [] };
+  const doc = { body: { innerText: 'Pregunta actual\nRespuesta parcial que está generándose.' }, querySelectorAll: () => [] };
   assert.equal(extractChatGptVisibleAnswer(doc, 'Pregunta actual'), 'Respuesta parcial que está generándose.');
 });
 
 test('captura DPU sin encabezados no reutiliza texto previo al prompt actual', () => {
-  const doc = { body: { innerText: 'Pregunta anterior\\nRespuesta vieja\\nPregunta actual' }, querySelectorAll: () => [] };
+  const doc = { body: { innerText: 'Pregunta anterior\nRespuesta vieja\nPregunta actual' }, querySelectorAll: () => [] };
   assert.equal(extractChatGptVisibleAnswer(doc, 'Pregunta actual'), '');
 });
