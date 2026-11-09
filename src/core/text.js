@@ -168,6 +168,17 @@ export function countGptTokens(text, model = '') {
   return countO200k(text);
 }
 
+/**
+ * Cuenta tokens sin aplicar el tokenizador GPT a proveedores ajenos.
+ * Para ChatGPT/OpenAI usa BPE según el modelo; otros sitios conservan la
+ * estimación genérica existente hasta integrar su tokenizador propio.
+ */
+export function countTokensForProvider(text, model = '', provider = '') {
+  const source = String(provider || '').toLowerCase();
+  if (source.includes('chatgpt') || source.includes('openai')) return countGptTokens(text, model);
+  return estimateTokens(text);
+}
+
 /** Identifica el modelo declarado por el cuerpo de una solicitud GPT. */
 export function gptModelFromRequest(payload) {
   if (!payload || typeof payload !== 'object') return '';
