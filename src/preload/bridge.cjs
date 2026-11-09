@@ -73,7 +73,7 @@ function boot() {
   const host = location.hostname;
   const config = readConfigSync(host);
   if (config) {
-    if (config.enabled !== false) inject(config);
+    if (config.enabled !== false && config.profiled !== false) inject(config);
     return;
   }
 
@@ -82,7 +82,7 @@ function boot() {
   ipcRenderer
     .invoke('nexo:config', { host, href: location.href })
     .then((asyncConfig) => {
-      if (asyncConfig && asyncConfig.enabled !== false) inject(asyncConfig);
+      if (asyncConfig && asyncConfig.enabled !== false && asyncConfig.profiled !== false) inject(asyncConfig);
     })
     .catch((error) => console.warn('[nexo] sin configuración:', error.message));
 }

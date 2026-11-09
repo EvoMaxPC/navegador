@@ -363,3 +363,62 @@ test('el registro dice con qué cliente se presenta el navegador', async () => {
   assert.doesNotMatch(entrada.detail, /Electron\//);
   assert.doesNotMatch(entrada.detail, /Nexo\//);
 });
+
+test('el inicio de sesión federado abre una ventana real, no una pestaña', async () => {
+  const { journal: j, FakeWebContents } = await import('./harness/electron-stub.mjs');
+  const win = j.windows[0];
+  const guest = new FakeWebContents('webview', 'https://chatgpt.com/');
+  win.webContents.emit('did-attach-webview', {}, guest);
+  assert.ok(guest.windowOpenHandler, 'la pestaña decide qué hace con window.open');
+
+  const popup = guest.windowOpenHandler({ url: 'https://accounts.google.com/o/oauth2/v2/auth?x=1' });
+  assert.equal(popup.action, 'allow', '«Continuar con Google» necesita una ventana de verdad');
+  assert.equal(popup.overrideBrowserWindowOptions.webPreferences.partition, 'persist:nexo');
+  assert.equal(popup.overrideBrowserWindowOptions.webPreferences.preload, '', 'sin capa de mediación en un tercero');
+  assert.equal(popup.overrideBrowserWindowOptions.webPreferences.nodeIntegration, false);
+
+  // Casi todos los flujos abren la ventana vacía y después la navegan.
+  assert.equal(guest.windowOpenHandler({ url: 'about:blank' }).action, 'allow');
+
+  // Un enlace normal sigue abriéndose como pestaña, igual que antes.
+  const normal = guest.windowOpenHandler({ url: 'https://ejemplo.com/articulo' });
+  assert.equal(normal.action, 'deny');
+  const abiertas = win.webContents.sent.filter((m) => m.channel === 'nexo:open-tab');
+  assert.equal(abiertas.at(-1).payload.url, 'https://ejemplo.com/articulo');
+
+  // Y una pestaña que no es proveedor no gana ventanas.
+  const otro = new FakeWebContents('webview', 'https://ejemplo.com/');
+  win.webContents.emit('did-attach-webview', {}, otro);
+  assert.equal(otro.windowOpenHandler({ url: 'about:blank' }).action, 'deny');
+});
+
+test('la configuración avisa si el host tiene perfil', async () => {
+  const { journal: j } = await import('./harness/electron-stub.mjs');
+  const listener = j.ipcListeners.get('nexo:config-sync');
+  assert.ok(listener, 'existe el canal síncrono de configuración');
+
+  const proveedor = { returnValue: undefined };
+  listener(proveedor, { host: 'chatgpt.com' });
+  assert.equal(proveedor.returnValue.profiled, true);
+  assert.equal(proveedor.returnValue.enabled, true);
+
+  const tercero = { returnValue: undefined };
+  listener(tercero, { host: 'accounts.google.com' });
+  assert.equal(tercero.returnValue.profiled, false, 'sin perfil no se inyecta la capa');
+});
+
+test('el motor no prepara texto fuera de un proveedor ni en un flujo de acceso', async () => {
+  const fuera = await callIpc('nexo:prepare', {
+    prompt: 'secreto123',
+    url: 'https://auth.openai.com/api/accounts/login',
+  });
+  assert.equal(fuera.skipped, 'fuera-de-alcance');
+  assert.equal(fuera.text, 'secreto123', 'el cuerpo se envía intacto');
+
+  const dentro = await callIpc('nexo:prepare', {
+    prompt: 'hola, ¿me ayudás?',
+    url: 'https://chatgpt.com/backend-api/conversation',
+  });
+  assert.equal(dentro.skipped, undefined, 'un chat de un proveedor sí se media');
+  assert.equal(typeof dentro.text, 'string');
+});

@@ -175,6 +175,48 @@ export function detectSite(host = '') {
 }
 
 /**
+ * Rutas de autenticación.
+ *
+ * Ahí no viaja un mensaje: viajan credenciales, códigos de un solo uso y
+ * tokens. Reescribir ese cuerpo no sólo rompe el inicio de sesión —el sitio
+ * contesta «no se pudo conectar» o el botón queda girando—: además mete una
+ * contraseña en el motor de prompts, en su registro y en su memoria.
+ */
+const AUTH_PATH =
+  /(^|\/)(login|log-in|signin|sign-in|logout|signout|signup|sign-up|register|auth|authorize|oauth|session|sessions|token|tokens|password|passwd|verify|verification|challenge|consent|mfa|2fa|sso|recover|reset)(\/|$|\?|\.)/i;
+
+/** ¿La URL es de un flujo de acceso (login, consentimiento, tokens)? */
+export function isAuthRequest(url = '') {
+  const raw = String(url || '');
+  let path = raw;
+  try {
+    const parsed = new URL(raw, 'https://sitio.invalido');
+    path = `${parsed.pathname}${parsed.search}`;
+  } catch {
+    // Sin URL válida se evalúa el texto tal cual: ante la duda, no se media.
+  }
+  return AUTH_PATH.test(path);
+}
+
+/**
+ * ¿Se puede mediar esta petición?
+ *
+ * Tres condiciones, en orden de importancia:
+ *
+ *  1. **Sólo proveedores con perfil.** Un host sin perfil cae en `generic`, que
+ *     reconocía cualquier POST a `/api/…` del mundo: eso reescribía cuerpos
+ *     ajenos —formularios, inicios de sesión— con el prompt del motor.
+ *  2. **Nunca un flujo de acceso.** Ni siquiera en un proveedor con perfil: el
+ *     cuerpo de un login no es un mensaje.
+ *  3. La ruta tiene que ser la de chat del proveedor.
+ */
+export function isMediable(profile, url = '', method = '') {
+  if (!profile || !profile.id || profile.id === 'generic') return false;
+  if (isAuthRequest(url)) return false;
+  return isChatRequest(profile, url, method);
+}
+
+/**
  * ¿La petición envía un mensaje de chat?
  *
  * Se evalúa sobre la RUTA (sin dominio ni query) cuando el perfil la declara, y

@@ -6,7 +6,8 @@
  */
 
 import { ConversationGuard } from '../core/guard.js';
-import { detectSite } from '../core/sites.js';
+import { detectSite, isAuthRequest } from '../core/sites.js';
+import { isAiHost } from '../core/cdp.js';
 import { settingsForHost } from '../core/settings.js';
 import { StreamSentinel } from '../core/streamSentinel.js';
 import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
@@ -69,6 +70,10 @@ export class Engine {
       language: settings.protocol.lang === 'en' ? 'en' : 'es',
       version: '0.1.0',
       site: detectSite(host).id,
+      // Sin perfil no hay nada que mediar: el preload no inyecta la capa. Es la
+      // segunda barrera, además de `isMediable`, contra reescribir cuerpos
+      // ajenos (formularios de acceso, APIs de sitios que no son de IA).
+      profiled: isAiHost(host),
     };
   }
 
@@ -84,6 +89,10 @@ export class Engine {
   prepare(webContentsId, { prompt, url, site }) {
     const host = safeHost(url) || site || 'desconocido';
     if (!this.isEnabledFor(host)) return { text: prompt, skipped: 'disabled' };
+    // Defensa en profundidad: aunque una página pida mediación, no se prepara
+    // un texto que venga de un host sin perfil ni de una ruta de acceso. Ese
+    // texto puede ser una contraseña, y acá se guarda en la memoria del motor.
+    if (!isAiHost(host) || isAuthRequest(url)) return { text: prompt, skipped: 'fuera-de-alcance' };
 
     const guard = this.#guard(webContentsId, host);
     // Se refrescan los ajustes por si el usuario los cambió en vivo.

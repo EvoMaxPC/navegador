@@ -147,7 +147,10 @@ recepción: sólo mira lo que ya pasó.
   navegar). Es el precio de no inventar un temporizador que corte respuestas
   largas legítimas.
 - **Sólo hosts con perfil.** Un proveedor nuevo necesita su entrada en
-  `src/core/sites.js` (host, rutas, adaptador) antes de que CDP lo mire.
+  `src/core/sites.js` (host, rutas, adaptador) antes de que CDP lo mire. Lo mismo
+  vale para la mediación: `isMediable()` la limita a hosts con perfil y excluye
+  toda ruta de acceso (`/login`, `/auth`, `/session`, `/oauth`, `/token`…), donde
+  el cuerpo lleva credenciales y no un mensaje.
 - **El bucle observado no se puede deshacer**: queda como aviso en el libro y en
   el historial, para que la continuación o el próximo turno salgan mejor.
 

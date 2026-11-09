@@ -19,7 +19,7 @@
 
 import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
-import { detectSite, isChatRequest, locateUserText, patchUserText } from '../core/sites.js';
+import { detectSite, isMediable, locateUserText, patchUserText } from '../core/sites.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
@@ -92,7 +92,9 @@ function safeJson(text) {
 function shouldMediate(url, method) {
   if (!state.enabled) return false;
   if (state.settings.sites?.[site.id]?.enabled === false) return false;
-  return isChatRequest(site, url, method);
+  // `isMediable` deja fuera los hosts sin perfil y todo flujo de acceso: una
+  // contraseña o un código de OAuth no son un mensaje que haya que mejorar.
+  return isMediable(site, url, method);
 }
 
 function urlOf(input) {

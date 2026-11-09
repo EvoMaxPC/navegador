@@ -102,6 +102,27 @@ Checklist de aceptación de la etapa 2:
 Si algo de esta lista falla, la etapa 2 no está terminada, por más que las
 pruebas automáticas estén en verde.
 
+### Inicio de sesión federado (Google, Apple, Microsoft)
+
+«Continuar con Google» no es un enlace: el sitio abre una ventana con
+`window.open` y después la vigila —lee `popup.closed`, escucha `postMessage` y
+espera el `window.close()` del final del flujo—. Una pestaña nueva no sirve:
+`window.open` devuelve `null`, el botón queda girando y el acceso no termina.
+
+Por eso los flujos de acceso se abren como **ventana real** cuando el pedido
+viene de una pestaña de proveedor y apunta a un host de acceso
+(`accounts.google.com`, `appleid.apple.com`, `login.microsoftonline.com`,
+`github.com`…) o a `about:blank`, que es como arrancan casi todos. Esa ventana:
+
+- usa la **misma partición** (`persist:nexo`), o las cookies del proveedor no
+  viajan y el flujo termina en una pantalla vacía;
+- **no lleva el preload** de mediación: en una pantalla de consentimiento no hay
+  nada que mediar y la capa no tiene por qué correr en un tercero;
+- no puede abrir más ventanas ni navegar fuera de `http(s)`;
+- se cierra sola cuando el proveedor completa el flujo.
+
+Cualquier otro `window.open` sigue convirtiéndose en pestaña, como antes.
+
 ---
 
 ## 4. Qué falta (etapa 3)

@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createStreamFilter } from '../src/core/streamFilter.js';
 import { parseSSE } from '../src/core/sse.js';
-import { detectSite, isChatRequest, locateUserText, patchUserText } from '../src/core/sites.js';
+import { detectSite, isAuthRequest, isChatRequest, isMediable, locateUserText, patchUserText } from '../src/core/sites.js';
 import { StreamSentinel } from '../src/core/streamSentinel.js';
 import { chunk } from './fixtures.js';
 
@@ -733,4 +733,31 @@ test('el bundle de inyección se genera y conserva el enganche', () => {
   const codigo = readFileSync(ruta, 'utf8');
   assert.match(codigo, /__NEXO_HOOKED__/);
   assert.ok(!/bodyToText|mediateRequest/.test(codigo), 'no debe quedar el camino que reenviaba');
+});
+
+/* ------------------------------------------------------------------ */
+/* dónde NO se media                                                  */
+/* ------------------------------------------------------------------ */
+
+test('fuera de un proveedor con perfil no se media nada', () => {
+  // El perfil genérico reconocía cualquier POST a `/api/…`: un formulario de
+  // acceso de un tercero terminaba reescrito con el prompt del motor.
+  const generico = detectSite('auth.openai.com');
+  assert.equal(generico.id, 'generic');
+  assert.equal(isMediable(generico, 'https://auth.openai.com/api/accounts/login', 'POST'), false);
+  assert.equal(isMediable(detectSite('ejemplo.com'), 'https://ejemplo.com/api/chat', 'POST'), false);
+  assert.equal(isMediable(null, 'https://chatgpt.com/backend-api/conversation', 'POST'), false);
+});
+
+test('un flujo de acceso no se media aunque el sitio tenga perfil', () => {
+  const chatgpt = detectSite('chatgpt.com');
+  const claude = detectSite('claude.ai');
+  assert.equal(isMediable(chatgpt, 'https://chatgpt.com/backend-api/conversation', 'POST'), true);
+  assert.equal(isMediable(chatgpt, 'https://chatgpt.com/backend-api/conversation/login', 'POST'), false);
+  assert.equal(isMediable(claude, 'https://claude.ai/api/auth/login', 'POST'), false);
+  assert.equal(isMediable(claude, 'https://claude.ai/api/oauth/token', 'POST'), false);
+  assert.equal(isAuthRequest('https://accounts.google.com/_/signin/v2/challenge'), true);
+  assert.equal(isAuthRequest('https://github.com/session'), true);
+  assert.equal(isAuthRequest('https://chatgpt.com/backend-api/conversation'), false);
+  assert.equal(isAuthRequest('https://gemini.google.com/_/BardChatUi/data/x/StreamGenerate'), false);
 });

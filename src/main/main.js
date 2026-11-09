@@ -239,6 +239,43 @@ function broadcast(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
+/**
+ * Hosts de inicio de sesión federado.
+ *
+ * «Continuar con Google» no es un enlace: el sitio abre una ventana con
+ * `window.open` y después la vigila —lee `popup.closed`, escucha `postMessage`
+ * y espera el `window.close()` del final del flujo—. Si esa ventana no existe y
+ * `window.open` devuelve `null`, el botón queda girando para siempre y la
+ * ventana emergente no aparece nunca.
+ *
+ * Por eso los flujos de acceso se abren como ventana real. El resto de los
+ * `window.open` sigue convirtiéndose en pestaña, como hasta ahora.
+ */
+const AUTH_POPUP_HOSTS = [
+  'accounts.google.com',
+  'accounts.youtube.com',
+  'appleid.apple.com',
+  'login.microsoftonline.com',
+  'login.microsoft.com',
+  'login.live.com',
+  'github.com',
+  'gitlab.com',
+  'okta.com',
+  'auth0.com',
+];
+
+/** ¿Este `window.open` es parte de un inicio de sesión? */
+function isAuthPopup(url, fromAiSite = false) {
+  const raw = String(url || '');
+  // Casi todos los flujos arrancan en blanco y después le cambian la dirección
+  // a la ventana. Negar `about:blank` es negar el flujo entero; se acepta sólo
+  // cuando lo pide una pestaña de proveedor, para no cambiar el resto de la web.
+  if (!raw || raw.startsWith('about:blank')) return fromAiSite;
+  const host = hostOf(raw);
+  if (!host) return false;
+  return AUTH_POPUP_HOSTS.some((auth) => host === auth || host.endsWith(`.${auth}`));
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -299,8 +336,44 @@ function createWindow() {
   // Las pestañas no pueden abrir ventanas: se convierten en pestañas nuevas.
   win.webContents.on('did-attach-webview', (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
+      if (isAuthPopup(url, isAiHost(hostOf(contents.getURL())))) {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            width: 520,
+            height: 680,
+            parent: win,
+            modal: false,
+            autoHideMenuBar: true,
+            title: 'Iniciar sesión',
+            backgroundColor: '#ffffff',
+            webPreferences: {
+              // La misma partición que la pestaña: sin eso, las cookies del
+              // proveedor no viajan y el acceso termina en una pantalla vacía.
+              partition: 'persist:nexo',
+              // Sin preload: en una pantalla de consentimiento no hay nada que
+              // mediar, y la capa no tiene por qué correr en un tercero.
+              preload: '',
+              nodeIntegration: false,
+              contextIsolation: true,
+              sandbox: true,
+              webSecurity: true,
+              spellcheck: false,
+            },
+          },
+        };
+      }
       broadcast('nexo:open-tab', { url });
       return { action: 'deny' };
+    });
+
+    // Una ventana abierta por un flujo de acceso no abre más ventanas ni navega
+    // fuera de http(s). Se cierra sola cuando el proveedor termina el flujo.
+    contents.on('did-create-window', (child) => {
+      child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      child.webContents.on('will-navigate', (event, url) => {
+        if (!/^https?:/i.test(String(url || ''))) event.preventDefault();
+      });
     });
 
     // Historial: se registra desde el proceso principal para que no dependa de
