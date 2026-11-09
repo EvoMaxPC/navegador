@@ -154,7 +154,10 @@ async function planRequest(input, init) {
   if (!located || !located.value) return null;
 
   const report = await bridge.request('prepare', { prompt: located.value, url, site: site.id });
-  if (!report?.text || report.text === located.value) return null;
+  if (!report?.text) return null;
+
+  // El registro de la respuesta no depende de que el prompt cambie.
+  if (report.text === located.value) return { input, init, captureOnly: true };
 
   if (!patchUserText(parsed, site, report.text)) return null;
   const body = JSON.stringify(parsed);
