@@ -9,6 +9,8 @@ import { CdpCapture } from '../src/core/cdp.js';
 import { detectSite } from '../src/core/sites.js';
 import { createStreamFilter } from '../src/core/streamFilter.js';
 import { countGptTokens, countOutputTokens } from '../src/main/tokens.js';
+import { Engine } from '../src/main/engine.js';
+import { EvoMemory } from '../src/memory/engine.js';
 
 process.env.NEXO_NETRESP_MS = '50';
 register('./harness/loader.mjs', import.meta.url);
@@ -778,4 +780,36 @@ test('DPU en vivo: ignora DOM anterior, actualiza estimación con nodos nuevos y
   } finally { release(); await reading; await pause(300); }
   assert.equal(stats().responses - before.responses, 1);
   assert.equal(stats().outputTokens - before.outputTokens, 3);
+});
+
+
+test('captura ChatGPT: la respuesta literal se guarda en EVO MEMORY aunque no haya guardián activo', () => {
+  const memory = new EvoMemory({ projectId: 'capture-test' });
+  const logs = [];
+  const engine = new Engine({
+    store: { settings: {}, pushLog: (entry) => logs.push(entry) },
+    memory,
+  });
+  const answer = 'Esta es la respuesta completa de GPT que Nexo debe poder leer y conservar.';
+  engine.onStreamEnd(9876, {
+    site: 'chatgpt',
+    host: 'chatgpt.com',
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    messageId: 'memory-proof-1',
+    conversationId: 'conversation-memory-proof',
+    model: 'gpt-6',
+    text: answer,
+    chars: answer.length,
+    finished: true,
+  });
+
+  const saved = memory.list().find((item) => item.kind === 'artifact' &&
+    item.text === `Respuesta GPT capturada: ${answer}`);
+  assert.ok(saved, 'la respuesta literal queda guardada y recuperable desde EVO MEMORY');
+  assert.equal(saved.source.role, 'assistant');
+  assert.equal(saved.source.model, 'gpt-6');
+  assert.equal(saved.source.messageId, 'memory-proof-1');
+  assert.equal(saved.conversationId, 'conversation-memory-proof');
+  assert.ok(logs.some((entry) => entry.code === 'gpt-response-memory' &&
+    entry.meta.chars === answer.length), 'el registro confirma cuántos caracteres se leyeron y guardaron');
 });
