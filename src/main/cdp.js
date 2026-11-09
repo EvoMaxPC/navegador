@@ -10,10 +10,11 @@
  *
  * Reglas de convivencia con la capa HTTP/SSE que ya existe:
  *
- *   1. Los cuerpos `text/event-stream` y los streams se ignoran acá: de esos se
- *      ocupa la página, y procesarlos también duplicaría el turno.
- *   2. Sólo se adjunta el depurador a los hosts con perfil conocido.
- *   3. Si el depurador no está disponible (ya hay uno adjunto, Electron sin
+ *   1. CDP observa también respuestas SSE: un envío detectado por la página no
+ *      garantiza que esa misma capa haya capturado la respuesta.
+ *   2. El motor deduplica el texto si llega por la página y por CDP.
+ *   3. Sólo se adjunta el depurador a los hosts con perfil conocido.
+ *   4. Si el depurador no está disponible (ya hay uno adjunto, Electron sin
  *      soporte, error del protocolo), el observador queda inerte: el navegador
  *      sigue funcionando exactamente igual que antes.
  *
