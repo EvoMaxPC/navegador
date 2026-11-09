@@ -8,16 +8,26 @@ metadatos del ejecutable y el código de la aplicación dentro de `resources/app
 
 ## 1. Lo más rápido: bajarlo ya compilado
 
-El repositorio compila solo en GitHub Actions, en un runner de Windows, cada vez
-que cambia `src/`, `scripts/`, `test/`, `package.json` o el propio flujo.
+Cada etiqueta `v*` compila en un runner de Windows y adjunta el ZIP a la release.
 
-1. Abrí **Actions → “Compilar para Windows”** en el repositorio.
-2. Entrá al último run en verde y bajá el artefacto **`Nexo-win32-x64`**
-   (se guarda 30 días).
-3. Descomprimí y ejecutá `Nexo-win32-x64\nexo.exe`.
+| Versión | Archivo | Tamaño | sha256 |
+|---|---|---|---|
+| [v0.1.0](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.0) | `Nexo-0.1.0-win32-x64.zip` | 161 MB | `44b303074b251c62b73d4d5229ff5a0871c15943690356812768f2741821f1eb` |
 
-Las etiquetas `v*` además adjuntan el ZIP a la release de GitHub, que es el enlace
-permanente para repartir.
+1. Bajá el ZIP y descomprimilo (queda la carpeta `Nexo-win32-x64`).
+2. Ejecutá `Nexo-win32-x64\nexo.exe`. No hace falta instalar nada.
+3. La primera vez Windows va a avisar que el editor es desconocido (no está
+   firmado); «Más información → Ejecutar de todas formas».
+
+Para comprobar la descarga en PowerShell:
+
+```powershell
+(Get-FileHash .\Nexo-0.1.0-win32-x64.zip -Algorithm SHA256).Hash.ToLower()
+```
+
+Además, cada push a `src/`, `scripts/`, `test/`, `package.json` o al propio flujo
+compila y deja el ZIP como artefacto de ese run (**Actions → “Compilar para
+Windows” → `Nexo-win32-x64`**, se guarda 30 días).
 
 ---
 
@@ -159,9 +169,9 @@ Tampoco hay actualizaciones automáticas: es una distribución manual.
   con los 62 archivos correctos y un ZIP que lectores independientes abren sin
   errores. Esto prueba el empaquetador, **no** el binario real.
 - **En GitHub Actions (Windows Server 2022, Electron 45.2.3 real):** instalación,
-  `npm run verify` (246 pruebas), empaquetado, la prueba de humo sobre el `.exe`
-  empaquetado y publicación del ZIP de 161 MB. Ese es el artefacto que se descarga
-  de la sección 1.
+  `npm run verify` (248 pruebas), empaquetado, la prueba de humo sobre el `.exe`
+  empaquetado y publicación del ZIP de 161 MB. Ese es el archivo de la sección 1:
+  el que se descarga y se ejecuta.
 
 Ver también [`NAVEGADOR.md`](NAVEGADOR.md) para el checklist manual del navegador y
 [`AUDITORIA.md`](AUDITORIA.md) para lo que se revisó en esta pasada.

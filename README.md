@@ -18,6 +18,11 @@ los dos sentidos**:
 Todo el análisis es **local y determinista**: sin modelos auxiliares, sin nube, sin
 dependencias en tiempo de ejecución.
 
+**[Descargar Nexo 0.1.0 para Windows](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.0)**
+— `Nexo-0.1.0-win32-x64.zip` (161 MB), sha256 `44b30307…1821f1eb`. Descomprimí y
+ejecutá `nexo.exe`. Sin firmar: Windows muestra SmartScreen la primera vez. Detalles
+en [`docs/EMPAQUETADO.md`](docs/EMPAQUETADO.md).
+
 ---
 
 ## Estado
