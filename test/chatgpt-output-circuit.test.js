@@ -557,10 +557,10 @@ test('integración remota DPU: espera el renderizado tardío del DOM y suma toke
   const view = await openTab(), before = stats();
   const answer = 'Respuesta DPU aplicada tarde al documento.';
   const page = pageFor(view, '<template>DPU</template>', { mime: dpuMime,
-    bodyText: 'You said:\\nPregunta DPU\\nAplicando respuesta...' });
+    bodyText: 'You said:\nPregunta DPU\nAplicando respuesta...' });
   const response = await requestDpu(page);
   setTimeout(() => {
-    page.document.body.innerText = `You said:\\nPregunta DPU\\nChatGPT said:\\n${answer}`;
+    page.document.body.innerText = `You said:\nPregunta DPU\nChatGPT said:\n${answer}`;
   }, 350);
   assert.equal(await response.text(), '<template>DPU</template>', 'el transporte original permanece intacto');
   await pause(500);
