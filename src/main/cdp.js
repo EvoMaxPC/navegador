@@ -485,13 +485,9 @@ export class CdpObserver {
       this.stats.ignored += 1;
       return;
     }
-    // El stream lo captura la capa de la página mientras está viva; leerlo acá
-    // sería contarlo dos veces. Si la capa no está activa en esta pestaña, el
-    // stream es el único camino que queda y CDP lo lee al terminar.
-    if (stream && this.engine?.hasRecentLayer?.(state.id)) {
-      this.stats.ignored += 1;
-      return;
-    }
+    // CDP observa también los streams aunque la capa haya enviado el mensaje:
+    // un envío no demuestra que la capa vaya a capturar la respuesta. El motor
+    // deduplica el mismo texto si también llega por el enganche de la página.
     if (response.status && (response.status < 200 || response.status > 299)) {
       // Un 403 en `/backend-api/conversation` es exactamente el motivo por el que
       // la interfaz del sitio dice «no se pudo conectar».
