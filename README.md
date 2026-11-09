@@ -18,8 +18,8 @@ los dos sentidos**:
 Todo el análisis es **local y determinista**: sin modelos auxiliares, sin nube, sin
 dependencias en tiempo de ejecución.
 
-**[Descargar Nexo 0.1.6 para Windows](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.6)**
-— `Nexo-0.1.6-win32-x64.zip` (149 MB). Descomprimí y
+**[Descargar Nexo 0.1.7 para Windows](https://github.com/EvoMaxPC/navegador/releases/tag/v0.1.7)**
+— `Nexo-0.1.7-win32-x64.zip` (149 MB). Descomprimí y
 ejecutá `nexo.exe`. Sin firmar: Windows muestra SmartScreen la primera vez. Detalles
 en [`docs/EMPAQUETADO.md`](docs/EMPAQUETADO.md).
 
@@ -69,7 +69,7 @@ entregó. El modelo está simulado; la mediación es la de verdad — es el mism
 código que corre dentro del navegador.
 
 ```bash
-npm test                # 401 pruebas, sin dependencias
+npm test                # 412 pruebas, sin dependencias
 npm run bench           # rendimiento medido: tabla antes/después
 npm run verify          # pruebas + bundle + checklist manual
 npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
@@ -265,7 +265,7 @@ src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
 scripts/         verificación, icono, empaquetado para Windows y prueba de humo
-test/            401 pruebas con node:test (incluye un Electron falso para el arranque)
+test/            412 pruebas con node:test (incluye un Electron falso para el arranque)
 docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
 .github/         flujo que compila la aplicación de Windows
 ```

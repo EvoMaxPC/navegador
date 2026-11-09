@@ -272,10 +272,14 @@ export class Engine {
     if (this.seenResponses.has(key)) return { ok: true, duplicate: true };
 
     // Misma respuesta vista antes (por CDP o por otro cierre del stream): no se
-    // cuenta, aunque el identificador del envío haya cambiado.
+    // cuenta, aunque el identificador del envío haya cambiado. Lo que decide es
+    // si hay un turno esperando: si lo hay y la respuesta es de ese turno, es
+    // nueva aunque el texto se repita; cinco respuestas iguales son cinco.
     const texto = String(payload.text || '');
     this.noteLayer(webContentsId);
-    const merge = this.#mergeResponse(webContentsId, texto);
+    const pendiente = this.#pendingTurn(webContentsId, now);
+    const awaitId = this.resolveMessageId(pendiente?.id ?? webContentsId, messageId);
+    const merge = this.#mergeResponse(webContentsId, texto, { messageId: awaitId, pendiente });
     if (merge.duplicate) {
       this.seenResponses.set(key, now);
       return { ok: true, duplicate: true, merged: true };
@@ -289,8 +293,6 @@ export class Engine {
     this.counters.outputTokens += tokens;
     if (payload.stopped) this.counters.loopsCut += 1;
 
-    const pendiente = this.#pendingTurn(webContentsId, now);
-    const awaitId = this.resolveMessageId(pendiente?.id ?? webContentsId, messageId);
     if (
       pendiente &&
       now - pendiente.entry.at <= VENTANA_RESPUESTA_MS &&
@@ -313,20 +315,36 @@ export class Engine {
    * Devuelve `{duplicate, tokens, sameText}`; `tokens` es lo que hay que sumar
    * al contador de salida cuando la respuesta es nueva.
    */
-  #mergeResponse(webContentsId, text) {
+  #mergeResponse(webContentsId, text, { messageId = null, pendiente = undefined } = {}) {
     const now = Date.now();
+    const esperando = pendiente === undefined ? this.#pendingTurn(webContentsId, now) : pendiente;
     const vistos = (this.recentTexts.get(webContentsId) || []).filter((v) => now - v.at < VENTANA_RESPUESTA_MS);
     for (const visto of vistos) {
       const crece = text.length > visto.text.length && text.startsWith(visto.text);
       const esPrefijo = visto.text.length > text.length && visto.text.startsWith(text);
       const igual = visto.text === text;
       if (!crece && !esPrefijo && !igual) continue;
+      // El texto igual sólo es la misma respuesta si no hay un turno nuevo
+      // esperando, si el turno esperando es el mismo que ya se contó, o si lo
+      // visto es posterior al envío de ese turno (o sea, ya estaba llegando
+      // cuando la pregunta salió: no es su respuesta).
+      //
+      // Sin esta condición, cinco respuestas «Listo.» seguidas se contaban como
+      // una sola: el texto se usa para no duplicar entre canales, no para
+      // fundir respuestas distintas.
+      const turno = esperando ? esperando.entry : null;
+      const mismoTurno =
+        !turno ||
+        (visto.messageId && messageId ? visto.messageId === messageId : false) ||
+        visto.at > turno.at;
+      if (!mismoTurno) continue;
       if (crece) {
         const tokens = estimateTokens(text);
         this.counters.outputTokens += Math.max(0, tokens - visto.tokens);
         visto.text = text;
         visto.tokens = tokens;
         visto.at = now;
+        if (messageId) visto.messageId = messageId;
       }
       this.recentTexts.set(webContentsId, vistos);
       return { duplicate: true, sameText: igual, tokens: 0 };
@@ -336,8 +354,7 @@ export class Engine {
     // nueva: es la misma, por otro canal o en otro trozo. Se acumula el texto
     // (sin repetir lo ya visto) y se corrige el conteo de tokens.
     const ultima = vistos[vistos.length - 1];
-    const pendiente = this.#pendingTurn(webContentsId, now);
-    if (!pendiente && ultima && !ultima.text.includes(text)) {
+    if (!esperando && ultima && !ultima.text.includes(text)) {
       const junto = `${ultima.text}${text}`;
       const tokens = estimateTokens(junto);
       this.counters.outputTokens += Math.max(0, tokens - ultima.tokens);
@@ -349,7 +366,7 @@ export class Engine {
     }
 
     const tokens = estimateTokens(text);
-    vistos.push({ at: now, text, tokens });
+    vistos.push({ at: now, text, tokens, messageId: messageId || null });
     this.recentTexts.set(webContentsId, vistos.slice(-6));
     return { duplicate: false, sameText: false, tokens };
   }
@@ -389,7 +406,9 @@ export class Engine {
     // Se anota lo que ya contó este camino ANTES de mirar el guard: si CDP ve el
     // mismo texto por otro canal, no se vuelve a registrar.
     const host = payload?.host || this.guards.get(webContentsId)?.host || safeHost(payload?.url) || 'desconocido';
-    if (payload?.text) this.#markSeen(webContentsId, [`h:${host}|${fingerprint(String(payload.text))}`]);
+    if (payload?.text) {
+      this.#markSeen(webContentsId, [`h:${host}|${fingerprint(String(payload.text))}`], payload?.messageId);
+    }
 
     // La respuesta se cuenta antes de exigir guardián: una respuesta existe
     // aunque no se haya preparado ningún envío (mediación apagada o en pausa).
@@ -540,17 +559,24 @@ export class Engine {
       `c:${capture.site || host}|${capture.prompt || ''}|${fingerprint(text)}`,
       `h:${host}|${fingerprint(text)}`,
     ];
-    if (this.#seenAlready(webContentsId, keys)) {
+    // El turno pendiente se resuelve antes de decidir: sin él, dos respuestas
+    // iguales seguidas se tomaban por una sola.
+    const pendiente = this.#pendingTurn(webContentsId, now);
+    const awaitId = capture.messageId
+      ? this.resolveMessageId(pendiente?.id ?? webContentsId, capture.messageId)
+      : null;
+
+    if (this.#seenAlready(webContentsId, keys, { pendiente, messageId: awaitId })) {
       this.cdp.duplicates += 1;
       return { ok: true, duplicate: true };
     }
-    this.#markSeen(webContentsId, keys);
+    this.#markSeen(webContentsId, keys, awaitId);
 
     // Una respuesta que sólo vio CDP también es una respuesta: se cuenta igual.
     // Si ya la había contado el camino SSE, la huella de arriba la descartó. Y si
     // es la misma respuesta llegando en pedazos, se corrige el conteo de tokens
     // en vez de sumar otra respuesta.
-    const merge = this.#mergeResponse(webContentsId, text);
+    const merge = this.#mergeResponse(webContentsId, text, { messageId: awaitId, pendiente });
     if (merge.duplicate) {
       this.cdp.duplicates += 1;
       return { ok: true, duplicate: true, merged: true };
@@ -561,10 +587,6 @@ export class Engine {
     // El turno se cierra con **su** mensaje. Si la captura trae identificador, se
     // exige que coincida; si no lo trae (un socket), se acepta el pendiente de la
     // pestaña sólo dentro de la ventana de respuesta.
-    const pendiente = this.#pendingTurn(webContentsId, now);
-    const awaitId = capture.messageId
-      ? this.resolveMessageId(pendiente?.id ?? webContentsId, capture.messageId)
-      : null;
     let paired = false;
     if (pendiente) {
       const vigente = now - pendiente.entry.at <= VENTANA_RESPUESTA_MS;
@@ -790,22 +812,35 @@ export class Engine {
 
   /* ---------------- deduplicación entre canales ---------------- */
 
-  /** Huellas vistas por esta pestaña en los últimos dos minutos. */
-  #seenAlready(webContentsId, keys) {
+  /**
+   * ¿Esta huella ya se vio en esta pestaña?
+   *
+   * La huella sirve para no contar dos veces el mismo texto entre canales, no
+   * para fundir respuestas distintas: si hay un turno nuevo esperando y lo visto
+   * viene de un turno anterior, es otra respuesta aunque diga exactamente lo
+   * mismo («Listo.» cinco veces son cinco respuestas).
+   */
+  #seenAlready(webContentsId, keys, { pendiente = null, messageId = null } = {}) {
     const seen = this.cdpSeen.get(webContentsId);
     if (!seen) return false;
-    return keys.some((key) => seen.has(key));
+    const marca = keys.map((key) => seen.get(key)).find(Boolean);
+    if (!marca) return false;
+    if (!pendiente) return true;
+    const turno = pendiente.entry;
+    if (marca.messageId && messageId) return marca.messageId === messageId;
+    return marca.at > turno.at;
   }
 
-  #markSeen(webContentsId, keys) {
+  #markSeen(webContentsId, keys, messageId = null) {
     let seen = this.cdpSeen.get(webContentsId);
     if (!seen) {
       seen = new Map();
       this.cdpSeen.set(webContentsId, seen);
     }
     const now = Date.now();
-    for (const key of keys) seen.set(key, now);
-    for (const [key, ts] of seen) if (now - ts > 120_000) seen.delete(key);
+    const marca = { at: now, messageId: messageId ? String(messageId) : null };
+    for (const key of keys) seen.set(key, marca);
+    for (const [key, valor] of seen) if (now - valor.at > 120_000) seen.delete(key);
   }
 
   /* ---------------- EVO MEMORY ---------------- */

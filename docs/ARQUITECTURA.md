@@ -263,6 +263,9 @@ Reglas que sostienen la cuenta:
 - **Los tokens son una estimación** (`estimateTokens`: caracteres y alfabeto), no
   el conteo del tokenizador del proveedor. La interfaz lo dice con un asterisco.
 
+El detalle de la corrección de los contadores —causa, criterio de identidad y
+qué queda por validar— está en [`CONTADORES.md`](CONTADORES.md).
+
 ### Cuando los contadores no suben: la línea de captura
 
 Un cero puede venir de cuatro sitios distintos y desde el panel se veían igual.
