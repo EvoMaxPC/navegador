@@ -1,6 +1,6 @@
 /** Conteo de conversación: BPE para GPT, estimación existente para otros sitios. */
 import { countGptTokens } from '../core/gptTokens.cjs';
-import { estimateTokens } from '../core/text.js';
+import { estimateTokens, estimateOutputTokens } from '../core/text.js';
 export { countGptTokens };
 
 export function countTokensForProvider(text, model = '', provider = '') {
@@ -9,8 +9,7 @@ export function countTokensForProvider(text, model = '', provider = '') {
   return estimateTokens(text);
 }
 
-/** Salida IA: estimación directa sobre el texto real, sin tokenizador. */
+/** Salida IA: estimación por palabras del texto real, sin tokenizador. */
 export function countOutputTokens(text) {
-  if (typeof text !== 'string' || !text.trim()) return 0;
-  return estimateTokens(text);
+  return estimateOutputTokens(text);
 }

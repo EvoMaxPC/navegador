@@ -16,7 +16,8 @@ los dos sentidos**:
   tokens internos filtrados) y ofrece continuar exactamente donde se cortó.
 
 Todo el análisis es **local y determinista**: sin modelos auxiliares ni nube. La entrada GPT conserva el tokenizador BPE local
-`gpt-tokenizer`. **La salida IA usa directamente una estimación del texto capturado, sin tokenizador.**
+`gpt-tokenizer`. **La salida IA se estima por las palabras capturadas, sin tokenizador: aproximadamente 4 tokens por cada 3 palabras.**
+Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar el conteo.
 
 **Corrección de tokens de salida 0.1.19:** captura SSE/NDJSON según el MIME real
 (incluido `/conversation/updates`), lectura del texto DPU tras el render y captura
@@ -80,7 +81,7 @@ entregó. El modelo está simulado; la mediación es la de verdad — es el mism
 código que corre dentro del navegador.
 
 ```bash
-npm test                # 556 pruebas, con dependencias instaladas
+npm test                # 574 pruebas, con dependencias instaladas
 npm run bench           # rendimiento medido: tabla antes/después
 npm run verify          # pruebas + bundle + checklist manual
 npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
@@ -276,7 +277,7 @@ src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
 scripts/         verificación, icono, empaquetado para Windows y prueba de humo
-test/            556 pruebas con node:test (incluye un Electron falso para el arranque)
+test/            574 pruebas con node:test (incluye un Electron falso para el arranque)
 docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
 .github/         flujo que compila la aplicación de Windows
 ```

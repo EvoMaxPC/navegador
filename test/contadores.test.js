@@ -1,4 +1,4 @@
-import { estimateTokens } from '../src/core/text.js';
+import { estimateOutputTokens } from '../src/core/text.js';
 /**
  * Contadores de conversación: mensajes, respuestas, turnos y tokens.
  *
@@ -156,7 +156,7 @@ test('4. una respuesta de más de 8 000 caracteres se registra entera', async ()
 
   assert.equal(despues.responses, antes.responses + 1);
   assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
-  assert.equal(despues.outputTokens, antes.outputTokens + estimateTokens(largo), 'cuenta los tokens de toda la respuesta');
+  assert.equal(despues.outputTokens, antes.outputTokens + estimateOutputTokens(largo), 'cuenta los tokens de toda la respuesta');
   assert.ok(resultado.counted && !resultado.counted.duplicate, 'el cierre informa que contó');
 
   // El recorte de 8 000 caracteres estaba en la capa de la página. Se comprueba

@@ -1,13 +1,13 @@
 > **Cambio vigente solicitado por el usuario:** el contador de salida IA ya no usa
-> BPE. `countOutputTokens` devuelve directamente `estimateTokens` sobre el texto
-> capturado (0 si no hay texto). Las referencias a BPE de salida que siguen son
+> BPE. `countOutputTokens` usa `estimateOutputTokens`: cuenta palabras Unicode del texto
+> capturado y devuelve `ceil(palabras × 4 / 3)` (0 si no hay palabras). Las referencias a BPE de salida que siguen son
 > el historial de la corrección anterior, no el comportamiento actual.
 >
 > Se conserva la captura SSE/NDJSON/DPU, actualización incremental y deduplicación.
 > Se estima el texto acumulado, no la suma de estimaciones de cada fragmento.
 > La UI identifica el resultado como «tokens de salida IA (estimados)».
 > La entrada y los demás contadores no cambian. `gpt-tokenizer` permanece sólo
-> para la entrada GPT. Pruebas: 556 total, 555 aprobadas, 1 omitida, 0 fallos.
+> para la entrada GPT. Pruebas vigentes: 574 total, 573 aprobadas, 1 omitida, 0 fallos.
 > La prueba integral bloquea la carga del tokenizador y verifica salida y UI.
 
 # Tokens de salida GPT — auditoría y corrección 0.1.14
@@ -251,3 +251,22 @@ el parser para aceptar datos de prueba erróneos. Total final: 556/555/1/0.
 Se integraron también las guardas de rol y MIME JSON de `e9d9d40` a `27b8b24`.
 Se corrigió la expresión regular JSON recibida (barra sobreescapada que impedía
 compilar) y se añadió replay integral de updates con `application/json`.
+
+
+### Estimación por palabras solicitada por el usuario
+
+La salida ya no depende de la longitud del texto: usa aproximadamente 4 tokens
+por cada 3 palabras, redondeando hacia arriba. Es una heurística, no el consumo
+real informado por OpenAI. Se reconocen palabras/números Unicode y se ignora
+puntuación aislada. Una palabra parcial ya visible cuenta provisionalmente;
+completar sus letras no añade otra palabra. Los fragmentos se acumulan antes de
+estimar, tanto en SSE como en los acumulados DOM DPU. El cierre conserva el total,
+sin sumar otra vez lo ya mostrado. Los demás contadores permanecen sin cambios.
+
+Se añadieron pruebas con resultados numéricos independientes para palabras,
+espacios, acentos, números, puntuación y fragmentación de una palabra. Se valida
+el progreso `Ho` → `Hola` → `Hola mundo` → `Hola mundo otra palabra` con salidas
+2 → 2 → 3 → 6; el cierre y su repetición mantienen 6. La prueba integral DOM
+verifica también 2 palabras → 3 tokens estimados y 3 palabras → 4, reflejados en UI.
+`npm run verify`: 574 pruebas, 573 aprobadas, 1 omitida, 0 fallos. Transporte
+reproducido/simulado: no se afirma haber realizado una conversación en vivo.
