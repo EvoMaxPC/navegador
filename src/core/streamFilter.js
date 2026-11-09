@@ -76,7 +76,13 @@ export function createStreamFilter(opts = {}) {
   };
   const pendingChunks = [];
   let plainText = '';
-  let lineText = '';\n  let liveDeliveredChars = 0;\n  const reportText = (text) => {\n    if (!text) return;\n    liveDeliveredChars += text.length;\n    opts.onText?.({ text, deliveredChars: liveDeliveredChars });\n  };
+  let lineText = '';
+  let liveDeliveredChars = 0;
+  const reportText = (text) => {
+    if (!text) return;
+    liveDeliveredChars += text.length;
+    opts.onText?.({ text, deliveredChars: liveDeliveredChars });
+  };
 
   const consumeLines = (final = false) => {
     const lines = buffered.split('\n');
