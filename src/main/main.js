@@ -15,7 +15,7 @@ import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
 import { CdpObserver } from './cdp.js';
 import { isAiHost } from '../core/cdp.js';
-import { detectSite, isMediable, locateUserText } from '../core/sites.js';
+import { detectSite, isMediable, isResponseRequest, locateUserText } from '../core/sites.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
@@ -1096,7 +1096,7 @@ function watchProviderNetwork(s) {
         requestId &&
         String(details.method || '').toUpperCase() === 'POST' &&
         isAiHost(host) &&
-        isMediable(detectSite(host), url, 'POST') &&
+        (isMediable(detectSite(host), url, 'POST') || isResponseRequest(detectSite(host), url, 'POST')) &&
         note?.responseEligible !== false &&
         engine.isEnabledFor(host)
       ) {
@@ -1132,7 +1132,7 @@ function watchProviderNetwork(s) {
     const host = hostOf(url);
     if (!isAiHost(host)) return;
     const method = String(details.method || 'GET').toUpperCase();
-    if (method === 'POST' && isMediable(detectSite(host), url, method)) {
+    if (method === 'POST' && (isMediable(detectSite(host), url, method) || isResponseRequest(detectSite(host), url, method))) {
       const status = Number(details.statusCode) || 0;
       if (status >= 200 && status < 300 && engine.isEnabledFor(host)) {
         const rawId = Number(details.webContentsId);
