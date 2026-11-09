@@ -44,8 +44,10 @@ export function isChatGptDpuMime(mimeType = '') {
  * como "ChatGPT said". La asociación se hace con la última aparición del prompt.
  */
 export function extractChatGptVisibleAnswer(documentRef, prompt = '') {
-  const fromAssistant = extractChatGptAssistantDomText(documentRef, prompt);
-  if (fromAssistant) return fromAssistant;
+  const roleSnapshot = readChatGptDpuAnswer(documentRef, prompt);
+  // Si hay un nodo de usuario, su identidad manda: no caer al texto histórico
+  // del body cuando el último prompt no coincide o todavía no tiene respuesta.
+  if (roleSnapshot.user) return roleSnapshot.text;
 
   const body = String(documentRef?.body?.innerText || documentRef?.body?.textContent || '');
   const labelled = extractChatGptDpuAnswer(body, prompt);
