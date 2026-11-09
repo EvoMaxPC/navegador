@@ -46,6 +46,7 @@ Los valores absolutos dependen de la máquina: lo que importa es la proporción.
 | `analyzeTail` (6 000 caracteres) | 0,227 ms | **0,102 ms** | 2,2× |
 | Código inyectado en cada página | 47,1 kB | **25,6 kB** (9,4 kB gzip) | 46 % menos |
 | Idiomas de Chromium empaquetados | 60 archivos | **5 archivos** | ~9 MB menos |
+| ZIP de Windows que se descarga | 161,3 MB | **148,8 MB** | 11,9 MB menos (7,7 %) |
 
 Una aclaración honesta: el centinela sobre 20 000 caracteres **subió** de
 0,29 ms a 0,44 ms. No es una regresión: ahora hace un trabajo que antes no
