@@ -11,9 +11,10 @@
  *  - coste de evaluar la capa inyectada en cada página,
  *  - arranque del proceso principal.
  *
- *   npm run bench                 # tabla con los números
- *   npm run bench -- --json      # además, la instantánea en JSON
- *   npm run bench -- --reps=20   # más repeticiones (más estable)
+ *   npm run bench                          # tabla con los números
+ *   npm run bench -- --json                # además, la instantánea en JSON
+ *   npm run bench -- --json-out=archivo    # la instantánea, sin ensuciar la consola
+ *   npm run bench -- --reps=20             # más repeticiones (más estable)
  *
  * Los números son de este contenedor, no de la máquina del usuario: valen para
  * comparar antes/después y para detectar regresiones, no como promesa absoluta.

@@ -155,7 +155,7 @@ export class HistoryStore {
     const words = term.split(' ').filter(Boolean);
     const now = this.now();
     const scored = [];
-    const window = 24 * 30 * 3_600_000;
+    const recenciaMaxima = 24 * 30 * 3_600_000;
 
     for (let i = 0; i < entries.length; i += 1) {
       const entry = entries[i];
@@ -170,17 +170,13 @@ export class HistoryStore {
       }
       if (!score) continue;
       // Desempate por cercanía temporal: hasta 1 punto por lo más reciente.
-      const age = now - entry.ts;
-      if (age < window) score += 1 - Math.max(0, age) / window;
+      const edad = Math.max(0, now - entry.ts);
+      if (edad < recenciaMaxima) score += 1 - edad / recenciaMaxima;
       scored.push({ entry, score });
     }
 
-    if (scored.length > limit) {
-      scored.sort((a, b) => b.score - a.score || b.entry.ts - a.entry.ts);
-      scored.length = limit;
-    } else {
-      scored.sort((a, b) => b.score - a.score || b.entry.ts - a.entry.ts);
-    }
+    scored.sort((a, b) => b.score - a.score || b.entry.ts - a.entry.ts);
+    if (scored.length > limit) scored.length = limit;
     return scored.map((item) => item.entry);
   }
 
