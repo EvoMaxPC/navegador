@@ -21,6 +21,7 @@ import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
 import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
+import { watchChatGptConversation } from '../core/chatgptConversation.js';
 import { estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
@@ -1002,6 +1003,17 @@ bridge.ready({
   href: location.href,
   version: CONFIG.version || '0.1.0',
 });
+
+// Lectura de la conversación ya cargada, independiente de los transportes.
+if (site.id === 'chatgpt') {
+  watchChatGptConversation({ document, window,
+    isEnabled: () => state.settings.memory?.enabled !== false,
+    isStreaming: () => Boolean(document.querySelector?.(site.stopButton)),
+    publish: (payload) => payload.error
+      ? bridge.event('error', { stage: 'conversation-memory', message: payload.error })
+      : bridge.event('conversation-snapshot', payload),
+  });
+}
 
 // Se expone un objeto de depuración para la consola del navegador.
 window.__nexo = {

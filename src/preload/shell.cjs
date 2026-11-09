@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld('nexo', {
   memory: {
     stats: () => ipcRenderer.invoke('nexo:memory:stats'),
     list: () => ipcRenderer.invoke('nexo:memory:list'),
+    conversations: () => ipcRenderer.invoke('nexo:memory:conversations'),
     recall: (query, limit) => ipcRenderer.invoke('nexo:memory:recall', { query, limit }),
     pin: (id, pinned) => ipcRenderer.invoke('nexo:memory:pin', { id, pinned }),
     forget: (id) => ipcRenderer.invoke('nexo:memory:forget', { id }),

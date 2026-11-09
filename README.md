@@ -24,6 +24,12 @@ Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar e
 parcial al detener la respuesta. Estimación directa en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
+**Lectura y memoria de ChatGPT 0.1.20:** al abrir una conversación, la capa lee los
+mensajes de usuario y asistente cargados en el DOM, sin depender de un fetch nuevo.
+Guarda una transcripción local y destila su contenido en EVO MEMORY; las revisiones
+actualizan el mismo mensaje. Consultá **Memoria → Conversaciones de ChatGPT guardadas**.
+No modifica contadores por releer historial. [Alcance, límites y pruebas](docs/CHATGPT-MEMORIA.md).
+
 **Contadores 0.1.18:** turnos cancelados, fallidos y realizados,
 con deduplicación y actualización automática. Se retiraron las métricas de bucles
 sin quitar la protección contra repeticiones.
@@ -81,7 +87,7 @@ entregó. El modelo está simulado; la mediación es la de verdad — es el mism
 código que corre dentro del navegador.
 
 ```bash
-npm test                # 574 pruebas, con dependencias instaladas
+npm test                # 583 pruebas, con dependencias instaladas
 npm run bench           # rendimiento medido: tabla antes/después
 npm run verify          # pruebas + bundle + checklist manual
 npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
@@ -277,7 +283,7 @@ src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
 scripts/         verificación, icono, empaquetado para Windows y prueba de humo
-test/            574 pruebas con node:test (incluye un Electron falso para el arranque)
+test/            583 pruebas con node:test (incluye un Electron falso para el arranque)
 docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
 .github/         flujo que compila la aplicación de Windows
 ```

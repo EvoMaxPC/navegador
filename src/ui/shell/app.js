@@ -770,6 +770,7 @@ const MEM = {
   legend: document.getElementById('memLegend'),
   context: document.getElementById('memContext'),
   list: document.getElementById('memoryList'),
+  conversations: document.getElementById('memoryConversations'),
   searchForm: document.getElementById('memSearchForm'),
   search: document.getElementById('memSearch'),
   handoff: document.getElementById('memHandoff'),
@@ -852,6 +853,13 @@ async function refreshMemory() {
     }
     MEM.file.textContent = memState.stats.file ? `Archivo: ${memState.stats.file}` : '';
     renderMemoryItems(memState.items.slice(0, 40));
+    if (MEM.conversations && nexo.memory.conversations) {
+      const conversations = await nexo.memory.conversations();
+      MEM.conversations.innerHTML = conversations.length ? conversations.map((entry) =>
+        `<li><details><summary>${escapeHtml(entry.conversationId)} · ${entry.turns.length} mensajes${entry.clipped ? ' (recortado)' : ''}</summary>${entry.turns.map((turn) =>
+          `<p><b>${turn.role === 'user' ? 'Vos' : 'ChatGPT'}</b></p><pre class="mem-text">${escapeHtml(turn.content)}</pre>`).join('')}</details></li>`
+      ).join('') : '<li class="empty">Todavía no se leyeron mensajes de ChatGPT.</li>';
+    }
   } catch {
     /* el panel de memoria es opcional frente al navegador */
   }

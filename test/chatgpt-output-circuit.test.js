@@ -77,11 +77,11 @@ async function openTab() {
 // extracción/tokenización. Sólo se sustituye el transporte externo por replay.
 function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null, fetchError = null, status = 200, bodyText = '', initialBodyText = '', roleNodes = null } = {}) {
   const listeners = [], captures = [];
-  let mutate = () => {};
+  const observers = new Set();
   class MutationObserver {
     constructor(callback) { this.callback = callback; }
-    observe() { mutate = this.callback; }
-    disconnect() { mutate = () => {}; }
+    observe() { observers.add(this.callback); }
+    disconnect() { observers.delete(this.callback); }
   }
   // Simula sólo la notificación DOM, no el extractor ni el contador.
 
@@ -109,7 +109,8 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
   const document = { body: { get innerText() { if (!transportStarted) return initialBodyText; return typeof bodyText === 'function' ? bodyText() : bodyText; }, set innerText(value) { bodyText = value; } }, querySelector: () => null, querySelectorAll: (selector) => selector === '[data-message-author-role]' && roleNodes ? roleNodes(transportStarted) : [],
     addEventListener(name, handler) { domListeners.set(name, handler); } };
   page.document = document;
-  page.mutate = () => mutate();
+  page.MutationObserver = MutationObserver;
+  page.mutate = () => { for (const callback of observers) callback(); };
   page.stop = (isTrusted = true, attributes = { 'data-testid': 'stop-button' }) => {
     // DOM mínimo: compara atributos reales del botón, sin copiar los selectores
     // de producción. El target puede ser el icono hijo del botón.
@@ -779,4 +780,53 @@ test('DPU en vivo: ignora DOM anterior, actualiza estimación con nodos nuevos y
   } finally { release(); await reading; await pause(300); }
   assert.equal(stats().responses - before.responses, 1);
   assert.equal(stats().outputTokens - before.outputTokens, 3);
+});
+
+test('ChatGPT ya abierto: lee mensajes visibles sin un fetch nuevo y los incorpora a memoria', async () => {
+  const view = await openTab(), before = stats();
+  const node = (role, text) => ({ innerText: text, getAttribute: (key) => key === 'data-message-author-role' ? role : null, querySelector: () => null });
+  pageFor(view, '', { roleNodes: () => [
+    node('user', 'Decidimos usar la biblioteca AuroraVisible para el proyecto.'),
+    node('assistant', 'Queda pendiente configurar AuroraVisible antes del viernes.'),
+  ] });
+  await pause(900);
+  const entries = journal.ipcHandlers.get('nexo:memory:list')({ sender: { id: 1 } });
+  assert.ok(entries.some((entry) => /AuroraVisible/.test(entry.text)), 'la conversación existente debe llegar a EVO MEMORY');
+  assert.equal(stats().messages, before.messages, 'leer historial no cuenta envíos nuevos');
+  assert.equal(stats().responses, before.responses, 'leer historial no cuenta respuestas nuevas');
+  assert.equal(stats().outputTokens, before.outputTokens, 'leer historial no altera tokens');
+});
+
+test('historial DOM → preload → IPC → transcripción local: cambios y repetición no duplican ni mueven contadores', async () => {
+  const view = await openTab(), before = stats();
+  const user = { innerText: 'Hola lector de memoria', getAttribute: (key) => key === 'data-message-author-role' ? 'user' : key === 'data-message-id' ? 'mem-u' : null };
+  const answer = { innerText: 'Primera parte', getAttribute: (key) => key === 'data-message-author-role' ? 'assistant' : key === 'data-message-id' ? 'mem-a' : null, querySelector: () => null };
+  const page = pageFor(view, '', { roleNodes: () => [user, answer] });
+  await pause(700);
+  const conversations = () => journal.ipcHandlers.get('nexo:memory:conversations')({ sender: { id: 1 } });
+  let stored = conversations().find((entry) => entry.conversationId === '/c/output-circuit');
+  assert.equal(stored.turns.find((turn) => turn.id === 'mem-a').content, 'Primera parte');
+  answer.innerText += '\n\nRespuesta final con **Markdown**.';
+  page.mutate();
+  await pause(700);
+  page.mutate();
+  await pause(700);
+  stored = conversations().find((entry) => entry.conversationId === '/c/output-circuit');
+  assert.equal(stored.turns.filter((turn) => turn.id === 'mem-a').length, 1);
+  assert.equal(stored.turns.find((turn) => turn.id === 'mem-a').content, answer.innerText);
+  assert.equal(stats().messages, before.messages);
+  assert.equal(stats().responses, before.responses);
+  assert.equal(stats().outputTokens, before.outputTokens);
+  assert.equal(stats().inputTokens, before.inputTokens);
+});
+
+test('el receptor de memoria rechaza snapshots de otro sitio, otra URL o de la shell', () => {
+  const handle = journal.ipcHandlers.get('nexo:conversation-snapshot');
+  const data = { href: 'https://chatgpt.com/c/test', turns: [{ id: 'a', role: 'user', content: 'No guardar' }] };
+  for (const sender of [
+    { getType: () => 'window', getURL: () => data.href },
+    { getType: () => 'webview', getURL: () => 'https://example.com' },
+    { getType: () => 'webview', getURL: () => 'https://chatgpt.com/c/otro' },
+    { getType: () => 'webview', getURL: () => 'https://chatgpt.com/?temporary-chat=true' },
+  ]) assert.equal(handle({ sender }, data).ok, false);
 });

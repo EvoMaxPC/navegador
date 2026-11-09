@@ -41,6 +41,8 @@ export class MemoryStore {
 
     /** @type {Map<string, any>} */
     this.items = new Map();
+    /** Transcripciones locales, separadas de las memorias destiladas. */
+    this.conversations = new Map();
     /** @type {Map<string, Set<string>>} término → ids */
     this.index = new Map();
     /** @type {Map<string, number>} término → nº de documentos */
@@ -65,6 +67,9 @@ export class MemoryStore {
         const item = reviveItem(rawItem);
         this.#indexItem(item);
       }
+      for (const conversation of (Array.isArray(parsed.conversations) ? parsed.conversations : []).slice(-50)) {
+        if (conversation?.id && Array.isArray(conversation.turns)) this.conversations.set(conversation.id, conversation);
+      }
       this.lastLoadedAt = this.now();
     } catch {
       // Archivo ilegible: se arranca vacío antes que romper la aplicación.
@@ -79,6 +84,7 @@ export class MemoryStore {
       this.storage.write(
         JSON.stringify({
           version: 2,
+          conversations: [...this.conversations.values()],
           savedAt: this.now(),
           items: [...this.items.values()],
         }),

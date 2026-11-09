@@ -108,6 +108,11 @@
         <p class="note" id="memContext">Contexto del último envío: 0 tokens.</p>
         <div class="mem-legend" id="memLegend"></div>
         <ul class="memory-list" id="memoryList"></ul>
+        <details><summary>Conversaciones de ChatGPT guardadas</summary>
+          <p class="note">Sólo mensajes cargados en la página. Guardado local: hasta 50 conversaciones,
+            200 mensajes y 250 000 caracteres por conversación; 10 000 por mensaje. Los chats temporales no se guardan.</p>
+          <ul class="memory-list" id="memoryConversations"></ul>
+        </details>
 
         <div class="panel-head"><h2>Continuidad</h2></div>
         <p class="note">
@@ -243,7 +248,7 @@
       <section class="panel-view" data-panel="about">
         <div class="about">
           <h2>Nexo</h2>
-          <p class="version" id="version">v0.1.19</p>
+          <p class="version" id="version">v0.1.20</p>
           <p>
             Navegador basado en Chromium que se sienta entre vos y los chatbots: reescribe el
             mensaje antes de enviarlo y filtra la respuesta antes de mostrarla.

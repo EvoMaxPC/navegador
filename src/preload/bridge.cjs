@@ -117,6 +117,10 @@ window.addEventListener('message', async (event) => {
 
   if (data.__nexo === 'event') {
     const { type, payload } = data;
+    if (type === 'conversation-snapshot') {
+      await ipcRenderer.invoke('nexo:conversation-snapshot', payload).catch((error) => console.warn('[nexo] conversación no guardada:', error.message));
+      return;
+    }
     if (type === 'turn-result') {
       await ipcRenderer.invoke('nexo:turn-result', payload).catch((error) => console.warn('[nexo] resultado no notificado:', error.message));
       return;

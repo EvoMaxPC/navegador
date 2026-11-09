@@ -1200,6 +1200,8 @@ export class Engine {
     if (!this.memory) return { ok: false };
     const items = this.memory.store.all({ includeSuperseded: true });
     for (const item of items) this.memory.store.forget(item.id);
+    this.memory.store.conversations.clear();
+    this.memory.store.dirty = true;
     this.memory.store.save();
     return { ok: true, removed: items.length };
   }

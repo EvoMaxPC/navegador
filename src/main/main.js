@@ -1,3 +1,4 @@
+import { isChatGptMemoryUrl } from '../core/chatgptConversation.js';
 /**
  * Proceso principal de Nexo.
  *
@@ -597,6 +598,23 @@ function registerIpc() {
   }));
 
   /* ---------------- EVO MEMORY ---------------- */
+  ipcMain.handle('nexo:conversation-snapshot', (event, payload) => {
+    const href = event.sender?.getURL?.() || '';
+    if (event.sender?.getType?.() !== 'webview' || !isChatGptMemoryUrl(href) ||
+      payload?.href !== href || !Array.isArray(payload?.turns) || payload.turns.length > 200 ||
+      store.settings.memory?.enabled === false) return { ok: false, skipped: 'conversación-no-permitida' };
+    const url = new URL(href);
+    // Nunca confiar en el ID del documento para escribir otra conversación.
+    const conversationId = url.pathname.includes('/c/') ? url.pathname
+      : `${url.pathname}#tab-${event.sender.id}`;
+    const result = memory.memory.captureConversation({ conversationId, url: `${url.origin}${url.pathname}`,
+      turns: payload.turns, streaming: payload.streaming === true });
+    if (!result.ok) noteDiagnostic({ code: 'conversation-memory-error', severity: 'warn',
+      title: 'No se pudo guardar la conversación', detail: result.error });
+    if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());
+    return result;
+  });
+  ipcMain.handle('nexo:memory:conversations', () => memory.memory.listConversations());
   ipcMain.handle('nexo:memory:stats', () => ({ ...engine.memoryStats(), file: memory?.file || null }));
   ipcMain.handle('nexo:memory:list', () => engine.memoryList());
   ipcMain.handle('nexo:memory:recall', (_event, payload = {}) =>

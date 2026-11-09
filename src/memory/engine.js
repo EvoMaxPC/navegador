@@ -99,7 +99,7 @@ export class EvoMemory {
     this.recentTurns.push({ role: turn.role, content: turn.content });
 
     if (this.turnsSinceEpisode >= this.episodeEvery) this.#closeEpisode(projectId, conversationId);
-    if (outcome.created.length || outcome.merged.length) this.store.save();
+    if (!meta.deferSave && (outcome.created.length || outcome.merged.length)) this.store.save();
 
     return outcome;
   }
@@ -237,6 +237,54 @@ export class EvoMemory {
           }
         : null,
     };
+  }
+
+  /** Guarda mensajes visibles con identidad; una revisión reemplaza el parcial. */
+  captureConversation({ conversationId, url, turns, streaming = false }) {
+    if (!conversationId || !Array.isArray(turns)) return { ok: false, error: 'conversación inválida' };
+    const id = `${this.projectId}|${conversationId}`;
+    const previous = this.store.conversations.get(id);
+    const saved = new Map((previous?.turns || []).map((turn) => [turn.id, turn]));
+    let changed = 0;
+    for (const turn of turns.slice(-200)) {
+      if (!turn || !['user', 'assistant'].includes(turn.role) || typeof turn.content !== 'string' || !turn.content.trim()) continue;
+      const key = String(turn.id || '').slice(0, 200);
+      if (!key) continue;
+      const content = turn.content.slice(0, 10000);
+      const old = saved.get(key);
+      const clipped = Boolean(turn.clipped || turn.content.length > 10000);
+      const same = old?.content === content && old?.role === turn.role && old?.clipped === clipped;
+      const memorized = same && old.memorized;
+      if (!same || (!streaming && !memorized)) changed += 1;
+      const entry = { id: key, role: turn.role, content, clipped, memorized: Boolean(memorized) };
+      saved.set(key, entry);
+      // El texto parcial queda en disco; destilar sólo al estabilizarse el turno.
+      if (!streaming && !memorized) {
+        this.remember({ role: turn.role, content }, { conversationId, url, deferSave: true });
+        entry.memorized = true;
+      }
+    }
+    if (!changed) return { ok: true, changed: 0, turns: saved.size };
+    let chars = 0;
+    const kept = [];
+    for (const turn of [...saved.values()].slice(-200).reverse()) {
+      if (chars + turn.content.length > 250000) break;
+      chars += turn.content.length;
+      kept.unshift(turn);
+    }
+    const conversation = { id, conversationId, projectId: this.projectId, url,
+      updatedAt: this.now(), clipped: kept.length < saved.size || kept.some((turn) => turn.clipped), turns: kept };
+    this.store.conversations.delete(id);
+    this.store.conversations.set(id, conversation);
+    while (this.store.conversations.size > 50) this.store.conversations.delete(this.store.conversations.keys().next().value);
+    this.store.dirty = true;
+    const ok = !this.store.storage || this.store.save();
+    return { ok, changed, turns: kept.length, error: ok ? null : 'No se pudo guardar la conversación en disco.' };
+  }
+
+  listConversations() {
+    return [...this.store.conversations.values()].filter((entry) => entry.projectId === this.projectId)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   /** Reconstruye un proyecto a partir de una conversación completa. */
