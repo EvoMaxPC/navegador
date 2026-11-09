@@ -11,7 +11,7 @@ import { isAiHost } from '../core/cdp.js';
 import { settingsForHost } from '../core/settings.js';
 import { StreamSentinel } from '../core/streamSentinel.js';
 import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
-import { countGptTokens, fingerprint } from '../core/text.js';
+import { countTokensForProvider, fingerprint } from '../core/text.js';
 import { looksEncrypted } from '../memory/item.js';
 
 /** Cómo se llama cada canal en los textos que ve el usuario. */
@@ -292,7 +292,7 @@ export class Engine {
     this.noteLayer(webContentsId);
     const pendiente = this.#pendingTurn(webContentsId, now);
     const awaitId = this.resolveMessageId(pendiente?.id ?? webContentsId, messageId);
-    const merge = this.#mergeResponse(webContentsId, texto, { messageId: awaitId, pendiente, model: payload.model || pendiente?.entry?.model || '' });
+    const merge = this.#mergeResponse(webContentsId, texto, { messageId: awaitId, pendiente, model: payload.model || pendiente?.entry?.model || '', provider: payload.host || pendiente?.entry?.host || '' });
     if (merge.duplicate) {
       this.seenResponses.set(key, now);
       return { ok: true, duplicate: true, merged: true };
@@ -368,7 +368,7 @@ export class Engine {
    * Devuelve `{duplicate, tokens, sameText}`; `tokens` es lo que hay que sumar
    * al contador de salida cuando la respuesta es nueva.
    */
-  #mergeResponse(webContentsId, text, { messageId = null, pendiente = undefined, model = '' } = {}) {
+  #mergeResponse(webContentsId, text, { messageId = null, pendiente = undefined, model = '', provider = '' } = {}) {
     const now = Date.now();
     const esperando = pendiente === undefined ? this.#pendingTurn(webContentsId, now) : pendiente;
     const vistos = (this.recentTexts.get(webContentsId) || []).filter((v) => now - v.at < VENTANA_RESPUESTA_MS);
@@ -392,7 +392,7 @@ export class Engine {
         visto.at > turno.at;
       if (!mismoTurno) continue;
       if (crece) {
-        const tokens = countGptTokens(text, model || esperando?.entry?.model || '');
+        const tokens = countTokensForProvider(text, model || esperando?.entry?.model || '', provider || esperando?.entry?.host || '');
         this.counters.outputTokens += Math.max(0, tokens - visto.tokens);
         visto.text = text;
         visto.tokens = tokens;
@@ -409,7 +409,7 @@ export class Engine {
     const ultima = vistos[vistos.length - 1];
     if (!esperando && ultima && !ultima.text.includes(text)) {
       const junto = `${ultima.text}${text}`;
-      const tokens = countGptTokens(junto, model || esperando?.entry?.model || '');
+      const tokens = countTokensForProvider(junto, model || esperando?.entry?.model || '', provider || esperando?.entry?.host || '');
       this.counters.outputTokens += Math.max(0, tokens - ultima.tokens);
       ultima.text = junto;
       ultima.tokens = tokens;
@@ -629,7 +629,7 @@ export class Engine {
     // Si ya la había contado el camino SSE, la huella de arriba la descartó. Y si
     // es la misma respuesta llegando en pedazos, se corrige el conteo de tokens
     // en vez de sumar otra respuesta.
-    const merge = this.#mergeResponse(webContentsId, text, { messageId: awaitId, pendiente, model: capture.model || pendiente?.entry?.model || '' });
+    const merge = this.#mergeResponse(webContentsId, text, { messageId: awaitId, pendiente, model: capture.model || pendiente?.entry?.model || '', provider: capture.host || pendiente?.entry?.host || '' });
     if (merge.duplicate) {
       this.cdp.duplicates += 1;
       return { ok: true, duplicate: true, merged: true };
