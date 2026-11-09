@@ -651,8 +651,13 @@ function timeOf(ts) {
   }
 }
 
+function interventionCount(entries) {
+  // System/browser notices are not interventions in an AI conversation.
+  return entries.filter((entry) => entry && entry.kind !== 'system').length;
+}
+
 function renderLog() {
-  els.stats.log.textContent = String(state.logs.length);
+  els.stats.log.textContent = String(interventionCount(state.logs));
   if (!state.logs.length) {
     els.log.innerHTML = '<li class="log-empty">Todavía no hubo intervenciones. Abrí un chat y escribí algo.</li>';
     return;
