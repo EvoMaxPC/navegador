@@ -524,15 +524,16 @@ export class Engine {
   #pendingTurn(webContentsId, now) {
     const propio = this.awaiting.get(webContentsId);
     if (propio) return { id: webContentsId, entry: propio };
-    const sinPestana = this.awaiting.get(-1);
-    if (!sinPestana || now - sinPestana.at > VENTANA_RESPUESTA_MS) return null;
-    // Sólo se enlaza si es el turno más reciente: si hay otro más nuevo en otra
-    // pestaña, esta respuesta no le pertenece al mensaje sin pestaña.
-    let ultimo = null;
-    for (const [id, entry] of this.awaiting) {
-      if (!ultimo || entry.at > ultimo.entry.at) ultimo = { id, entry };
-    }
-    return ultimo && ultimo.id === -1 ? ultimo : null;
+
+    // Si el evento no trae una pestaña fiable, sólo se puede asociar cuando
+    // existe exactamente un turno pendiente en todo el navegador. Esto cubre
+    // webRequest/CDP que alternan entre un webContentsId real y -1 sin atribuir
+    // jamás una respuesta a una conversación elegida por aproximación.
+    const candidatos = [...this.awaiting.entries()]
+      .filter(([, entry]) => now - entry.at <= VENTANA_RESPUESTA_MS)
+      .map(([id, entry]) => ({ id, entry }));
+    if (candidatos.length === 1) return candidatos[0];
+    return null;
   }
 
   /** Identificador canónico de un mensaje, aunque haya llegado con un alias. */
