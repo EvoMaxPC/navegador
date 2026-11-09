@@ -36,7 +36,7 @@ const stats = () => callIpc('nexo:stats');
 const PARTITION = 'persist:nexo';
 
 /** Lanza una petición por el vigilante de red, como lo hace Chromium. */
-function peticionRed({ url, method = 'POST', cuerpo = null, webContentsId = 1, sinPestana = false }) {
+function peticionRed({ url, method = 'POST', cuerpo = null, webContentsId = 1, sinPestana = false, requestId = null }) {
   const mano = journal.webRequest.before.get(PARTITION);
   assert.ok(mano, 'el vigilante de red está escuchando');
   const detalles = {
@@ -44,6 +44,7 @@ function peticionRed({ url, method = 'POST', cuerpo = null, webContentsId = 1, s
     method,
     resourceType: 'xhr',
     uploadData: cuerpo ? [{ bytes: Buffer.from(cuerpo, 'utf8') }] : undefined,
+    ...(requestId ? { id: requestId } : {}),
   };
   // Chromium no informa la pestaña cuando la petición sale de un worker.
   if (!sinPestana) detalles.webContentsId = webContentsId;
@@ -55,10 +56,10 @@ function peticionRed({ url, method = 'POST', cuerpo = null, webContentsId = 1, s
 }
 
 /** Simula el cierre HTTP de una petición de conversación en Electron. */
-function respuestaRed({ url = 'https://chatgpt.com/backend-api/f/conversation', statusCode = 200, webContentsId = 1, sinPestana = false, method = 'POST' } = {}) {
+function respuestaRed({ url = 'https://chatgpt.com/backend-api/f/conversation', statusCode = 200, webContentsId = 1, sinPestana = false, method = 'POST', requestId = null } = {}) {
   const mano = journal.webRequest.completed.get(PARTITION);
   assert.ok(mano, 'el observador de respuestas está escuchando');
-  const detalles = { url, method, statusCode, resourceType: 'xhr' };
+  const detalles = { url, method, statusCode, resourceType: 'xhr', ...(requestId ? { id: requestId } : {}) };
   if (!sinPestana) detalles.webContentsId = webContentsId;
   mano.listener(detalles);
 }
@@ -299,8 +300,9 @@ test('una respuesta HTTP 2xx cierra el turno aunque la pestaña no venga en el e
     url: 'https://chatgpt.com/backend-api/f/conversation',
     cuerpo: cuerpoChatGPT('respuesta por red'),
     webContentsId: view.id,
+    requestId: 'req-respuesta-red-correlacionada',
   });
-  respuestaRed({ webContentsId: view.id, sinPestana: true });
+  respuestaRed({ requestId: 'req-respuesta-red-correlacionada', sinPestana: true });
   await settle(30);
 
   const fin = await stats();
