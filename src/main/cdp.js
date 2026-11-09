@@ -31,7 +31,7 @@ import {
   terminalOf,
 } from '../core/cdp.js';
 import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
-import { countGptTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
+import { countTokensForProvider, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 /** Versión del protocolo que expone Electron/Chromium. */
 const CDP_VERSION = '1.3';
@@ -473,7 +473,7 @@ export class CdpObserver {
         host: entry.host,
         url: entry.url,
         chars: text.length,
-        tokens: countGptTokens(text, model),
+        tokens: countTokensForProvider(text, model, entry.host),
         promptHash: fingerprint(text),
         textFound: true,
       });
