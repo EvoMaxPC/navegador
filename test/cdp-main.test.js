@@ -315,6 +315,20 @@ test('ChatGPT sigue observado para EVO MEMORY aunque la mediación esté apagada
   assert.equal(config.enabled, false, 'la mediación sigue apagada');
   assert.equal(config.settings.memory.enabled, true, 'la memoria sigue habilitada');
 
+  const respuesta = 'PRUEBA DE CAPTURA PASIVA NEXO: respuesta guardada en EVO MEMORY.';
+  view.debugger.bodies.set('req-memory-passive', JSON.stringify({
+    message: { author: { role: 'assistant' }, content: { parts: [respuesta] } },
+  }));
+  view.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-memory-passive', type: 'XHR',
+    response: { url: 'https://chatgpt.com/backend-api/conversation', status: 200, mimeType: 'application/json' },
+  });
+  view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-memory-passive' });
+  await settle();
+  const artifacts = await callIpc('nexo:memory:list', {});
+  assert.ok(artifacts.some((item) => item.kind === 'artifact' && item.text.includes(respuesta)),
+    'la respuesta real observada por CDP se guarda literalmente en EVO MEMORY');
+
   await callIpc('nexo:settings:set', { sites: { chatgpt: { enabled: true } }, memory: { enabled: true } });
 });
 
