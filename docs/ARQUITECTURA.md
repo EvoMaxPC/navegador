@@ -176,14 +176,13 @@ los dos caminos, así que un mismo turno no se registra dos veces.
 
 ## Contadores de conversación
 
-Métricas de sesión, con cuatro resultados de turno exclusivos, expuestas por
+Métricas de sesión, con tres contadores de resultado de turno, expuestas por
 `nexo:stats` y dibujadas en el panel de actividad:
 
 | Métrica | Qué cuenta | De dónde sale |
 | --- | --- | --- |
 | `messages` | mensajes del usuario | evento `outgoing` de la capa, uno por envío reconocido |
 | `responses` | respuestas de la IA | cierre de stream (`nexo:stream-end`) o captura CDP |
-| `turnsCompleted` | turnos completos de ChatGPT | respuesta finalizada normalmente |
 | `turnsCancelled` | turnos cancelados de ChatGPT | Stop confirmado por un gesto real o señal explícita del proveedor |
 | `turnsFailed` | turnos fallidos de ChatGPT | error de generación o petición correlacionada fallida |
 | `turnsPerformed` | turnos realizados de ChatGPT | interrupción sin confirmación; red sin cuerpo |
@@ -423,9 +422,15 @@ Un cierre HTTP 2xx sin cuerpo no confirma el resultado del modelo: queda como
 desconocido. Si llega una confirmación después, se mueve ese resultado a su
 categoría (−1 desconocido, +1 confirmado), nunca se agrega otro turno. Un
 resultado confirmado no se vuelve a incrementar ni se degrada con avisos débiles
-posteriores. Cada cambio emite `nexo:stats-changed` y la shell actualiza las cuatro
+posteriores. Cada cambio emite `nexo:stats-changed` y la shell actualiza las tres
 celdas existentes/nuevas sin recarga ni cambios al estilo del panel.
 
 Se retiraron los contadores agregados de bucles de Engine, guard.stats, shell y
 demo. Se conserva la memoria de patrones del guardián porque decide cuándo
 continuar o regenerar: es parte de la protección, no una métrica del panel.
+
+
+En 0.1.18 se retiró la métrica de turnos completos del motor, las estadísticas y
+la shell. La señal interna `completed` permanece para finalizar y deduplicar una
+respuesta, pero no tiene contador asociado. No se modifica la tokenización ni
+los otros tres contadores.

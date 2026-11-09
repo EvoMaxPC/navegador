@@ -98,7 +98,7 @@ test('1. un mensaje sin mediación cuenta una sola vez y suma actividad', async 
     'sin mediación el motor no intervino',
   );
   assert.equal(despues.responses, antes.responses, 'todavía no hay respuesta');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted, 'un mensaje suelto no es un turno');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('el mismo mensaje repetido por la capa no se cuenta dos veces', async () => {
@@ -141,7 +141,7 @@ test('3. una respuesta SSE corta cierra el turno', async () => {
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 1);
   assert.equal(despues.responses, antes.responses + 1);
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 1, 'mensaje y respuesta emparejados');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
   assert.equal(Object.hasOwn(despues, 'loopsCut'), false);
 });
 
@@ -155,7 +155,7 @@ test('4. una respuesta de más de 8 000 caracteres se registra entera', async ()
   const despues = await stats();
 
   assert.equal(despues.responses, antes.responses + 1);
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 1);
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
   assert.equal(despues.outputTokens, antes.outputTokens + countGptTokens(largo), 'cuenta los tokens de toda la respuesta');
   assert.ok(resultado.counted && !resultado.counted.duplicate, 'el cierre informa que contó');
 
@@ -184,7 +184,7 @@ test('5. una respuesta interrumpida se cuenta como respuesta, una sola vez', asy
   const despues = await stats();
 
   assert.equal(despues.responses, antes.responses + 1, 'la respuesta existió aunque se cortara');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted, 'un corte del motor no es un fin normal');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
   assert.equal(despues.turnsPerformed, antes.turnsPerformed + 1, 'interrupción sin confirmación: un turno desconocido');
 
   // El mismo cierre repetido (reintento del sitio) no vuelve a contar.
@@ -208,11 +208,11 @@ test('6. dos conversaciones simultáneas en pestañas distintas no se mezclan', 
   let medio = await stats();
   assert.equal(medio.messages, antes.messages + 2);
   assert.equal(medio.responses, antes.responses + 1);
-  assert.equal(medio.turnsCompleted, antes.turnsCompleted + 1, 'cerró el turno de la pestaña que respondió');
+  assert.equal(Object.hasOwn(medio, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 
   await responder(207, { messageId: 'b1', text: 'Respuesta de la pestaña A.' });
   const fin = await stats();
-  assert.equal(fin.turnsCompleted, antes.turnsCompleted + 2, 'cada pestaña cerró el suyo');
+  assert.equal(Object.hasOwn(fin, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('8. varios mensajes consecutivos se cuentan todos', async () => {
@@ -224,7 +224,7 @@ test('8. varios mensajes consecutivos se cuentan todos', async () => {
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 3);
   assert.equal(despues.responses, antes.responses + 3);
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 3);
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 /* ------------------------------------------------------------------ */
@@ -273,7 +273,7 @@ test('7. una respuesta vista por SSE y por CDP cuenta una sola vez', async () =>
 
   const despues = await stats();
   assert.equal(despues.responses, trasSse.responses, 'CDP no vuelve a contar la misma respuesta');
-  assert.equal(despues.turnsCompleted, trasSse.turnsCompleted, 'ni cierra un segundo turno');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
   assert.equal(despues.messages, antes.messages + 1);
   assert.ok(despues.cdp.duplicates >= 1, 'el motor marcó el duplicado');
 });

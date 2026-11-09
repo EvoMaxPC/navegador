@@ -122,7 +122,7 @@ test('2. una respuesta completa suma exactamente 1', async () => {
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 1, 'un mensaje');
   assert.equal(despues.responses, antes.responses + 1, 'una respuesta');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 1, 'y el turno queda cerrado');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 /* ------------------------------------------------------------------ */
@@ -142,7 +142,7 @@ test('3. cinco intercambios seguidos dan 5 mensajes y 5 respuestas', async () =>
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 5, 'cinco mensajes');
   assert.equal(despues.responses, antes.responses + 5, 'cinco respuestas');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 5, 'cinco turnos');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('3b. cinco respuestas con el mismo texto son cinco respuestas', async () => {
@@ -251,7 +251,7 @@ test('6. un error HTTP no suma ninguna respuesta', async () => {
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses, 'un 500 no es una respuesta del modelo');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted, 'ni cierra el turno');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('7. una respuesta que no terminó no está contabilizada como terminada', async () => {
@@ -300,7 +300,7 @@ test('8. cada respuesta se asocia al mensaje que la originó', async () => {
   await respuestaPorCDP(view, { requestId: 'req-c8-1', texto: 'Respuesta a la primera consulta.' });
   await settle(20);
   const trasPrimera = await stats();
-  assert.equal(trasPrimera.turnsCompleted, antes.turnsCompleted + 1, 'cierra el primer turno');
+  assert.equal(Object.hasOwn(trasPrimera, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 
   enviar('segunda consulta', { webContentsId: view.id });
   await settle(10);
@@ -310,7 +310,7 @@ test('8. cada respuesta se asocia al mensaje que la originó', async () => {
   const fin = await stats();
   assert.equal(fin.messages, antes.messages + 2, 'dos mensajes');
   assert.equal(fin.responses, antes.responses + 2, 'dos respuestas');
-  assert.equal(fin.turnsCompleted, antes.turnsCompleted + 2, 'dos turnos, sin cruzar mensajes');
+  assert.equal(Object.hasOwn(fin, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 /* ------------------------------------------------------------------ */
@@ -353,7 +353,7 @@ test('10. cambiar de conversación o recargar no pierde ni duplica lo contado', 
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 2, 'los mensajes se acumulan, no se reinician');
   assert.equal(despues.responses, antes.responses + 2, 'las respuestas también');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 2, 'y los turnos');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 /* ------------------------------------------------------------------ */
@@ -393,7 +393,7 @@ test('12. al responder suben respuestas, intervenciones y tokens de salida', asy
     '+1 interventiones por la respuesta (además de la del envío)',
   );
   assert.ok(despues.outputTokens > trasEnviar.outputTokens, 'y suman los tokens de salida');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 1, 'el turno queda cerrado');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('13. tres intercambios suman seis intervenciones', async () => {
@@ -468,7 +468,7 @@ test('15. si CDP ya contó la respuesta, la red no la cuenta otra vez', async ()
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses + 1, 'una respuesta, no dos');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted + 1, 'un turno');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('16. una petición que termina mal no cuenta como respuesta', async () => {
@@ -482,7 +482,7 @@ test('16. una petición que termina mal no cuenta como respuesta', async () => {
 
   const despues = await stats();
   assert.equal(despues.responses, antes.responses, 'un 500 no es una respuesta');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted, 'ni cierra el turno');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('17. sin mensaje esperando, la red no inventa una respuesta', async () => {

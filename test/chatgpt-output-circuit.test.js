@@ -53,7 +53,7 @@ function thinkingExpected() {
 // Ejecuta las funciones reales de la shell y su suscripción IPC sobre elementos
 // mínimos. Es integración con DOM simulado, NO una prueba visual en Chromium.
 const appSource = readFileSync(new URL('../src/ui/shell/app.js', import.meta.url), 'utf8');
-const elements = Object.fromEntries(['messages', 'responses', 'turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsPerformed', 'inTokens', 'outTokens', 'interventions', 'capture'].map((key) => [key, { textContent: '0' }]));
+const elements = Object.fromEntries(['messages', 'responses', 'turnsCancelled', 'turnsFailed', 'turnsPerformed', 'inTokens', 'outTokens', 'interventions', 'capture'].map((key) => [key, { textContent: '0' }]));
 let refreshFromIpc;
 const ui = vm.createContext({
   nexo: { getStats: stats, on: (_channel, listener) => { refreshFromIpc = listener; } },
@@ -377,7 +377,7 @@ for (const [name, body, mime, expected] of [
 }
 
 
-const outcomes = ['turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsPerformed'];
+const outcomes = ['turnsCancelled', 'turnsFailed', 'turnsPerformed'];
 function outcomeDelta(before) { return outcomes.map((key) => stats()[key] - before[key]); }
 function assertOutcomeUi() {
   for (const key of outcomes) assert.equal(elements[key].textContent, stats()[key].toLocaleString('es-AR'), key);
@@ -388,15 +388,15 @@ function requestReply(page) {
   }) });
 }
 
-test('resultados: SSE y NDJSON normales actualizan sólo turnos completos', async () => {
+test('resultados: SSE y NDJSON normales no recrean el contador de turnos completos', async () => {
   for (const [body, mime] of [[fixture('normal-reply.sse'), 'text/event-stream'],
     [fixture('logged-out-reply.ndjson'), 'application/x-ndjson']]) {
     const view = await openTab(), before = stats();
     await replayPrimary(view, body, { mime });
-    assert.deepEqual(outcomeDelta(before), [1, 0, 0, 0]);
+    assert.deepEqual(outcomeDelta(before), [0, 0, 0]);
     assertOutcomeUi();
     await replayCdp(view, body, mime);
-    assert.deepEqual(outcomeDelta(before), [1, 0, 0, 0]);
+    assert.deepEqual(outcomeDelta(before), [0, 0, 0]);
   }
 });
 
@@ -411,14 +411,14 @@ test('resultados: Stop confirmado actualiza UI antes del aborto; no se confunde 
     await pause(60);
     page.stop(false);
     await pause();
-    assert.deepEqual(outcomeDelta(before), [0, 0, 0, 0], 'un clic programático no confirma Stop');
+    assert.deepEqual(outcomeDelta(before), [0, 0, 0], 'un clic programático no confirma Stop');
     page.stop();
     await pause();
-    assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+    assert.deepEqual(outcomeDelta(before), [1, 0, 0]);
     assert.equal(stats().outputTokens, before.outputTokens, 'clasificar Stop no modifica los tokens');
     assertOutcomeUi();
   } finally { release(); await reading; await pause(50); }
-  assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+  assert.deepEqual(outcomeDelta(before), [1, 0, 0]);
   assert.ok(stats().outputTokens > before.outputTokens, 'el cierre conserva el conteo parcial existente');
   assertOutcomeUi();
 });
@@ -426,7 +426,7 @@ test('resultados: Stop confirmado actualiza UI antes del aborto; no se confunde 
 test('resultados: AbortError sin Stop confirmado queda desconocido y se refresca solo', async () => {
   const view = await openTab(), before = stats();
   await replayPrimary(view, fixture('aborted.sse'), { abort: true });
-  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 1]);
   assertOutcomeUi();
 });
 
@@ -435,15 +435,15 @@ test('resultados: error de generación en SSE con HTTP 200 no se marca completo'
   const body = fixture('normal-reply.sse').split('data: {"type":"message_stream_complete"')[0] +
     'data: {"type":"error","error":{"message":"Generation failed"}}\n\ndata: [DONE]\n\n';
   await replayPrimary(view, body);
-  assert.deepEqual(outcomeDelta(before), [0, 0, 1, 0]);
+  assert.deepEqual(outcomeDelta(before), [0, 1, 0]);
   assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(normal, 'gpt-6'));
   assertOutcomeUi();
 });
 
 for (const [name, options, expected] of [
-  ['rechazo fetch', { fetchError: new TypeError('Failed to fetch') }, [0, 0, 1, 0]],
-  ['aborto antes de cabeceras', { fetchError: new DOMException('Aborted', 'AbortError') }, [0, 0, 0, 1]],
-  ['HTTP 500', { status: 500 }, [0, 0, 1, 0]],
+  ['rechazo fetch', { fetchError: new TypeError('Failed to fetch') }, [0, 1, 0]],
+  ['aborto antes de cabeceras', { fetchError: new DOMException('Aborted', 'AbortError') }, [0, 0, 1]],
+  ['HTTP 500', { status: 500 }, [0, 1, 0]],
 ]) {
   test(`resultados: ${name} se integra desde inyección/preload hasta UI`, async () => {
     const view = await openTab(), before = stats();
@@ -471,11 +471,11 @@ test('resultados: error explícito actualiza el contador sin esperar EOF ni DONE
   try {
     await pause(70);
     assert.equal(closed, false);
-    assert.deepEqual(outcomeDelta(before), [0, 0, 1, 0]);
+    assert.deepEqual(outcomeDelta(before), [0, 1, 0]);
     assertOutcomeUi();
     assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(normal, 'gpt-6'));
   } finally { release(); await reading; await pause(50); }
-  assert.deepEqual(outcomeDelta(before), [0, 0, 1, 0]);
+  assert.deepEqual(outcomeDelta(before), [0, 1, 0]);
 });
 
 test('resultados: CDP loadingFailed cancelado no presupone Stop y actualiza UI', async () => {
@@ -488,7 +488,7 @@ test('resultados: CDP loadingFailed cancelado no presupone Stop y actualiza UI',
   await pause(30);
   view.debugger.emitEvent('Network.loadingFailed', { requestId, canceled: true, errorText: 'net::ERR_ABORTED' });
   await pause(30);
-  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 1]);
   assertOutcomeUi();
 });
 
@@ -499,11 +499,11 @@ test('resultados: navegar fuera durante una generación deja un único desconoci
   });
   view.emit('did-start-navigation', {}, 'https://example.org/', false, true);
   await pause();
-  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 1]);
   assertOutcomeUi();
   view.emit('destroyed');
   await pause();
-  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 1]);
 });
 
 test('resultados: regenerar dos veces el mismo texto cuenta dos turnos, no otros mensajes', async () => {
@@ -518,7 +518,7 @@ test('resultados: regenerar dos veces el mismo texto cuenta dos turnos, no otros
     await response.text();
     await pause(50);
   }
-  assert.deepEqual(outcomeDelta(before), [2, 0, 0, 0]);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 0]);
   assert.equal(stats().messages, before.messages);
   assert.equal(stats().inputTokens, before.inputTokens);
   assertOutcomeUi();
@@ -539,7 +539,7 @@ test('integración remota DPU: conserva captura de texto y clasifica un único t
   const response = await requestDpu(page);
   assert.equal(await response.text(), '<template>DPU</template>', 'no se altera el transporte DPU');
   await pause(260);
-  assert.deepEqual(outcomeDelta(before), [1, 0, 0, 0]);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 0]);
   assert.equal(stats().outputTokens - before.outputTokens, countGptTokens(answer));
   assertOutcomeUi();
 });
@@ -556,10 +556,10 @@ test('integración remota DPU: Stop y cierre posterior no crean otro resultado',
     await pause(40);
     page.stop();
     await pause();
-    assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+    assert.deepEqual(outcomeDelta(before), [1, 0, 0]);
     assertOutcomeUi();
   } finally { release(); await reading; await pause(260); }
-  assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+  assert.deepEqual(outcomeDelta(before), [1, 0, 0]);
 });
 
 test('integración remota DPU: sin respuesta verificable en DOM queda desconocido, no completo', async () => {
@@ -568,7 +568,7 @@ test('integración remota DPU: sin respuesta verificable en DOM queda desconocid
   const response = await requestDpu(page);
   await response.text();
   await pause(260);
-  assert.deepEqual(outcomeDelta(before), [0, 0, 0, 1]);
+  assert.deepEqual(outcomeDelta(before), [0, 0, 1]);
   assert.equal(stats().outputTokens, before.outputTokens, 'no inventa tokens si falta la respuesta');
   assertOutcomeUi();
 });
@@ -593,13 +593,13 @@ for (const attributes of [
       page.stop(true, attributes);
       page.stop(true, attributes);
       await pause();
-      assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0]);
+      assert.deepEqual(outcomeDelta(before), [1, 0, 0]);
       assertOutcomeUi();
       assert.equal(stats().outputTokens, before.outputTokens, 'el clic no modifica tokens');
     } finally { release(); await reading; await pause(50); }
-    assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0], 'el aborto no vuelve a sumar');
+    assert.deepEqual(outcomeDelta(before), [1, 0, 0], 'el aborto no vuelve a sumar');
     await replayCdp(view, fixture('aborted.sse'));
-    assert.deepEqual(outcomeDelta(before), [0, 1, 0, 0], 'CDP no vuelve a sumar');
+    assert.deepEqual(outcomeDelta(before), [1, 0, 0], 'CDP no vuelve a sumar');
     assertOutcomeUi();
   });
 }

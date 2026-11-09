@@ -1,6 +1,7 @@
 /** Clasificación del resultado; nunca infiere Stop de un AbortError genérico. */
 export const TURN_OUTCOMES = {
-  completed: 'turnsCompleted',
+  // Se conserva la señal de fin para deduplicar, sin contador asociado.
+  completed: null,
   cancelled: 'turnsCancelled',
   failed: 'turnsFailed',
   unknown: 'turnsPerformed',

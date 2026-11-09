@@ -250,7 +250,7 @@ test('escribir, enviar y recibir respuesta cuenta 1 mensaje, 1 respuesta y 1 tur
   const fin = await stats();
   assert.equal(fin.messages, antes.messages + 1, '1 mensaje del usuario');
   assert.equal(fin.responses, antes.responses + 1, '1 respuesta de la IA');
-  assert.equal(fin.turnsCompleted, antes.turnsCompleted + 1, '1 turno completo');
+  assert.equal(Object.hasOwn(fin, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 
   const log = await callIpc('nexo:log');
   const respuestaLog = log.find((item) => item.code === 'incoming-cdp');
@@ -314,7 +314,7 @@ test('un envío salido de un worker (sin pestaña identificada) igual cierra su 
   const fin = await stats();
   assert.equal(fin.messages, antes.messages + 1, 'el mensaje se cuenta');
   assert.equal(fin.responses, antes.responses + 1, 'la respuesta se cuenta');
-  assert.equal(fin.turnsCompleted, antes.turnsCompleted + 1, 'y el turno se cierra igual');
+  assert.equal(Object.hasOwn(fin, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 /* ------------------------------------------------------------------ */
@@ -351,7 +351,7 @@ test('una respuesta HTTP fallida no se cuenta como respuesta de GPT', async () =
   await settle(30);
   const fin = await stats();
   assert.equal(fin.responses, antes.responses, 'un 500 no cuenta respuesta');
-  assert.equal(fin.turnsCompleted, antes.turnsCompleted, 'un 500 no cierra el turno');
+  assert.equal(Object.hasOwn(fin, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('la telemetría POST no se cuenta como respuesta de GPT', async () => {
@@ -363,7 +363,7 @@ test('la telemetría POST no se cuenta como respuesta de GPT', async () => {
   await settle(10);
   const fin = await stats();
   assert.equal(fin.responses, antes.responses, 'telemetría no suma respuestas');
-  assert.equal(fin.turnsCompleted, antes.turnsCompleted, 'telemetría no cierra turnos');
+  assert.equal(Object.hasOwn(fin, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('CDP lee el texto y los tokens del stream unauth-mweb de ChatGPT', async () => {
@@ -408,7 +408,7 @@ test('CDP lee el texto y los tokens del stream unauth-mweb de ChatGPT', async ()
   const fin = await stats();
   assert.equal(fin.messages, antes.messages + 1, 'se conserva un único mensaje');
   assert.equal(fin.responses, antes.responses + 1, 'CDP cuenta la respuesta');
-  assert.equal(fin.turnsCompleted, antes.turnsCompleted + 1, 'CDP cierra el turno');
+  assert.equal(Object.hasOwn(fin, 'turnsCompleted'), false, 'el contador eliminado no se expone');
   assert.ok(fin.outputTokens > antes.outputTokens, 'se calculan tokens a partir del texto real');
 });
 
@@ -453,7 +453,7 @@ test('CDP conserva unauth-mweb/updates cuando Chromium lo clasifica como Other',
   const fin = await stats();
   assert.equal(fin.messages, antes.messages + 1, 'no crea otro mensaje de usuario');
   assert.equal(fin.responses, antes.responses + 1, 'cuenta la respuesta aunque Chromium informe Other');
-  assert.equal(fin.turnsCompleted, antes.turnsCompleted + 1, 'cierra el turno');
+  assert.equal(Object.hasOwn(fin, 'turnsCompleted'), false, 'el contador eliminado no se expone');
   assert.ok(fin.outputTokens > antes.outputTokens, 'cuenta tokens de la respuesta');
 });
 

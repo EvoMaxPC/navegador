@@ -30,7 +30,6 @@ const els = {
   stats: {
     messages: document.getElementById('statMessages'),
     responses: document.getElementById('statResponses'),
-    turnsCompleted: document.getElementById('statTurnsCompleted'),
     turnsCancelled: document.getElementById('statTurnsCancelled'),
     turnsFailed: document.getElementById('statTurnsFailed'),
     turnsPerformed: document.getElementById('statTurnsPerformed'),
@@ -748,7 +747,7 @@ async function refreshStats() {
     // actividad siguen siendo las métricas independientes del motor.
     els.stats.messages.textContent = num(stats.messages);
     els.stats.responses.textContent = num(stats.responses);
-    for (const key of ['turnsCompleted', 'turnsCancelled', 'turnsFailed', 'turnsPerformed']) {
+    for (const key of ['turnsCancelled', 'turnsFailed', 'turnsPerformed']) {
       els.stats[key].textContent = num(stats[key]);
     }
     els.stats.inTokens.textContent = num(stats.inputTokens);

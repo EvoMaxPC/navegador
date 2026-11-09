@@ -440,7 +440,7 @@ test('preparar un envío no cuenta ni un mensaje ni un turno por sí solo', asyn
   // llega su respuesta: preparar el texto no es ninguna de las dos cosas.
   const despues = await callIpc('nexo:stats');
   assert.equal(despues.messages, antes.messages, 'preparar no cuenta mensajes');
-  assert.equal(despues.turnsCompleted, antes.turnsCompleted, 'preparar no cuenta turnos');
+  assert.equal(Object.hasOwn(despues, 'turnsCompleted'), false, 'el contador eliminado no se expone');
 });
 
 test('un cierre de turno deja la conversación registrada', async () => {

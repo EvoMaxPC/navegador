@@ -1,14 +1,13 @@
-# Contadores de resultado de ChatGPT — NEXO 0.1.17
+# Contadores de resultado de ChatGPT — NEXO 0.1.18
 
 ## Implementación
 
 El panel conserva su estilo y sus métricas de mensajes, respuestas, tokens y
-actividad. Se reemplazó el antiguo total de turnos por cuatro resultados
+actividad. Se reemplazó el antiguo total de turnos por tres contadores de resultado
 exclusivos, todos inicializados en **0** al crear Engine:
 
 | Campo en `nexo:stats` | Etiqueta | Cuándo cuenta |
 | --- | --- | --- |
-| `turnsCompleted` | turnos completos | finalización normal de la respuesta |
 | `turnsCancelled` | turnos cancelados | Stop real del usuario o cancelación explícita del proveedor |
 | `turnsFailed` | turnos fallidos | error de generación o fallo de la petición de conversación |
 | `turnsPerformed` | turnos realizados | interrupción sin confirmar el resultado |
@@ -69,7 +68,7 @@ que dependían del antiguo total de turnos.
 
 ## Pruebas
 
-- **19 pruebas nuevas de Engine/clasificación:** cero inicial, cuatro resultados,
+- **20 pruebas nuevas de Engine/clasificación:** cero inicial, cuatro resultados,
   errores y abortos, exclusividad, repetición SSE/CDP, confirmación tardía,
   tokens intactos, múltiples pestañas, IDs alternativos y worker sin pestaña.
 - **16 pruebas adicionales de circuito:** bundle de inyección, preload real,
@@ -80,7 +79,7 @@ que dependían del antiguo total de turnos.
 - Pruebas existentes adaptadas a la semántica nueva: una red sin confirmación
   ya no se etiqueta como turno completo. Las verificaciones de tokens,
   mensajes, respuestas y demás funciones se conservan.
-- `npm run verify`: **527 pruebas, 526 aprobadas, 1 omitida, 0 fallos**.
+- `npm run verify`: **528 pruebas, 527 aprobadas, 1 omitida, 0 fallos**.
   La omitida requiere un ZIP externo de Electron para la cadena local.
 - Bundle: **45.2 kB**, **16.2 kB gzip**, 10 módulos; sin nuevas dependencias ni
   relajación de límites de rendimiento.
@@ -126,3 +125,16 @@ cancelación confirmada después de una llegada de red sin resultado definitivo:
 se mueve el mismo turno a cancelados y no se contabiliza dos veces.
 
 No se cambió la tokenización, la captura de texto ni la lógica de suma de tokens.
+
+
+## Ajuste 0.1.18: eliminación de turnos completos
+
+Se eliminó el campo del constructor de Engine, de `nexo:stats`, del enlace de
+la shell y del HTML del panel. No queda una acumulación oculta ni se traslada su
+valor a otro contador. Permanecen **turnos cancelados, fallidos y realizados**.
+
+La finalización normal sigue existiendo como señal privada de captura y
+deduplicación, sin contador asociado. La respuesta y sus tokens se registran
+igual que antes. Las pruebas comprueban que el contador retirado no se expone,
+que no se creen propiedades `null`/`undefined` por sumar a una métrica ausente y
+que repetir un cierre no duplique respuestas ni tokens.

@@ -69,7 +69,6 @@ export class Engine {
     this.counters = {
       messages: 0,
       responses: 0,
-      turnsCompleted: 0,
       turnsCancelled: 0,
       turnsFailed: 0,
       turnsPerformed: 0,
@@ -336,8 +335,10 @@ export class Engine {
     const previous = this.seenResponses.get(key);
     const outcome = turnOutcome(payload);
     if (previous && (previous.outcome !== 'unknown' || outcome === 'unknown')) return { duplicate: true, outcome: previous.outcome };
-    if (previous) this.counters[TURN_OUTCOMES[previous.outcome]] -= 1;
-    this.counters[TURN_OUTCOMES[outcome]] += 1;
+    const previousCounter = previous && TURN_OUTCOMES[previous.outcome];
+    const counter = TURN_OUTCOMES[outcome];
+    if (previousCounter) this.counters[previousCounter] -= 1;
+    if (counter) this.counters[counter] += 1;
     this.seenResponses.set(key, { at: Date.now(), outcome });
     this.onEvent({ kind: 'system', code: 'turn-result', severity: 'info',
       title: 'Resultado del turno actualizado', meta: { messageId: canonical, outcome }, ts: Date.now() });
@@ -962,7 +963,7 @@ export class Engine {
   /**
    * Contadores para la interfaz.
    *
-   * Los cuatro resultados clasifican respuestas de ChatGPT, no
+   * Los resultados clasifican respuestas de ChatGPT, no
    * envíos preparados: `guardTurns` conserva la cuenta interna de los guardianes
    * para quien la necesite, pero no se muestra como «turnos».
    */
@@ -975,10 +976,9 @@ export class Engine {
     const c = this.counters;
     return {
       tabs: this.guards.size,
-      // Métricas de sesión; los cuatro resultados de turno son exclusivos.
+      // Métricas de sesión; los resultados de turno son exclusivos.
       messages: c.messages,
       responses: c.responses,
-      turnsCompleted: c.turnsCompleted,
       turnsCancelled: c.turnsCancelled,
       turnsFailed: c.turnsFailed,
       turnsPerformed: c.turnsPerformed,
