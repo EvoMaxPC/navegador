@@ -342,6 +342,49 @@ test('la telemetría POST no se cuenta como respuesta de GPT', async () => {
   assert.equal(fin.turns, antes.turns, 'telemetría no cierra turnos');
 });
 
+test('ChatGPT unauth-mweb conversation/updates cuenta la respuesta sin contar otro mensaje', async () => {
+  const view = await abrir('https://chatgpt.com/c/red-unauth-mweb');
+  const antes = await stats();
+
+  // El envío ya fue reconocido por la capa. El endpoint /updates transporta
+  // la respuesta del modelo, no un segundo mensaje del usuario.
+  journal.ipcListeners.get('nexo:event')(
+    { sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' } },
+    {
+      type: 'outgoing',
+      payload: {
+        messageId: 'm-unauth-mweb',
+        source: 'request',
+        host: 'chatgpt.com',
+        site: 'chatgpt',
+        chars: 4,
+        tokens: 1,
+        promptHash: 'prompt-unauth-mweb',
+        textFound: true,
+      },
+    },
+  );
+
+  peticionRed({
+    url: 'https://chatgpt.com/unauth-mweb/conversation/updates',
+    method: 'POST',
+    webContentsId: view.id,
+    requestId: 'req-unauth-mweb-updates',
+  });
+  respuestaRed({
+    url: 'https://chatgpt.com/unauth-mweb/conversation/updates',
+    method: 'POST',
+    webContentsId: view.id,
+    requestId: 'req-unauth-mweb-updates',
+  });
+  await settle(40);
+
+  const fin = await stats();
+  assert.equal(fin.messages, antes.messages + 1, 'el endpoint de respuesta no inventa otro mensaje');
+  assert.equal(fin.responses, antes.responses + 1, 'la respuesta del endpoint actual se cuenta');
+  assert.equal(fin.turns, antes.turns + 1, 'el turno se cierra');
+});
+
 /* ------------------------------------------------------------------ */
 /* el estado de la captura, tal como lo ve el panel                    */
 /* ------------------------------------------------------------------ */
