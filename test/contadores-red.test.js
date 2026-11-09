@@ -275,3 +275,85 @@ test('un envío salido de un worker (sin pestaña identificada) igual cierra su 
   assert.equal(fin.responses, antes.responses + 1, 'la respuesta se cuenta');
   assert.equal(fin.turns, antes.turns + 1, 'y el turno se cierra igual');
 });
+
+/* ------------------------------------------------------------------ */
+/* el estado de la captura, tal como lo ve el panel                    */
+/* ------------------------------------------------------------------ */
+
+test('las estadísticas dicen qué vio el vigilante de red', async () => {
+  await abrir('https://chatgpt.com/c/red-estado');
+  const antes = await stats();
+
+  assert.equal(antes.capture.watcher, true, 'el vigilante quedó registrado en la partición');
+  assert.ok(antes.capture.requests > 0, 'la navegación ya pasó por el vigilante');
+
+  peticionRed({
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    cuerpo: cuerpoChatGPT('estado de la captura'),
+  });
+  await settle(20);
+
+  const despues = await stats();
+  assert.equal(
+    despues.capture.chatRequests,
+    antes.capture.chatRequests + 1,
+    'la petición de conversación se ve aunque el mensaje se deduplique después',
+  );
+  assert.ok(despues.capture.lastRequestAt > 0, 'queda la marca de la última petición vista');
+  // La línea del panel se arma con estos dos bloques y ninguno inventa nada.
+  assert.ok(despues.cdpObserver, 'el estado del depurador viaja en la misma respuesta');
+  assert.equal(typeof despues.cdpObserver.tabs, 'number', 'con sus pestañas enganchadas');
+});
+
+test('un POST al proveedor fuera de la ruta conocida queda anotado con su ruta real', async () => {
+  await abrir('https://chatgpt.com/c/red-ruta');
+  const antes = await stats();
+  const logAntes = (await callIpc('nexo:log')).length;
+
+  // Si ChatGPT mueve el endpoint, el mensaje no se cuenta: sin este aviso el
+  // panel sólo mostraría ceros sin decir qué petición se quedó fuera.
+  peticionRed({ url: 'https://chatgpt.com/backend-api/f/conversation/prepare', cuerpo: cuerpoChatGPT('hola') });
+  await settle(20);
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages, 'preparar no es un mensaje');
+  assert.equal(despues.capture.posts, antes.capture.posts + 1, 'el POST se vio');
+  assert.equal(despues.capture.chatRequests, antes.capture.chatRequests, 'pero no es de conversación');
+
+  const log = await callIpc('nexo:log');
+  assert.equal(log.length, logAntes + 1, 'el aviso entra en el registro');
+  const aviso = log.find((e) => e.code === 'chat-unmatched');
+  assert.ok(aviso, 'con su código propio');
+  assert.match(aviso.detail, /conversation\/prepare/, 'con la ruta exacta que llegó');
+});
+
+test('con el sitio apagado en Ajustes, el panel dice que llegó y no se contó', async () => {
+  await abrir('https://chatgpt.com/c/red-apagado');
+  const ajustes = await callIpc('nexo:settings:get');
+  await callIpc('nexo:settings:set', {
+    ...ajustes,
+    sites: { ...(ajustes.sites || {}), chatgpt: { enabled: false } },
+  });
+
+  try {
+    const antes = await stats();
+    peticionRed({
+      url: 'https://chatgpt.com/backend-api/f/conversation',
+      cuerpo: cuerpoChatGPT('con el sitio apagado'),
+    });
+    await settle(20);
+
+    const despues = await stats();
+    assert.equal(despues.messages, antes.messages, 'apagado no cuenta mensajes');
+    assert.equal(despues.capture.chatRequests, antes.capture.chatRequests + 1, 'la petición se vio igual');
+    assert.equal(despues.capture.counted, antes.capture.counted, 'pero no se contó');
+    assert.equal(despues.capture.blocked, antes.capture.blocked + 1, 'y queda dicho que la frenó el ajuste');
+
+    const log = await callIpc('nexo:log');
+    const aviso = log.find((e) => e.code === 'chat-disabled');
+    assert.ok(aviso, 'con un aviso en el registro, no un cero mudo');
+    assert.match(aviso.title, /chatgpt\.com/);
+  } finally {
+    await callIpc('nexo:settings:reset');
+  }
+});

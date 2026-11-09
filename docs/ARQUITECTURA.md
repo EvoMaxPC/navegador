@@ -259,6 +259,38 @@ Reglas que sostienen la cuenta:
 - **Los tokens son una estimación** (`estimateTokens`: caracteres y alfabeto), no
   el conteo del tokenizador del proveedor. La interfaz lo dice con un asterisco.
 
+### Cuando los contadores no suben: la línea de captura
+
+Un cero puede venir de cuatro sitios distintos y desde el panel se veían igual.
+Por eso el panel de actividad muestra, debajo de los ocho contadores, una línea
+de estado que **no cuenta la conversación**: informa del arnés de captura.
+
+```
+Captura — red activa · 128 peticiones · 4 POST · 3 de conversación · 3 contadas
+```
+
+- `red activa` / `red sin registrar`: si el vigilante de red quedó enganchado en
+  la partición de las pestañas. Si está registrado pero las peticiones no suben,
+  el tráfico no pasa por ahí.
+- `N POST`: peticiones POST vistas hacia un proveedor de IA.
+- `N de conversación`: las que el perfil reconoce como envío de un mensaje.
+- `N contadas`: las que además sumaron el mensaje.
+- `CDP en N pestañas`: el depurador está adjunto a las pestañas del sitio.
+
+Dos avisos del registro completan el diagnóstico, y los dos son hechos, no
+sospechas:
+
+- `chat-unmatched`: llegó un POST al proveedor que no coincide con la ruta de
+  conversación del perfil. Lleva la ruta real, así el patrón se corrige con el
+  dato y no a ciegas.
+- `chat-disabled`: la petición de conversación llegó, pero el sitio está apagado
+  en Ajustes; no se cuenta ni se media.
+
+El gesto de enviar tampoco depende de un selector exacto: si el marcado del sitio
+cambia y no aparece el cuadro que declara el perfil, se usa el que tiene el foco
+y, en último término, el primer cuadro editable de la página. Un formulario que
+se envía (`submit`) cuenta como gesto, igual que el botón.
+
 ---
 
 ## Costes

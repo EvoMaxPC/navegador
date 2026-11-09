@@ -209,6 +209,20 @@ function anunciarEnvio(datos = {}) {
 }
 
 /** Texto que hay ahora mismo en el cuadro de diálogo. */
+/** Texto de un cuadro, sea `textarea`, `input` o `contenteditable`. */
+function textoDe(el) {
+  if (!el) return '';
+  if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') return String(el.value || '');
+  return String(el.innerText || el.textContent || '');
+}
+
+/**
+ * Texto que hay ahora mismo en el cuadro de diálogo.
+ *
+ * Primero los selectores del perfil. Si el sitio cambió el marcado y no hay
+ * ninguno, se usa lo que tiene el foco y, por último, el primer cuadro editable
+ * de la página: el mensaje se tiene que contar aunque el selector envejezca.
+ */
 function textoDelCuadro() {
   for (const selector of site.composer || []) {
     let el = null;
@@ -217,9 +231,26 @@ function textoDelCuadro() {
     } catch {
       el = null;
     }
-    if (!el) continue;
-    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') return String(el.value || '');
-    return String(el.innerText || el.textContent || '');
+    if (el) return textoDe(el);
+  }
+
+  try {
+    const activo = document.activeElement;
+    const texto = textoDe(activo);
+    if (texto.trim()) return texto;
+  } catch {
+    /* sin foco accesible */
+  }
+
+  for (const selector of ['[contenteditable="true"]', 'textarea', 'form textarea']) {
+    let el = null;
+    try {
+      el = document.querySelector(selector);
+    } catch {
+      el = null;
+    }
+    const texto = textoDe(el);
+    if (texto.trim()) return texto;
   }
   return '';
 }
@@ -546,7 +577,7 @@ const SEND = site.sendButton || [];
  */
 function esBotonDeEnvio(nodo) {
   if (!nodo || typeof nodo.closest !== 'function') return false;
-  const boton = nodo.closest('button, [role="button"]');
+  const boton = nodo.closest('button, [role="button"], input[type="submit"]');
   if (!boton || boton.disabled) return false;
   return SEND.some((selector) => {
     try {
@@ -573,6 +604,15 @@ try {
     'click',
     (event) => {
       if (esBotonDeEnvio(event.target)) gestoDeEnvio('boton');
+    },
+    true,
+  );
+
+  // Algunos sitios envían con un formulario: `submit` es el gesto, no el click.
+  document.addEventListener(
+    'submit',
+    () => {
+      gestoDeEnvio('formulario');
     },
     true,
   );

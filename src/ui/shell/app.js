@@ -36,6 +36,7 @@ const els = {
     interventions: document.getElementById('statInterventions'),
     loopsSeen: document.getElementById('statLoopsSeen'),
     loops: document.getElementById('statLoops'),
+    capture: document.getElementById('captureLine'),
   },
   sidebar: document.getElementById('sidebar'),
   suggestions: document.getElementById('suggestions'),
@@ -716,6 +717,29 @@ function num(value) {
   return Number(value || 0).toLocaleString('es-AR');
 }
 
+/**
+ * Una línea con lo que Nexo ve por sí mismo: si el vigilante de red está
+ * registrado, cuántas peticiones pasaron y si el depurador está enganchado.
+ * No son contadores de la conversación; son el estado del arnés de captura,
+ * que es lo primero que hay que mirar cuando los contadores no suben.
+ */
+function captureLine(stats = {}) {
+  const cap = stats.capture || {};
+  const partes = [];
+  if (cap.watcher) {
+    partes.push(
+      `red activa · ${num(cap.requests)} peticiones · ${num(cap.posts)} POST · ` +
+        `${num(cap.chatRequests)} de conversación · ${num(cap.counted)} contadas`,
+    );
+    if (cap.blocked) partes.push(`${num(cap.blocked)} con el sitio apagado`);
+  } else {
+    partes.push('red sin registrar');
+  }
+  const tabs = Number(stats.cdpObserver?.tabs || 0);
+  partes.push(tabs ? `CDP en ${tabs} ${tabs === 1 ? 'pestaña' : 'pestañas'}` : 'CDP sin pestañas');
+  return `Captura — ${partes.join(' · ')}`;
+}
+
 async function refreshStats() {
   try {
     const stats = await nexo.getStats();
@@ -730,6 +754,7 @@ async function refreshStats() {
     els.stats.interventions.textContent = num(stats.interventions);
     els.stats.loopsSeen.textContent = num(stats.loopsSeen ?? stats.loops);
     els.stats.loops.textContent = num(stats.loopsCut);
+    if (els.stats.capture) els.stats.capture.textContent = captureLine(stats);
   } catch {
     /* la shell sigue funcionando sin estadísticas */
   }

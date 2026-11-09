@@ -216,6 +216,12 @@ button { font: inherit; color: inherit; }
 .sites-list .hosts { font-size: 10.5px; color: var(--muted-2); }
 
 .note { font-size: 11.5px; color: var(--muted-2); line-height: 1.55; }
+/* Estado del arnés de captura: se lee como diagnóstico, no como contador. */
+.note.capture {
+  margin: 2px 0 8px; padding: 6px 8px;
+  border: 1px dashed var(--line); border-radius: 8px;
+  font-family: var(--mono, ui-monospace, monospace); font-size: 11px;
+}
 .ghost {
   margin-top: 10px; width: 100%;
   background: transparent; border: 1px solid var(--line); border-radius: 8px;

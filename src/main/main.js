@@ -111,6 +111,21 @@ let engine = null;
  * disponible, el navegador funciona igual.
  */
 let cdp = null;
+/**
+ * Lo que Nexo vio por su cuenta, sin contar nada de la conversación: si el
+ * vigilante de red está registrado, cuántas peticiones pasaron y cuántas eran
+ * de conversación. Sirve para saber si el fallo está en la captura o después.
+ */
+const capture = {
+  watcher: false,
+  since: 0,
+  requests: 0,
+  posts: 0,
+  chatRequests: 0,
+  counted: 0,
+  blocked: 0,
+  lastRequestAt: 0,
+};
 let memory = null;
 let profile = null;
 /** Guardado diferido: navegar no debe escribir en disco en cada clic. */
@@ -544,6 +559,9 @@ function registerIpc() {
     ...engine.stats(),
     log: store.log.length,
     cdpObserver: cdp?.status() || null,
+    // Estado de la captura, para la línea de diagnóstico del panel. No son
+    // contadores de la conversación: son hechos del propio vigilante.
+    capture: { ...capture },
   }));
 
   // Estado de la observación CDP. La interfaz todavía no lo pide; existe para
@@ -925,15 +943,47 @@ function uploadText(uploadData) {
  * inventa nada y queda el rastro en el registro para saber por qué.
  */
 function noteUserMessageFromNetwork(details = {}) {
-  if (!engine) return false;
+  // `seen` es «era una petición de conversación», `counted` es «además sumó el
+  // mensaje». Van separados para que el panel distinga «no llega nada» de
+  // «llega y algo lo frena» — que es lo que hasta ahora no dejaba rastro.
+  const no = { seen: false, counted: false };
+  if (!engine) return no;
   const url = String(details.url || '');
   const host = hostOf(url);
-  if (!isAiHost(host)) return false;
+  if (!isAiHost(host)) return no;
   const method = String(details.method || 'GET').toUpperCase();
-  if (method !== 'POST') return false;
+  if (method !== 'POST') return no;
   const site = detectSite(host);
-  if (!isMediable(site, url, method)) return false;
-  if (!engine.isEnabledFor(host)) return false;
+  capture.posts += 1;
+  if (!isMediable(site, url, method)) {
+    // Un POST al proveedor que no es la ruta que conocemos: si el sitio cambió
+    // el endpoint, el mensaje no se cuenta y no hay rastro de por qué. Se
+    // anota la ruta real una vez cada 30 s por endpoint, sin contarla.
+    noteDiagnostic({
+      code: 'chat-unmatched',
+      key: `chat-unmatched|${host}|${shortPath(url)}`,
+      severity: 'info',
+      title: `${host}: petición POST fuera de la ruta conocida`,
+      detail: `POST ${shortPath(url)} — no coincide con el patrón de conversación del perfil ${site.id}.`,
+      meta: { host, site: site.id, url: shortPath(url), method },
+    });
+    return no;
+  }
+
+  if (!engine.isEnabledFor(host)) {
+    // El sitio está apagado en Ajustes: la petición de conversación se vio, pero
+    // no se cuenta nada. Antes esto era indistinguible de «no llega nada».
+    capture.blocked += 1;
+    noteDiagnostic({
+      code: 'chat-disabled',
+      key: `chat-disabled|${host}`,
+      severity: 'warn',
+      title: `${host} está apagado en Ajustes`,
+      detail: 'La petición de conversación llegó, pero el sitio está desactivado: no se cuenta ni se media.',
+      meta: { host, site: site.id, url: shortPath(url) },
+    });
+    return { seen: true, counted: false };
+  }
 
   const webContentsId = Number(details.webContentsId);
   const tabId = Number.isFinite(webContentsId) ? webContentsId : -1;
@@ -948,7 +998,10 @@ function noteUserMessageFromNetwork(details = {}) {
   }
 
   // Regenerar o continuar no es un mensaje nuevo del usuario.
-  if (typeof json?.action === 'string' && json.action && json.action !== 'next') return false;
+  // Regenerar es una petición de conversación, pero no un mensaje nuevo.
+  if (typeof json?.action === 'string' && json.action && json.action !== 'next') {
+    return { seen: true, counted: false };
+  }
 
   const located = json ? locateUserText(json, site) : null;
   const text = located && typeof located.value === 'string' ? located.value.trim() : '';
@@ -982,7 +1035,7 @@ function noteUserMessageFromNetwork(details = {}) {
     promptHash: text ? fingerprint(text) : '',
     textFound: Boolean(text),
   });
-  if (counted?.duplicate) return true;
+  if (counted?.duplicate) return { seen: true, counted: false };
 
   const entry = {
     kind: 'sending',
@@ -1006,7 +1059,7 @@ function noteUserMessageFromNetwork(details = {}) {
   if (store) store.pushLog(entry);
   broadcast('nexo:event', { type: 'intervention', payload: entry });
   broadcast('nexo:stats-changed', engine.stats());
-  return true;
+  return { seen: true, counted: true };
 }
 
 function watchProviderNetwork(s) {
@@ -1022,9 +1075,16 @@ function watchProviderNetwork(s) {
   // El cuerpo de la petición de conversación trae el mensaje del usuario. Se
   // lee acá, en el proceso principal, antes de que salga: es el camino que no
   // depende de la capa de la página ni del depurador.
+  capture.watcher = true;
+  capture.since = Date.now();
+
   s.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details = {}, callback) => {
+    capture.requests += 1;
+    capture.lastRequestAt = Date.now();
     try {
-      noteUserMessageFromNetwork(details);
+      const note = noteUserMessageFromNetwork(details);
+      if (note?.seen) capture.chatRequests += 1;
+      if (note?.counted) capture.counted += 1;
     } catch (error) {
       console.log('[red] al leer el envío:', error?.message || error);
     }

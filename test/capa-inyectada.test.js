@@ -46,7 +46,8 @@ function crearMundo(options = {}) {
   const cuadro = options.cuadro || null;
   const boton = { disabled: false, matches: (sel) => /send-button|Send|Enviar/i.test(String(sel)), closest: () => boton };
   const objetivo = {
-    closest: (sel) => (String(sel) === 'button, [role="button"]' ? boton : cuadro ? cuadro.closest(sel) : null),
+    // Cualquier selector de botón de envío que pregunte la capa da con el botón.
+    closest: (sel) => (/button/i.test(String(sel)) ? boton : cuadro ? cuadro.closest(sel) : null),
   };
   const manejadores = { click: [], keydown: [] };
 
@@ -83,7 +84,13 @@ function crearMundo(options = {}) {
     console,
     navigator: { userAgent: 'Chrome' },
     document: {
-      querySelector: (sel) => (cuadro && /prompt|textarea|contenteditable/i.test(String(sel)) ? cuadro : null),
+      // `selectoresDesactualizados` simula que el sitio cambió el marcado: los
+      // selectores del perfil ya no dan con el cuadro y sólo queda el genérico.
+      querySelector: (sel) => {
+        if (!cuadro) return null;
+        if (options.selectoresDesactualizados) return String(sel) === '[contenteditable="true"]' ? cuadro : null;
+        return /prompt|textarea|contenteditable/i.test(String(sel)) ? cuadro : null;
+      },
       querySelectorAll: () => [],
       addEventListener: (tipo, fn) => {
         if (!manejadores[tipo]) manejadores[tipo] = [];
@@ -102,8 +109,9 @@ function crearMundo(options = {}) {
   const pulsarEnviar = () => pulsar('click', { target: objetivo });
   const pulsarEnter = () =>
     pulsar('keydown', { key: 'Enter', shiftKey: false, isComposing: false, target: objetivo });
+  const pulsarFormulario = () => pulsar('submit', { target: objetivo });
 
-  return { window, salientes, peticiones, pulsarEnviar, pulsarEnter };
+  return { window, salientes, peticiones, pulsarEnviar, pulsarEnter, pulsarFormulario };
 }
 
 /** Cuadro de diálogo falso con el texto que el usuario escribió. */
@@ -310,4 +318,29 @@ test('regenerar no es un mensaje del usuario', { skip: !fuente && 'falta build/i
 
   assert.equal(eventos(mundo, 'outgoing').length, 0, 'no hay mensaje nuevo');
   assert.equal(eventos(mundo, 'stream-end').length, 1, 'pero la respuesta nueva sí se captura');
+});
+
+test('si los selectores del cuadro envejecen, el gesto cuenta el mensaje igual', { skip: !fuente && 'falta build/inject.js' }, async () => {
+  // ChatGPT cambia el marcado seguido: `#prompt-textarea` deja de existir. El
+  // mensaje se tiene que contar por el cuadro editable que haya.
+  const mundo = crearMundo({ cuadro: cuadroCon('¿seguís ahí?'), selectoresDesactualizados: true });
+
+  mundo.pulsarEnviar();
+  await new Promise((r) => setTimeout(r, 2700));
+
+  const envios = eventos(mundo, 'outgoing');
+  assert.equal(envios.length, 1, 'un envío, con el cuadro que haya');
+  assert.equal(envios[0].payload.source, 'composer');
+  assert.equal(envios[0].payload.chars, '¿seguís ahí?'.length, 'y con el texto real, no inventado');
+});
+
+test('un formulario que se envía también es el gesto de enviar', { skip: !fuente && 'falta build/inject.js' }, async () => {
+  const mundo = crearMundo({ cuadro: cuadroCon('por formulario') });
+
+  mundo.pulsarFormulario();
+  await new Promise((r) => setTimeout(r, 2700));
+
+  const envios = eventos(mundo, 'outgoing');
+  assert.equal(envios.length, 1, 'el submit cuenta el mensaje');
+  assert.equal(envios[0].payload.source, 'composer');
 });
