@@ -368,7 +368,7 @@ export class Engine {
     const current = this.streamProgress.get(webContentsId) || {
       messageId, text: '', tokens: 0, model: payload.model || '', host: payload.host || '',
     };
-    current.text += fragment;
+    current.text = payload.cumulative === true ? fragment : current.text + fragment;
     current.messageId ||= messageId;
     current.model ||= payload.model || '';
     current.host ||= payload.host || '';
