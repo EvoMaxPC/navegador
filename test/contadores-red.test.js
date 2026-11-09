@@ -275,3 +275,58 @@ test('un envío salido de un worker (sin pestaña identificada) igual cierra su 
   assert.equal(fin.responses, antes.responses + 1, 'la respuesta se cuenta');
   assert.equal(fin.turns, antes.turns + 1, 'y el turno se cierra igual');
 });
+
+test('un envío detectado por la capa no bloquea a CDP si la capa no captura la respuesta', async () => {
+  const view = await abrir('https://chatgpt.com/c-red-envio-sin-respuesta');
+  const antes = await stats();
+
+  // La capa anuncia el envío: esto no prueba que vaya a capturar el stream.
+  journal.ipcListeners.get('nexo:event')(
+    { sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' } },
+    {
+      type: 'outgoing',
+      payload: {
+        messageId: 'layer-send-sin-respuesta',
+        source: 'request',
+        host: 'chatgpt.com',
+        site: 'chatgpt',
+        chars: 4,
+        tokens: 1,
+        textFound: true,
+      },
+    },
+  );
+  await settle(10);
+
+  const cuerpo = cuerpoChatGPT('hola');
+  view.debugger.emitEvent('Network.requestWillBeSent', {
+    requestId: 'req-layer-no-capture',
+    type: 'XHR',
+    request: {
+      url: 'https://chatgpt.com/backend-api/f/conversation',
+      method: 'POST',
+      postData: cuerpo,
+    },
+  });
+  view.debugger.emitEvent('Network.responseReceived', {
+    requestId: 'req-layer-no-capture',
+    type: 'XHR',
+    response: {
+      url: 'https://chatgpt.com/backend-api/f/conversation',
+      status: 200,
+      mimeType: 'text/event-stream',
+    },
+  });
+  view.debugger.bodies.set(
+    'req-layer-no-capture',
+    `data: ${JSON.stringify({ message: { author: { role: 'assistant' }, content: { parts: ['Respuesta capturada por CDP.'] } } })}\\n\\n`,
+  );
+  view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-layer-no-capture' });
+  await settle(80);
+
+  const fin = await stats();
+  assert.equal(fin.messages, antes.messages + 1, 'el envío se cuenta una sola vez');
+  assert.equal(fin.responses, antes.responses + 1, 'CDP captura la respuesta aunque la capa sólo haya enviado');
+  assert.equal(fin.turns, antes.turns + 1, 'el intercambio queda completo');
+});
+
