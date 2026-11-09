@@ -113,7 +113,12 @@ test('la conversación real «hola» cuenta 1 mensaje, 1 respuesta y 1 turno', a
   assert.equal(fin.responses, antes.responses + 1, 'una respuesta, no cuatro');
   assert.equal(fin.turns, antes.turns + 1, 'un turno completo');
   assert.equal(fin.outputTokens, antes.outputTokens + 24, 'los tokens de la respuesta visible');
-  assert.equal(fin.interventions, antes.interventions, 'Nexo no intervino');
+  assert.equal(
+    fin.interventions,
+    antes.interventions + 2,
+    'actividad: el envío y la respuesta suman una cada uno',
+  );
+  assert.equal(fin.mediatedInterventions, antes.mediatedInterventions, 'Nexo no intervino');
 });
 
 test('el mensaje contado por la capa y por CDP es uno solo', async () => {

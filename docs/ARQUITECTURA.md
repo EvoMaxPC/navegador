@@ -186,7 +186,8 @@ Ocho métricas independientes, cada una con su hecho, expuestas por
 | `turns` | turnos completos | par mensaje↔respuesta, asociado por `messageId` |
 | `inputTokens` | tokens del mensaje | `estimateTokens` sobre el texto localizado |
 | `outputTokens` | tokens de la respuesta | `estimateTokens` sobre el texto entregado |
-| `interventions` | intervenciones reales | `prepare()` sólo cuando el texto cambió, más los cortes |
+| `interventions` | actividad de la conversación | +1 al contar un mensaje y +1 al contar una respuesta |
+| `mediatedInterventions` | intervenciones del motor | `prepare()` sólo cuando el texto cambió, más los cortes |
 | `loopsSeen` | bucles observados | centinelas de cada guardián + observación CDP |
 | `loopsCut` | bucles cortados | cierre de stream con `stopped: true` |
 

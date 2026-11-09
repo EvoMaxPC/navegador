@@ -1319,6 +1319,18 @@ app.whenReady().then(async () => {
   registerProtocol();
   registerIpc();
   configureSession();
+  // Una línea con la versión que corre y qué captura quedó armada. Sin esto,
+  // un informe de «no cuenta nada» no distingue una falla de una build vieja.
+  noteDiagnostic({
+    code: 'app-version',
+    key: `app-version|${app.getVersion()}`,
+    severity: 'info',
+    title: `Nexo ${app.getVersion()} — captura armada`,
+    detail: `Red: ${process.env.NEXO_NETWATCH === '0' ? 'apagada' : 'activa'} · CDP: ${
+      process.env.NEXO_CDP === '0' ? 'apagado' : 'activo'
+    } · contadores en la sesión.`,
+    meta: { version: app.getVersion(), netwatch: process.env.NEXO_NETWATCH !== '0', cdp: process.env.NEXO_CDP !== '0' },
+  });
   buildMenu({ send: (channel, payload) => broadcast(channel, payload) });
   createWindow();
   mark('ventana');

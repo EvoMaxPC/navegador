@@ -1,6 +1,6 @@
 {
   "name": "nexo-browser",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "Nexo — navegador basado en Chromium con una capa de mediación que interviene los mensajes antes de enviarlos y las respuestas de la IA antes de mostrarlas.",
   "type": "module",

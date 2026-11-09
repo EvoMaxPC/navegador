@@ -351,3 +351,59 @@ test('10. cambiar de conversación o recargar no pierde ni duplica lo contado', 
   assert.equal(despues.responses, antes.responses + 2, 'las respuestas también');
   assert.equal(despues.turns, antes.turns + 2, 'y los turnos');
 });
+
+/* ------------------------------------------------------------------ */
+/* 11-12. lo que el panel marca en la captura de referencia            */
+/* ------------------------------------------------------------------ */
+
+test('11. al enviar suben mensajes, intervenciones y tokens de entrada', async () => {
+  const view = await abrir('https://chatgpt.com/c/c11');
+  const antes = await stats();
+
+  enviar('adssaf', { webContentsId: view.id });
+  await settle(20);
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages + 1, '+1 mensajes del usuario');
+  assert.equal(despues.interventions, antes.interventions + 1, '+1 intervenciones');
+  assert.ok(despues.inputTokens > antes.inputTokens, 'y suman los tokens de entrada');
+  assert.equal(despues.responses, antes.responses, 'la respuesta todavía no llegó');
+  assert.equal(despues.outputTokens, antes.outputTokens, 'ni hay tokens de salida');
+});
+
+test('12. al responder suben respuestas, intervenciones y tokens de salida', async () => {
+  const view = await abrir('https://chatgpt.com/c/c12');
+  const antes = await stats();
+  const texto = '¿Podrías aclararme qué necesitas? 😊';
+
+  enviar('adssaf', { webContentsId: view.id });
+  await settle(20);
+  const trasEnviar = await stats();
+  await respuestaPorCDP(view, { requestId: 'req-c12', texto });
+  const despues = await stats();
+
+  assert.equal(despues.responses, antes.responses + 1, '+1 respuestas de la IA');
+  assert.equal(
+    despues.interventions,
+    trasEnviar.interventions + 1,
+    '+1 interventiones por la respuesta (además de la del envío)',
+  );
+  assert.ok(despues.outputTokens > trasEnviar.outputTokens, 'y suman los tokens de salida');
+  assert.equal(despues.turns, antes.turns + 1, 'el turno queda cerrado');
+});
+
+test('13. tres intercambios suman seis intervenciones', async () => {
+  const view = await abrir('https://chatgpt.com/c/c13');
+  const antes = await stats();
+
+  for (let i = 1; i <= 3; i += 1) {
+    enviar(`pregunta ${i}`, { webContentsId: view.id });
+    await settle(20);
+    await respuestaPorCDP(view, { requestId: `req-c13-${i}`, texto: `Respuesta ${i}.` });
+  }
+
+  const despues = await stats();
+  assert.equal(despues.messages, antes.messages + 3, 'tres mensajes');
+  assert.equal(despues.responses, antes.responses + 3, 'tres respuestas');
+  assert.equal(despues.interventions, antes.interventions + 6, 'seis intervenciones');
+});

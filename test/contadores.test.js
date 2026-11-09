@@ -82,13 +82,20 @@ const stats = () => callIpc('nexo:stats');
 /* 1 y 2. mensajes                                                      */
 /* ------------------------------------------------------------------ */
 
-test('1. un mensaje sin intervención cuenta una sola vez', async () => {
+test('1. un mensaje sin mediación cuenta una sola vez y suma actividad', async () => {
   const antes = await stats();
   enviar(201, { messageId: 'a1', mediated: false });
   const despues = await stats();
 
   assert.equal(despues.messages, antes.messages + 1, 'el mensaje se cuenta');
-  assert.equal(despues.interventions, antes.interventions, 'sin mediación no hay intervención');
+  // «intervenciones» en el panel es actividad de la conversación: cada envío y
+  // cada respuesta suman una. Lo que hizo el mediador va en su propio contador.
+  assert.equal(despues.interventions, antes.interventions + 1, 'el envío suma actividad');
+  assert.equal(
+    despues.mediatedInterventions,
+    antes.mediatedInterventions,
+    'sin mediación el motor no intervino',
+  );
   assert.equal(despues.responses, antes.responses, 'todavía no hay respuesta');
   assert.equal(despues.turns, antes.turns, 'un mensaje suelto no es un turno');
 });
@@ -114,7 +121,11 @@ test('2. un mensaje mediado cuenta como mensaje y como intervención', async () 
 
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 1, 'el mensaje se cuenta');
-  assert.ok(despues.interventions >= antes.interventions + 1, 'y la intervención también');
+  assert.equal(despues.interventions, antes.interventions + 1, 'y suma actividad una vez');
+  assert.ok(
+    despues.mediatedInterventions >= antes.mediatedInterventions + 1,
+    'y el mediador cuenta su intervención aparte',
+  );
 });
 
 /* ------------------------------------------------------------------ */

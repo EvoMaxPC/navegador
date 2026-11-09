@@ -70,7 +70,17 @@ export class Engine {
       turns: 0,
       inputTokens: 0,
       outputTokens: 0,
+      /**
+       * Intervenciones del motor: cuántas veces Nexo cambió el texto que salía o
+       * cortó un bucle. Es la medida de lo que hizo el mediador, no del tráfico.
+       */
       interventions: 0,
+      /**
+       * Actividad de la conversación: +1 por cada mensaje contado y +1 por cada
+       * respuesta contada. Es el número que muestra el panel como
+       * «intervenciones»: dos intercambios completos suman cuatro.
+       */
+      activity: 0,
       loopsSeen: 0,
       loopsCut: 0,
     };
@@ -245,6 +255,7 @@ export class Engine {
     const tokens = Number.isFinite(Number(payload.tokens)) ? Math.max(0, Number(payload.tokens)) : estimateTokens(' ');
     this.counters.messages += 1;
     this.counters.inputTokens += tokens;
+    this.counters.activity += 1;
 
     // Queda esperando su respuesta para poder cerrar el turno.
     this.awaiting.set(webContentsId, {
@@ -290,6 +301,7 @@ export class Engine {
     this.#prune(this.seenResponses, now);
 
     this.counters.responses += 1;
+    this.counters.activity += 1;
     const tokens = Number.isFinite(Number(payload.tokens)) ? Math.max(0, Number(payload.tokens)) : merge.tokens;
     this.counters.outputTokens += tokens;
     if (payload.stopped) this.counters.loopsCut += 1;
@@ -583,6 +595,7 @@ export class Engine {
       return { ok: true, duplicate: true, merged: true };
     }
     this.counters.responses += 1;
+    this.counters.activity += 1;
     this.counters.outputTokens += merge.tokens;
 
     // El turno se cierra con **su** mensaje. Si la captura trae identificador, se
@@ -726,7 +739,10 @@ export class Engine {
       turns: c.turns,
       inputTokens: c.inputTokens,
       outputTokens: c.outputTokens,
-      interventions: c.interventions,
+      // El panel muestra la actividad de la conversación: +1 al enviar y +1 al
+      // recibir. Lo que hizo el mediador va aparte, para no mezclar dos cosas.
+      interventions: c.activity,
+      mediatedInterventions: c.interventions,
       loopsSeen: observed,
       loopsCut: c.loopsCut,
       // Compatibilidad con lo anterior.
