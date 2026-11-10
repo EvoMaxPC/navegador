@@ -118,7 +118,7 @@ export function readChatGptConversation(document, { literal = false } = {}) {
       node.closest?.('[data-message-id]')?.getAttribute?.('data-message-id') ||
       node.closest?.('[data-turn-id]')?.getAttribute?.('data-turn-id') ||
       node.closest?.('article[data-testid]')?.getAttribute?.('data-testid');
-    const signature = `${role}:${messageHash(raw)}`;
+    const signature = `${role}:${messageHash(raw.slice(0, 120))}`;
     const occurrence = occurrences.get(signature) || 0;
     occurrences.set(signature, occurrence + 1);
     const id = nativeId || `visible-${signature}-${occurrence}`;
