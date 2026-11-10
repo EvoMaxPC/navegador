@@ -24,6 +24,11 @@ Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar e
 parcial al detener la respuesta. Estimación directa en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
+**Captura del panel 0.1.26:** el lector corre en el preload aislado y publica
+al panel por IPC directo, sin depender del JS del sitio ni de la inyección de fetch.
+Recupera publicaciones rechazadas, reemplazo de `body` y restauración de página.
+El circuito completo se prueba en Electron real/Windows con una fixture HTTPS local.
+
 **Lector de ChatGPT 0.1.25:** adaptación del método EVO con cuatro estrategias
 de detección, estado de respuesta sin confundirlo con dictado y diagnóstico
 de la estrategia activa en el panel de repetición. Lectura sin escribir en el composer.

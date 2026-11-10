@@ -1,4 +1,4 @@
-# Repetición de conversación — Nexo 0.1.24
+# Repetición de conversación — Nexo 0.1.26
 
 ## Uso
 
@@ -24,9 +24,9 @@ Es una repetición **textual**, no una captura gráfica: el ancho y los saltos v
 
 ## Arquitectura y privacidad
 
-Se reutiliza `watchChatGptConversation`: **un solo MutationObserver**, sin un segundo observador ni polling por intervalo. Publica por separado el snapshot de memoria existente y la vista literal. Memoria conserva su contrato y sus límites anteriores.
+Se reutiliza `watchChatGptConversation`: **un solo MutationObserver**, ahora sobre `Document` y en el preload aislado. Publica por separado el snapshot de memoria existente y la vista literal. Se conserva el respaldo de sondeo incorporado por el cambio concurrente `93a56e3` (1,2 s, sin releer el DOM de pestañas ocultas desde ese respaldo), además de los eventos de navegación. No existe un lector paralelo en el mundo principal. Memoria conserva su contrato y sus límites anteriores.
 
-Flujo: DOM → bundle → preload aislado → `nexo:repetition:snapshot` → caché volátil por webContentsId/URL → evento a la shell → render por cuadro.
+Flujo: DOM compartido → `build/chatgpt-reader.cjs` en preload aislado → `nexo:repetition:snapshot` → caché volátil por webContentsId/URL → evento a la shell → render por cuadro.
 
 - La repetición funciona aunque mediación y EVO MEMORY estén apagadas. En ese modo el fetch pasa al original sin inspección/reescritura del cuerpo: sólo se lee el DOM para esta vista.
 - La ruta de repetición **no cuenta turnos/respuestas/tokens, no destila y no escribe nuevos archivos**. EVO MEMORY, si está habilitada, mantiene por separado su comportamiento previo.
@@ -37,13 +37,13 @@ Flujo: DOM → bundle → preload aislado → `nexo:repetition:snapshot` → cac
 
 ## Validación
 
-- Suite completa: **661 pruebas, 660 aprobadas, una omitida, cero fallos**.
+- Suite completa: **667 pruebas, 666 aprobadas, una omitida, cero fallos**.
 - Tests del lector: espacios, saltos, Unicode, chats ya abiertos, cambios parciales, cambio SPA/chat vacío, exclusión de temporales, mensajes mayores de 10k y límites explícitos.
 - Tests de IPC: memoria/mediación apagadas, aislamiento por pestaña, cambio de URL, limpieza al destruir, rechazo de páginas ajenas, subframes y lectores no privilegiados; la repetición no mueve contadores ni memorias.
 - Test del circuito de producción: DOM simulado → bundle generado → preload real → IPC del principal → consulta desde shell, incluyendo respuesta de más de 18k, actualización sin duplicación y fetch de paso directo con memoria/mediación apagadas.
 - Tests del renderer: sólo texto, no ejecución HTML, actualización del mismo nodo sin duplicados, vaciado, aviso de límites y respeto del scroll del usuario.
 - Chromium headless con fixture local y MutationObserver real: panel a 1440×1000 y 760×900, ambos roles exactos, conservación de espacios/saltos/Unicode, actualización automática, ausencia de HTML ejecutable, chat vacío y memoria apagada. Sin errores JS ni infracciones detectadas por axe WCAG 2 A/AA en ese recorrido. No es certificación de accesibilidad ni una sesión real de ChatGPT.
-- Benchmark existente ejecutado sin cambiar presupuestos; bundle de inyección aproximadamente **55,6 kB** en el estado integrado (baseline previo: 51,3 kB; el total incluye también el espejo de diagnóstico remoto). Sin dependencias nuevas de producción.
+- Benchmark existente ejecutado sin cambiar presupuestos; bundle de inyección aproximadamente **58,5 kB** sumando el bundle principal y el nuevo bundle del lector (no se oculta el coste trasladado al preload; baseline previo: 51,3 kB). Sin dependencias nuevas de producción.
 
 Pendiente: confirmar los selectores, lectura completa del contenido cargado, cambios de conversación y generación en una sesión propia de ChatGPT dentro de Electron/Windows. Los tests y fixtures no equivalen a esa comprobación.
 
@@ -63,4 +63,30 @@ El estado de generación reconoce Stop/Detener/Parar, descarta botones deshabili
 
 Validación adicional: cuatro estrategias con ambos roles, literalidad, DPU, prioridad de selectores, anidamiento, rechazo de roles ambiguos, IDs, código, botones y metadatos sin contenido. Chromium con DOM/MutationObserver reales: estrategias alternativas en la fixture del panel, texto exacto, sin duplicados ni errores JS; cero infracciones axe detectadas en el recorrido. Captura: `/home/user/nexo-repeticion-adaptador.png`. No se probó una cuenta real de ChatGPT ni el ejecutable Windows de esta versión.
 
-Se integraron además los cambios concurrentes hasta `e9334eb` y sus seis pruebas del lector histórico/IDs. Se mantuvo el adaptador compartido (sin duplicar estrategias ni asignar roles a ciegas por paridad), con reconocimiento de estructuras anidadas también para `data-turn`. Suite completa posterior a esta integración: 661 pruebas, 660 aprobadas, una omitida y cero fallos.
+Se integraron además los cambios concurrentes hasta `e9334eb` y sus seis pruebas del lector histórico/IDs. Se mantuvo el adaptador compartido (sin duplicar estrategias ni asignar roles a ciegas por paridad), con reconocimiento de estructuras anidadas también para `data-turn`. Suite completa posterior a esta integración: 667 pruebas, 666 aprobadas, una omitida y cero fallos.
+
+## Corrección del panel vacío — 0.1.26
+
+La captura del usuario mostraba texto de GPT con el panel vacío. Una imagen no permite determinar si falló la selección, el arranque o el transporte; no se afirma una causa única de esa sesión.
+
+Se reprodujeron dos fallos contra el código del ejecutable entregado (`84c3564`):
+
+- `publishLive` marcaba un snapshot como enviado antes de confirmar IPC. Tras un rechazo y sin cambios del DOM, una nueva lectura no lo reenviaba (una publicación en vez de dos).
+- `pagehide` activaba `stopped` de forma irreversible: `pageshow` de una página restaurada no recuperaba la lectura.
+
+Ambos casos pasan en 0.1.26. También se corrigió observar sólo el `body` inicial, lo que perdía mutaciones tras sustituirlo.
+
+La corrección no se limita a añadir selectores: el lector compartido se ejecuta desde `src/preload/chatgptReader.js`, empaquetado como CommonJS, en el mundo aislado. La copia llega por `ipcRenderer.invoke` directamente al principal, sin `postMessage` del sitio y aunque la inyección de mediación falle. El bridge de la página ya no acepta eventos de snapshot de conversación. Las confirmaciones/reintentos de memoria de los cambios concurrentes se mantienen mediante las promesas del IPC directo. No se añadieron dependencias de producción ni escrituras en el composer.
+
+El principal solicita una relectura al estar listo el DOM, tras navegación SPA y al consultar una caché vacía desde la shell autorizada. Una relectura explícita permite repoblar la caché aunque el texto no haya cambiado. El diagnóstico diferencia «no se recibió snapshot» de «lector activo sin mensajes reconocidos».
+
+### Evidencia
+
+- `npm run verify`: **667 pruebas; 666 aprobadas, una omitida, cero fallos**.
+- Nuevas regresiones: `test/chatgpt-reader-lifecycle.test.js`; también prueba directa de IPC aislado con memoria/mediación apagadas y confirmación de memoria.
+- Chromium con mundos separados mediante CDP: preload de producción, inyección principal bloqueada intencionalmente, ambos roles recibidos por IPC simulado, sustitución de body y eventos pagehide/pageshow. No cuenta de ChatGPT.
+- `scripts/probes/repetition-electron.cjs`: aplicación y shell de producción, webview HTTPS servido localmente mediante interceptación de protocolo (sin excepciones TLS), preload real, IPC real y panel real. Comprobó texto literal, memoria/mediación apagadas, actualización sin duplicados, APIs del mundo principal alteradas, reemplazo de body y eventos pagehide/pageshow sintéticos. Estos últimos no equivalen a una navegación BFCache completa.
+- Windows CI **42755430646**, commit **9813fc4**: verificación, integración Electron, benchmark, empaquetado y prueba de arranque **correctos**.
+- ZIP 0.1.26: https://github.com/EvoMaxPC/navegador/actions/runs/42755430646/artifacts/13735686481 . Incluye la corrección; no es el ZIP anterior 0.1.25.
+
+Pendiente todavía: validación en una sesión real de ChatGPT del usuario. No se afirma haber accedido a su cuenta, su DOM real o su conversación a partir de la imagen.
