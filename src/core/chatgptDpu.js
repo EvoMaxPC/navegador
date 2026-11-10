@@ -135,6 +135,7 @@ export function extractChatGptDpuAnswer(bodyText, prompt = '') {
  * La lectura textual antigua queda como respaldo para layouts sin esos nodos.
  */
 export function readChatGptDpuAnswer(document, prompt = '') {
+  const normalize = (text) => String(text || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
   const textOf = (node) => String(node?.innerText ?? node?.textContent ?? '').trim();
   const outer = (items) => items.filter((node) =>
     !items.some((other) => other !== node && other.contains?.(node))
@@ -167,6 +168,8 @@ export function readChatGptDpuAnswer(document, prompt = '') {
     const userIndex = messages.findLastIndex((item) => item.role === 'user');
     if (userIndex < 0) continue;
     const user = messages[userIndex].node;
+    // Ampliar selectores no autoriza asociar la respuesta de otro envío al actual.
+    if (prompt && normalize(textOf(user)) !== normalize(prompt)) return { text: '', user, assistant: null, body: '' };
     const assistant = messages.slice(userIndex + 1).findLast((item) => item.role === 'assistant')?.node || null;
     if (!assistant) return { text: '', user, assistant: null, body: '' };
 
