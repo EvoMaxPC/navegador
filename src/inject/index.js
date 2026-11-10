@@ -486,7 +486,7 @@ const MAX_DPU_RESPONSE_BYTES = 12_000_000;
  */
 let gptCaptureMirror = null;
 
-function beginGptCaptureMirror(messageId = '') {
+function beginGptCaptureMirror(messageId = '', initialText = 'Esperando texto de GPT…') {
   try {
     gptCaptureMirror?.host?.remove?.();
     const host = document.createElement('div');
@@ -500,7 +500,7 @@ function beginGptCaptureMirror(messageId = '') {
     title.textContent = 'NEXO · ESPEJO DE CAPTURA GPT';
     title.style.cssText = 'font-size:11px;letter-spacing:.04em;color:#71d6c9;';
     const output = document.createElement('pre');
-    output.textContent = 'Esperando texto de GPT…';
+    output.textContent = String(initialText || 'Esperando texto de GPT…');
     output.style.cssText = 'margin:0;min-height:28px;max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.45 ui-monospace,monospace;color:#f4f7f9;';
     panel.append(title, output);
     shadow.append(panel);
@@ -1063,6 +1063,18 @@ bridge.ready({
   href: location.href,
   version: CONFIG.version || '0.1.0',
 });
+
+// El espejo se muestra desde que la capa se instala, no recién cuando logra
+// interceptar una respuesta. Así podemos distinguir inyección ausente de captura vacía.
+if (site.id === 'chatgpt') {
+  const showCaptureMirror = () => {
+    if (!gptCaptureMirror) {
+      beginGptCaptureMirror('', 'CAPA NEXO INYECTADA · ESPERANDO RESPUESTA DE GPT…');
+    }
+  };
+  if (document.documentElement || document.body) showCaptureMirror();
+  else document.addEventListener('DOMContentLoaded', showCaptureMirror, { once: true });
+}
 
 // Lectura de la conversación ya cargada, independiente de los transportes.
 if (site.id === 'chatgpt') {
