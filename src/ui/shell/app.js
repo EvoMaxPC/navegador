@@ -675,7 +675,17 @@ async function refreshRepetition() {
 }
 nexo.on('nexo:repetition-changed', (snapshot) => {
   const source = repetitionSource();
-  if (!source || snapshot.webContentsId !== source.webContentsId || (snapshot.href && snapshot.href !== source.href)) return;
+  // El mismo webContents puede cambiar hash/query durante el render de React.
+  // La identidad de la pestaña es estable; validar además origen y ruta evita
+  // aceptar un snapshot de otra conversación, sin perder el evento por esa carrera.
+  if (!source || snapshot.webContentsId !== source.webContentsId) return;
+  if (snapshot.href) {
+    try {
+      const incoming = new URL(snapshot.href);
+      const current = new URL(source.href);
+      if (incoming.origin !== current.origin || incoming.pathname !== current.pathname) return;
+    } catch { return; }
+  }
   memState.liveSnapshot = snapshot.href ? snapshot : null;
   if (isPanelActive('memory')) uiTasks.schedule('chat-capture', renderChatCapture);
   if (!isPanelActive('repetition')) return;
@@ -1029,7 +1039,10 @@ async function refreshMemory() {
       // No depender de que el renderer haya recibido el evento en vivo:
       // consultar también el último snapshot almacenado al abrir/actualizar Memoria.
       const source = repetitionSource();
-      memState.liveSnapshot = source ? await nexo.repetition.get(source) : null;
+      // Una consulta inicial puede devolver null mientras el preload termina
+      // de leer el DOM. No borrar un snapshot en vivo que llegó durante el await.
+      const fetchedLive = source ? await nexo.repetition.get(source) : null;
+      if (fetchedLive?.turns?.length || !memState.liveSnapshot) memState.liveSnapshot = fetchedLive;
       renderChatCapture();
       if (MEM.conversations?.closest('details')?.open) {
         MEM.conversations.innerHTML = memState.conversations.length ? memState.conversations.map((entry) =>
