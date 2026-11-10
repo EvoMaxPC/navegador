@@ -73,6 +73,16 @@ test('respuestas mayores de 10k se repiten sin el recorte de memoria; límites e
   } finally { h.watch.disconnect(); }
 });
 
+test('el receptor conserva estrategias combinadas válidas del lector DOM', () => {
+  const payload = { strategy: 'author-role+data-turn', turns: [
+    { id: 'u', role: 'user', content: 'pregunta' },
+    { id: 'a', role: 'assistant', content: 'respuesta' },
+  ] };
+  assert.equal(repetitionSnapshot(payload).strategy, 'author-role+data-turn');
+  assert.equal(repetitionSnapshot({ ...payload, strategy: 'author-role+unknown' }).strategy, 'none');
+  assert.equal(repetitionSnapshot({ ...payload, strategy: 'author-role+author-role' }).strategy, 'none');
+});
+
 test('el receptor valida roles, longitud y estructura sin interpretar HTML ni modificar texto', () => {
   const content = '<img src=x onerror=alert(1)>\n  no ejecutar 😊';
   assert.equal(repetitionSnapshot({ turns: [{ id: 'a', role: 'assistant', content }] }).turns[0].content, content);
