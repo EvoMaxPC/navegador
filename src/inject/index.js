@@ -1076,7 +1076,9 @@ if (site.id === 'chatgpt') {
     }
   };
   if (document.documentElement || document.body) showCaptureMirror();
-  else document.addEventListener('DOMContentLoaded', showCaptureMirror, { once: true });
+  else if (typeof document.addEventListener === 'function') {
+    document.addEventListener('DOMContentLoaded', showCaptureMirror, { once: true });
+  }
 }
 
 // Lectura de la conversación ya cargada, independiente de los transportes.
