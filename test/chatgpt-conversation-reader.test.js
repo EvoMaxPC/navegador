@@ -79,3 +79,13 @@ test('limita el tamaño por mensaje y marca el contenido recortado', () => {
   assert.equal(turn.content.length, 10000);
   assert.equal(turn.clipped, true);
 });
+
+
+test('mantiene el ID de respaldo cuando el texto de una respuesta sigue creciendo', () => {
+  const first = message('assistant', 'a'.repeat(120) + ' parcial');
+  const later = message('assistant', 'a'.repeat(120) + ' respuesta completa');
+  const read = (node) => readChatGptConversation({
+    querySelectorAll: (selector) => selector === '[data-message-author-role]' ? [node] : [],
+  })[0].id;
+  assert.equal(read(first), read(later));
+});
