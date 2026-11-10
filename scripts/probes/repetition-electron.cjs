@@ -54,7 +54,11 @@ app.whenReady().then(() => {
     await until(() => shell.executeJavaScript('document.querySelectorAll("#repetitionList .repeat-message").length===2'), 'dos roles recibidos en panel real');
     const exact = await shell.executeJavaScript(String.raw`(()=>{const t=[...document.querySelectorAll('#repetitionList .repeat-text')].map(n=>n.textContent);return t[0]==='  Hola\n'&&t[1]==='Respuesta de fixture 😊\n  código\n';})()`);
     if (!exact) throw Error('Texto no literal en el panel');
-    report.checks.push('texto literal y memoria apagada');
+    const diagnostic = await shell.executeJavaScript('document.getElementById("repetitionDiagnostic")?.textContent || ""');
+    if (!diagnostic.includes('print-label') || !diagnostic.includes('Vos: 1 · ChatGPT: 1')) {
+      throw Error('Diagnóstico no confirma una pregunta y una respuesta sin duplicados: ' + diagnostic);
+    }
+    report.checks.push('texto literal, ambos roles y deduplicación del DOM real con memoria apagada');
     await guest.executeJavaScript(`document.querySelector('.markdown').textContent+='Respuesta final';`);
     await until(() => shell.executeJavaScript('document.querySelectorAll("#repetitionList .repeat-text")[1]?.textContent.endsWith("Respuesta final")'), 'streaming DOM actualiza panel sin duplicados');
     await shell.executeJavaScript(`(async()=>{await nexo.setSettings({enabled:false,memory:{enabled:true}});document.querySelector('.stab[data-panel="memory"]').click();})()`);
