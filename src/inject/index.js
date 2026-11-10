@@ -725,6 +725,9 @@ if (!window.__NEXO_HOOKED__) {
   const nativeFetch = window.fetch.bind(window);
 
   window.fetch = async function nexoFetch(input, init) {
+    // Si sólo está activa la repetición, leer el DOM no habilita captura de red
+    // ni mediación. Se devuelve el fetch original sin inspeccionar el cuerpo.
+    if (site.id === 'chatgpt' && !state.enabled && state.settings.memory?.enabled === false) return nativeFetch(input, init);
     const url = absoluteUrl(urlOf(input));
     const method = methodOf(input, init);
 
@@ -1020,6 +1023,7 @@ if (site.id === 'chatgpt') {
   watchChatGptConversation({ document, window,
     isEnabled: () => state.settings.memory?.enabled !== false,
     isStreaming: () => Boolean(document.querySelector?.(site.stopButton)),
+    publishLive: (payload) => bridge.event('conversation-repetition', payload),
     publish: (payload) => payload.error
       ? bridge.event('error', { stage: 'conversation-memory', message: payload.error })
       : bridge.event('conversation-snapshot', payload),

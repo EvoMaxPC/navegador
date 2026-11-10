@@ -1,3 +1,5 @@
+import { createRepetitionView } from './repetition.js';
+import { isChatGptMemoryUrl } from '../../core/chatgptConversation.js';
 /**
  * Interfaz de navegador de Nexo.
  *
@@ -198,11 +200,11 @@ function createTab(url = START_URL, { activate = true } = {}) {
   }
   view.addEventListener('did-navigate', (event) => {
     tab.url = event.url;
-    if (state.activeId === id) { els.omnibox.value = event.url; updateNavigation(); }
+    if (state.activeId === id) { els.omnibox.value = event.url; updateNavigation(); if (isPanelActive('repetition')) refreshRepetition(); }
   });
   view.addEventListener('did-navigate-in-page', (event) => {
     tab.url = event.url;
-    if (state.activeId === id) { els.omnibox.value = event.url; updateNavigation(); }
+    if (state.activeId === id) { els.omnibox.value = event.url; updateNavigation(); if (isPanelActive('repetition')) refreshRepetition(); }
   });
   view.addEventListener('page-favicon-updated', (event) => {
     const icon = safeFaviconUrl(event.favicons?.[0]);
@@ -234,6 +236,7 @@ function createTab(url = START_URL, { activate = true } = {}) {
     if (state.activeId === id) {
       updateStar();
       if (isPanelActive('sites')) renderSitePanel();
+      if (isPanelActive('repetition')) refreshRepetition();
     }
     scheduleSessionCapture();
   });
@@ -267,6 +270,7 @@ function activateTab(id) {
   updateStar();
   updateNavigation();
   if (isPanelActive('sites')) renderSitePanel();
+  if (isPanelActive('repetition')) refreshRepetition();
   scheduleSessionCapture();
 }
 
@@ -619,6 +623,50 @@ function renderDownloads() {
     els.downloadNote.textContent = 'Las descargas se ubican en la carpeta que elijas al bajarlas.';
   });
 }
+
+/* ---------------- repetición literal de la pestaña activa ---------------- */
+const repetitionView = createRepetitionView({
+  list: document.getElementById('repetitionList'), status: document.getElementById('repetitionStatus'),
+  scroller: document.getElementById('panel-repetition'),
+});
+let repetitionTicket = 0;
+let repetitionSourceKey = '';
+function repetitionSource() {
+  const tab = activeTab();
+  if (!tab || !isChatGptMemoryUrl(tab.url)) return null;
+  try { return { webContentsId: tab.view.getWebContentsId(), href: tab.url }; } catch { return null; }
+}
+async function refreshRepetition() {
+  const ticket = ++repetitionTicket;
+  const source = repetitionSource();
+  if (!source) {
+    repetitionSourceKey = '';
+    repetitionView.render(null, 'Abrí una conversación de ChatGPT. Esta vista no lee otros sitios ni chats temporales.');
+    return;
+  }
+  const key = `${source.webContentsId}:${source.href}`;
+  if (key !== repetitionSourceKey) repetitionView.render(null, 'Esperando los mensajes cargados de esta conversación…');
+  repetitionSourceKey = key;
+  try {
+    const snapshot = await nexo.repetition.get(source);
+    if (ticket === repetitionTicket && isPanelActive('repetition')) repetitionView.render(snapshot,
+      'Esperando mensajes de ChatGPT. Si abriste Nexo antes de actualizarlo, recargá la pestaña.');
+  } catch {
+    if (ticket === repetitionTicket) repetitionView.render(null, 'No se pudo leer esta pestaña. Recargá ChatGPT para reintentar.');
+  }
+}
+nexo.on('nexo:repetition-changed', (snapshot) => {
+  if (!isPanelActive('repetition')) return;
+  const source = repetitionSource();
+  if (!source || snapshot.webContentsId !== source.webContentsId || (snapshot.href && snapshot.href !== source.href)) return;
+  repetitionTicket += 1;
+  uiTasks.schedule('repetition', () => {
+    const current = repetitionSource();
+    if (!isPanelActive('repetition') || !current || current.webContentsId !== source.webContentsId || current.href !== source.href) return;
+    repetitionSourceKey = `${source.webContentsId}:${source.href}`;
+    repetitionView.render(snapshot.href ? snapshot : null, 'Esperando los mensajes de la conversación…');
+  });
+});
 
 /* ---------------- sitio actual: permisos y zoom ---------------- */
 
@@ -1259,7 +1307,7 @@ window.addEventListener('beforeunload', () => {
 function refreshActivePanel() {
   const current = document.querySelector('.stab.active')?.dataset.panel;
   const renders = { activity: () => { renderLog(); refreshStats(); }, memory: refreshMemory,
-    history: renderHistory, bookmarks: renderBookmarks, downloads: renderDownloads, sites: renderSitePanel };
+    history: renderHistory, bookmarks: renderBookmarks, downloads: renderDownloads, sites: renderSitePanel, repetition: refreshRepetition };
   if (els.browser.classList.contains('with-sidebar')) uiTasks.schedule(`panel-${current}`, renders[current] || (() => {}));
 }
 const panelTabs = [...document.querySelectorAll('.stab')];

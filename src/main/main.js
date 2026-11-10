@@ -1,3 +1,4 @@
+import { repetitionSnapshot } from '../core/conversationRepetition.js';
 import { isPublicAssetPath } from './internalAssets.js';
 import { createCaptureDiagnostic } from './captureDiagnostic.js';
 import { isChatGptMemoryUrl } from '../core/chatgptConversation.js';
@@ -136,6 +137,20 @@ let captureDiagnosticFile = null;
 let captureDiagnostic = null;
 function writeCaptureTrace(stage, data = {}) {
   return captureDiagnostic?.write(stage, data);
+}
+
+// Vista volátil: nunca escribe conversaciones en logs, diagnóstico ni un archivo nuevo.
+const repetitionSnapshots = new Map();
+function publishRepetition(snapshot) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.webContents.getURL() === 'nexo://app/src/ui/shell/index.html') {
+      window.webContents.send('nexo:repetition-changed', snapshot);
+    }
+  }
+}
+function clearRepetition(id) {
+  repetitionSnapshots.delete(id);
+  publishRepetition({ webContentsId: id, href: null, turns: [] });
 }
 
 let profile = null;
@@ -452,6 +467,7 @@ function createWindow() {
     // con perfil conocido y se suelta si la pestaña navega a otro lado.
     cdp?.sync(contents);
     contents.on('did-start-navigation', (_e, url, _inPage, isMainFrame) => {
+      if (isMainFrame) clearRepetition(contents.id);
       if (!isMainFrame || _inPage) return;
       engine?.onTurnInterrupted(contents.id);
       broadcast('nexo:stats-changed', statsSnapshot());
@@ -472,6 +488,7 @@ function createWindow() {
     });
 
     contents.on('destroyed', () => {
+      clearRepetition(contents.id);
       cdp?.release(contents);
       engine?.dropTab(contents.id);
       broadcast('nexo:stats-changed', statsSnapshot());
@@ -627,6 +644,28 @@ function registerIpc() {
     return { observer: cdp?.status() || { enabled: false, tabs: 0 },
       engine: engine ? engine.stats().cdp : null, diagnosticFile: captureDiagnosticFile,
       diagnosticError: captureDiagnostic?.status().error || null };
+  });
+
+  /* ---------------- Repetición de conversación (sólo lectura) ---------------- */
+  ipcMain.handle('nexo:repetition:snapshot', (event, payload) => {
+    const sender = event.sender;
+    const href = sender?.getURL?.() || '';
+    if (sender?.getType?.() !== 'webview' || !isChatGptMemoryUrl(href) || payload?.href !== href ||
+      (event.senderFrame && sender.mainFrame && event.senderFrame !== sender.mainFrame)) return { ok: false };
+    const snapshot = repetitionSnapshot(payload);
+    if (!snapshot) return { ok: false };
+    const next = { ...snapshot, href, webContentsId: sender.id };
+    repetitionSnapshots.set(sender.id, next);
+    publishRepetition(next);
+    return { ok: true };
+  });
+  ipcMain.handle('nexo:repetition:get', (event, payload = {}) => {
+    // Este canal contiene texto privado: exclusivamente para la shell conocida.
+    if (event.senderFrame && event.sender?.mainFrame && event.senderFrame !== event.sender.mainFrame) return null;
+    if (!BrowserWindow.getAllWindows().some((window) => window.webContents === event.sender &&
+      window.webContents.getURL() === 'nexo://app/src/ui/shell/index.html')) return null;
+    const snapshot = repetitionSnapshots.get(payload.webContentsId);
+    return snapshot && snapshot.href === payload.href ? snapshot : null;
   });
 
   /* ---------------- EVO MEMORY ---------------- */

@@ -16,6 +16,7 @@ const ALLOWED_EVENTS = new Set([
   'nexo:downloads-changed',
   'nexo:download-done',
   'nexo:stats-changed',
+  'nexo:repetition-changed',
 ]);
 
 contextBridge.exposeInMainWorld('nexo', {
@@ -92,6 +93,10 @@ contextBridge.exposeInMainWorld('nexo', {
     saveNow: (windows) => ipcRenderer.send('nexo:session:save-now', { windows }),
     restore: () => ipcRenderer.invoke('nexo:session:restore'),
     clear: () => ipcRenderer.invoke('nexo:session:clear'),
+  },
+
+  repetition: {
+    get: (payload) => ipcRenderer.invoke('nexo:repetition:get', payload),
   },
 
   memory: {

@@ -1,3 +1,5 @@
+import { REPETITION_MAX_CHARS, REPETITION_MAX_TURN_CHARS } from './conversationRepetition.js';
+
 /** Historial visible de ChatGPT. Nunca lee composer, cookies ni campos de formulario. */
 export const MAX_CONVERSATION_TURNS = 200;
 export const MAX_TURN_CHARS = 10000;
@@ -10,34 +12,52 @@ export function isChatGptMemoryUrl(value) {
   } catch { return false; }
 }
 
-export function readChatGptConversation(document) {
+export function readChatGptConversation(document, { literal = false } = {}) {
   const nodes = Array.from(document?.querySelectorAll?.('[data-message-author-role]') || []);
   return nodes.slice(-MAX_CONVERSATION_TURNS).flatMap((node, index) => {
     const role = node.getAttribute?.('data-message-author-role');
     if (!['user', 'assistant'].includes(role)) return [];
     const contentNode = role === 'assistant'
       ? node.querySelector?.('.markdown') || node.querySelector?.('.prose, [data-message-content]') || node
-      : node;
-    const raw = String(contentNode.innerText ?? contentNode.textContent ?? '').trim();
+      : (literal ? node.querySelector?.('.whitespace-pre-wrap') || node : node);
+    const value = String(contentNode.innerText ?? contentNode.textContent ?? '');
+    const raw = literal ? value : value.trim();
     if (!raw) return [];
     const id = node.getAttribute?.('data-message-id') ||
       node.closest?.('[data-message-id]')?.getAttribute?.('data-message-id') ||
       node.closest?.('article[data-testid]')?.getAttribute?.('data-testid') || `visible-${Math.max(0, nodes.length - MAX_CONVERSATION_TURNS) + index}`;
-    return [{ id, role, content: raw.slice(0, MAX_TURN_CHARS), clipped: raw.length > MAX_TURN_CHARS }];
+    const limit = literal ? REPETITION_MAX_TURN_CHARS : MAX_TURN_CHARS;
+    return [{ id: literal ? String(id).slice(0, 256) : id, role, content: raw.slice(0, limit), clipped: raw.length > limit }];
   });
 }
 
 /** Un solo observador, agrupado; funciona aunque ChatGPT no use nuestro fetch. */
-export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => false }) {
-  let timer = null, last = '', observer = null, stopped = false;
+export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => false, publishLive = null }) {
+  if (typeof document?.querySelectorAll !== 'function') return { read() {}, disconnect() {} };
+  let timer = null, last = '', lastLive = '', observer = null, stopped = false;
   const session = `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const read = () => {
     timer = null;
-    if (stopped || !isEnabled() || !isChatGptMemoryUrl(window.location.href)) return;
+    if (stopped || (!isEnabled() && !publishLive) || !isChatGptMemoryUrl(window.location.href)) return;
     try {
+      const url = new URL(window.location.href);
+      if (publishLive) {
+        const turns = readChatGptConversation(document, { literal: true });
+        let remaining = REPETITION_MAX_CHARS;
+        let clipped = (document.querySelectorAll?.('[data-message-author-role]') || []).length > MAX_CONVERSATION_TURNS;
+        const bounded = turns.flatMap((turn) => {
+          if (!remaining) { clipped = true; return []; }
+          const content = turn.content.slice(0, remaining);
+          remaining -= content.length;
+          return [{ ...turn, content, clipped: turn.clipped || content.length < turn.content.length }];
+        });
+        const live = { href: window.location.href, turns: bounded, clipped, streaming: Boolean(isStreaming()) };
+        const signature = JSON.stringify(live);
+        if (signature !== lastLive) { lastLive = signature; publishLive(live); }
+      }
+      if (!isEnabled()) return;
       const turns = readChatGptConversation(document);
       if (!turns.length) return;
-      const url = new URL(window.location.href);
       const conversationId = url.pathname.includes('/c/') ? url.pathname : `${url.pathname}#${session}`;
       const payload = { conversationId, href: window.location.href, turns, streaming: Boolean(isStreaming()) };
       const signature = JSON.stringify(payload);
@@ -60,6 +80,7 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
   };
   document.addEventListener?.('DOMContentLoaded', start, { once: true });
   window.addEventListener?.('popstate', schedule);
+  window.addEventListener?.('hashchange', schedule);
   window.addEventListener?.('pagehide', () => { read(); stopped = true; observer?.disconnect(); clearTimeout(timer); });
   start();
   return { read, disconnect() { stopped = true; clearTimeout(timer); observer?.disconnect(); } };

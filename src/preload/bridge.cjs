@@ -49,17 +49,17 @@ function readConfigSync(host) {
 }
 
 /**
- * La lectura de EVO MEMORY no depende de la mediación.
+ * La lectura de ChatGPT no depende de la mediación.
  *
- * Con la mediación global apagada, el bundle sigue siendo necesario en
- * ChatGPT para observar el DOM y enviar conversation-snapshot. El propio
- * motor mantiene state.enabled=false, por lo que no modifica los mensajes.
+ * El bundle también alimenta la vista volátil de repetición aunque EVO MEMORY
+ * esté apagada. El motor conserva state.enabled=false y no modifica envíos.
+ * El watcher decide por separado si publica snapshots para persistencia.
  */
 function shouldInject(config, host) {
   if (!config || config.profiled === false) return false;
   const isChatGpt = host === 'chatgpt.com' || host === 'chat.openai.com';
-  const memoryEnabled = config.settings?.memory?.enabled !== false;
-  return config.enabled !== false || (isChatGpt && memoryEnabled);
+  // La repetición literal es de sólo lectura y no depende de EVO MEMORY.
+  return config.enabled !== false || isChatGpt;
 }
 
 /** Inyecta la capa en el mundo principal de la página. */
@@ -137,6 +137,10 @@ window.addEventListener('message', async (event) => {
 
   if (data.__nexo === 'event') {
     const { type, payload } = data;
+    if (type === 'conversation-repetition') {
+      await ipcRenderer.invoke('nexo:repetition:snapshot', payload).catch(() => {});
+      return;
+    }
     if (type === 'conversation-snapshot') {
       await ipcRenderer.invoke('nexo:conversation-snapshot', payload).catch((error) => console.warn('[nexo] conversación no guardada:', error.message));
       return;

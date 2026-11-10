@@ -538,3 +538,15 @@ button, input, textarea, select { font-family: inherit; }
 .sites { max-width: none; overflow: visible; }
 .site-chip:nth-child(n+3) { display: none; }
 .suggestions { --text: #24382f; --muted: #526b60; --panel: #fffefb; border-color: #d8e1dc; box-shadow: 0 8px 24px #10291b20; }
+
+/* Repetición literal: el contenido de una web nunca se interpreta como HTML. */
+.sidebar-tabs { overflow-y: auto; }
+.sidebar-heading h1 { min-width: 0; font-size: 16px; line-height: 1.3; }
+.sidebar-heading > div:first-child { min-width: 0; flex: 1; }
+.repeat-status { font-size: 11px; color: var(--muted); line-height: 1.6; border-block: 1px solid var(--line); padding-block: 10px; }
+.repeat-status[data-limited="true"] { color: #8b481c; }
+.repetition-list { list-style: none; margin: 0; padding: 0; }
+.repeat-message { border: 1px solid var(--line); background: #fffefb; border-radius: 10px; margin: 12px 0; padding: 13px; }
+.repeat-message.from-user { background: #edf3eb; }
+.repeat-message h3 { font-size: 11px; margin: 0 0 9px; color: var(--accent); }
+.repeat-text { margin: 0; font: 12px/1.65 system-ui, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; user-select: text; }

@@ -24,6 +24,12 @@ Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar e
 parcial al detener la respuesta. Estimación directa en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
+**Repetición de conversación 0.1.24:** panel separado que refleja tus mensajes
+y las respuestas de ChatGPT desde el texto cargado en la pestaña activa. Se
+actualiza en vivo, también al abrir chats antiguos, sin resumir ni reescribir,
+y sin depender de EVO MEMORY.
+[Funcionamiento, privacidad y límites](docs/REPETICION-CONVERSACION.md).
+
 **Captura streaming 0.1.23:** respaldo CDP con `Network.streamResourceContent`
 y `Network.dataReceived` para SSE/NDJSON cuando Chromium no conserva el cuerpo.
 Se mantienen el fallback, la deduplicación y los límites de captura.

@@ -5,7 +5,7 @@ let settings = structuredClone(DEFAULT_SETTINGS);
 const empty = async () => [];
 const result = async () => ({ ok: true, removed: 0 });
 window.nexo = {
-  getConfig: async () => ({ version: '0.1.22 · vista web', pagePreload: null }),
+  getConfig: async () => ({ version: '0.1.24 · vista web', pagePreload: null }),
   getSettings: async () => settings,
   setSettings: async (patch) => (settings = mergeSettings(settings, patch)),
   resetSettings: async () => (settings = structuredClone(DEFAULT_SETTINGS)),
@@ -15,6 +15,7 @@ window.nexo = {
   session: { restore: async () => null, capture: result, saveNow() {} },
   bookmarks: { list: empty, is: async () => false, toggle: result, remove: result, clear: result },
   history: { list: empty, clear: result, remove: result, top: empty },
+  repetition: { get: async () => null },
   memory: { stats: async () => ({ active: 0, tokens: 0, savedPct: 0 }), list: empty, conversations: empty, recall: empty, handoff: async () => ({ markdown: 'Vista web: no hay memoria de Electron conectada.' }), import: result, clear: result, pin: result, forget: result },
   downloads: { list: empty, clear: result, open: result, show: result, cancel: result },
   zoom: { get: async () => 1, set: result },

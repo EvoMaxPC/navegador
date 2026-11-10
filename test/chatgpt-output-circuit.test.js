@@ -78,7 +78,7 @@ async function openTab() {
 
 // Capa de producción + preload real + IPC real del principal, sin copiar su
 // extracción/tokenización. Sólo se sustituye el transporte externo por replay.
-function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null, fetchError = null, status = 200, bodyText = '', initialBodyText = '', roleNodes = null } = {}) {
+function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort = false, beforeResponse = null, holdOpen = null, fetchError = null, status = 200, bodyText = '', initialBodyText = '', roleNodes = null, pageConfig = null } = {}) {
   const listeners = [], captures = [];
   const observers = new Set();
   class MutationObserver {
@@ -134,7 +134,7 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
   const sender = { id: view.id, getURL: () => page.location.href, getType: () => 'webview' };
   const ipcRenderer = {
     on() {},
-    sendSync: () => ({ host: 'chatgpt.com', enabled: true, settings: { receiving: { stopOnLoop: false } }, language: 'es' }),
+    sendSync: () => pageConfig || ({ host: 'chatgpt.com', enabled: true, settings: { receiving: { stopOnLoop: false } }, language: 'es' }),
     invoke: async (channel, payload) => {
       if (channel === 'nexo:stream-end') captures.push(payload);
       return journal.ipcHandlers.get(channel)?.({ sender }, payload);
@@ -876,4 +876,39 @@ test('respaldo de respuestas respeta memoria deshabilitada y chats temporales', 
     engine.onStreamEnd(777, { site: 'chatgpt', host: 'chatgpt.com', text: 'Texto que no debe archivarse.', documentUrl: options.documentUrl });
     assert.equal(memory.list().length, 0);
   }
+});
+
+
+test('repetición completa: DOM → bundle → preload → IPC → shell, memoria y mediación apagadas', async () => {
+  const shell = journal.windows[0].webContents;
+  const previousUrl = shell.url;
+  const settings = structuredClone(await journal.ipcHandlers.get('nexo:settings:get')({ sender: shell }));
+  const setSettings = (patch) => journal.ipcHandlers.get('nexo:settings:set')({ sender: shell }, patch);
+  shell.url = 'nexo://app/src/ui/shell/index.html';
+  try {
+    await setSettings({ enabled: false, memory: { enabled: false } });
+    const view = await openTab();
+    const before = stats();
+    const node = (id, role, content) => ({ innerText: content, getAttribute: (name) => ({ 'data-message-id': id, 'data-message-author-role': role })[name], querySelector: () => null });
+    const user = node('rep-u', 'user', '  Usuario antiguo\n');
+    const assistant = node('rep-a', 'assistant', '\nRespuesta parcial 😊\n');
+    const page = pageFor(view, '', { roleNodes: () => [user, assistant], pageConfig: {
+      host: 'chatgpt.com', enabled: false, profiled: true, settings: { memory: { enabled: false } }, language: 'es',
+    } });
+    const get = () => journal.ipcHandlers.get('nexo:repetition:get')({ sender: shell }, { webContentsId: view.id, href: page.location.href });
+    await pause(650);
+    assert.deepEqual((await get()).turns.map((turn) => turn.content), [user.innerText, assistant.innerText]);
+    assistant.innerText += 'Final exacto con código: <script>no ejecutar</script>\n' + 'z'.repeat(18000);
+    page.mutate(); await pause(650);
+    const snapshot = await get();
+    assert.equal(snapshot.turns.length, 2);
+    assert.equal(snapshot.turns[1].content, assistant.innerText);
+    assert.equal(snapshot.clipped, false);
+    const response = await page.fetch('/backend-api/f/conversation', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'no mediar' }] }) });
+    await response.text();
+    assert.equal(page.captures.length, 0, 'la repetición sola no habilita captura de fetch');
+    assert.equal(stats().messages, before.messages);
+    assert.equal(stats().responses, before.responses);
+    assert.equal(stats().outputTokens, before.outputTokens);
+  } finally { await setSettings(settings); shell.url = previousUrl; }
 });
