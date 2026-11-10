@@ -1049,7 +1049,7 @@ function registerIpc() {
   });
 }
 
-/** La observación UUE nunca acepta autoridad desde una página ajena o un subframe. */
+/** Verifica el frame principal sin depender de la identidad del wrapper JS. */
 function isMainFrameEvent(event, sender = event?.sender) {
   const frame = event?.senderFrame;
   const mainFrame = sender?.mainFrame;
