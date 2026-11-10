@@ -142,3 +142,32 @@ test('el interruptor de privacidad descarta el acumulado antes de leer nuevos da
   assert.equal(pending.streaming.chunks.length, 0);
   await h.finish(); assert.equal(h.captures.length, 0);
 });
+
+test('timeout con fragmentos recibidos: no confunde una cola SSE válida con el cuerpo íntegro', { timeout: 5000 }, async () => {
+  let activate;
+  const h = harness({ command: (method, params, original) => method === 'Network.streamResourceContent'
+    ? new Promise((resolve) => { activate = resolve; }) : original(method, params) });
+  const full = 'Respuesta íntegra recuperada desde getResponseBody.';
+  h.view.debugger.bodies.set('stream', sse(full));
+  await h.begin();
+  await h.data(sse('Sólo un fragmento posterior; falta bufferedData.'));
+  const stream = h.observer.tabs.get(h.view.id).pending.get('stream').streaming;
+  assert.ok(stream.bytes > 0, 'hay datos antes de resolver la activación');
+  await h.finish();
+  assert.deepEqual(h.captures.map((capture) => capture.text), [full]);
+  assert.ok(h.view.debugger.commands.some((command) => command.method === 'Network.getResponseBody'));
+  assert.equal(stream.bytes, 0); assert.equal(stream.state.streamCount, 0);
+  activate({ bufferedData: b64(sse('Un búfer inicial que llegó demasiado tarde.')) });
+  await stream.ready;
+  assert.equal(stream.bytes, 0, 'la resolución tardía no repuebla el acumulador');
+  assert.equal(h.captures.length, 1, 'no hay segunda entrega');
+});
+
+test('si vence la activación y también falla getResponseBody, no inventa una respuesta con la cola SSE', { timeout: 5000 }, async () => {
+  const h = harness({ command: (method, params, original) => method === 'Network.streamResourceContent'
+    ? new Promise(() => {}) : original(method, params) });
+  h.view.debugger.rejectBodyFor.add('stream');
+  await h.begin(); await h.data(sse('Fragmento sin garantía de cuerpo completo.')); await h.finish();
+  assert.equal(h.captures.length, 0);
+  assert.ok(h.diagnostics.some((entry) => entry.code === 'response-sin-cuerpo'));
+});

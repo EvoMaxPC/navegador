@@ -47,3 +47,18 @@ En el checkout de esta rama no existen `src/main/domFallback.js`, `domCandidates
 5. Repetir con mediación apagada y EVO MEMORY habilitada para validar la observación pasiva, y detener una respuesta para comprobar que cancelados suma exactamente una vez.
 
 Si el stream no se puede leer, se mantienen los avisos existentes de cuerpo ausente/vacío o texto no reconocido. El hecho de que pasen los tests o el empaquetado no permite afirmar que quedó resuelto en ChatGPT real.
+
+## Revisión posterior: timeout con fragmentos disponibles
+
+El segundo diff propuesto espera la activación con `Promise.race`, pero después del timeout concatena `streamChunks` aunque la activación no haya respondido. Si `bufferedData` sigue pendiente, puede entregar sólo la cola de SSE como si fuera el cuerpo íntegro y no intentar `getResponseBody`.
+
+La implementación publicada exige `stream.enabled`, además de haber bytes. Vencido el plazo sin confirmación, descarta el acumulado y usa el fallback. Una respuesta tardía del comando no repuebla los buffers descartados. Su espera sigue siendo de un segundo; pasarla a 1,5 segundos no sustituye esa comprobación.
+
+Se añadieron dos regresiones sin cambiar código de producción:
+
+- Hay fragmentos válidos, pero la activación no responde a tiempo: se entrega únicamente el cuerpo completo del fallback; una activación posterior no suma otra captura.
+- Si además falla el fallback, no se inventa una respuesta con los fragmentos disponibles; se emite `response-sin-cuerpo`.
+
+Ambos casos fallaron al quitar temporalmente la condición de activación confirmada y pasan con el código publicado, que se restauró sin cambios. Suite ampliada: **622 pruebas, 621 aprobadas, una omitida, cero fallos**; el archivo de transporte tiene ahora 19 casos. Los resultados 620/619 anteriores corresponden a la publicación original de 0.1.23.
+
+Por eso, un contador en cero aún no excluye esta parte del transporte: la activación puede fallar o exceder el plazo y el cuerpo de fallback tampoco estar disponible. Se necesita el diagnóstico de esa captura concreta, no inferir la causa únicamente del contador.
