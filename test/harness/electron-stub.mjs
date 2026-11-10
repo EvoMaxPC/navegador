@@ -379,4 +379,4 @@ export default {
   dialog,
 };
 
-export const webContents = { fromId: (id) => journal.contents.find((contents) => contents.id === id && !contents.isDestroyed()) };
+export const webContents = { getAllWebContents: () => journal.contents.filter(contents => !contents.isDestroyed()), fromId: (id) => journal.contents.find((contents) => contents.id === id && !contents.isDestroyed()) };

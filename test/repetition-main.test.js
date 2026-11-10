@@ -66,3 +66,16 @@ test('al destruir la pestaña se elimina su copia volátil', async () => {
   b.emit('destroyed');
   assert.equal(await invoke('nexo:repetition:get', shell, { webContentsId: b.id, href: b.url }), null);
 });
+
+
+test('activar memoria actualiza el preload de webviews existentes, no sólo la shell', async () => {
+  const view = journal.windows[0].attachWebview('https://chatgpt.com/c/settings-live');
+  const other = journal.windows[0].attachWebview('https://example.com/');
+  await invoke('nexo:settings:set', shell, { enabled: false, memory: { enabled: true } });
+  const config = view.sent.findLast(entry => entry.channel === 'nexo:settings')?.payload;
+  assert.equal(config.settings.memory.enabled, true);
+  assert.equal(config.enabled, false);
+  assert.equal(other.sent.some(entry => entry.channel === 'nexo:settings'), false);
+  await invoke('nexo:settings:set', shell, { enabled: false, memory: { enabled: false } });
+  assert.equal(view.sent.findLast(entry => entry.channel === 'nexo:settings').payload.settings.memory.enabled, false);
+});

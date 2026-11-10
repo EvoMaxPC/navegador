@@ -110,3 +110,27 @@ test('guardado agrupa revisiones y confirma la última sin 60 escrituras por seg
   assert.equal(saved.length, 1); assert.equal(saved[0].turns[1].content, 'texto 99');
   assert.ok(results.every(result => result.ok)); queue.cancel();
 });
+
+test('el cambio de documento y snapshots recortados no inventan palabras históricas', () => {
+  const e = engine(); send(e);
+  e.onRenderedConversation(1, { ...snapshot('otra conversación'), href: 'https://chatgpt.com/c/otra' }, snapshot(''));
+  e.onRenderedConversation(1, { ...snapshot('texto recortado'), clipped: true }, snapshot(''));
+  assert.equal(e.stats().outputTokens, 0); assert.equal(e.stats().responses, 0);
+});
+
+test('la cancelación de guardado pendiente respeta memoria apagada y no deja una escritura tardía', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const saved = [], queue = createConversationSaveQueue(p => saved.push(p));
+  const delivery = queue.publish(snapshot('no escribir')); queue.cancel();
+  t.mock.timers.tick(1000); await Promise.resolve();
+  assert.equal(saved.length, 0); assert.equal((await delivery).ok, false);
+});
+
+test('pagehide puede vaciar la cola sin esperar a la siguiente escritura agrupada', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const saved = [], queue = createConversationSaveQueue(p => { saved.push(p); return { ok: true }; });
+  const delivery = queue.publish(snapshot('parcial al salir'));
+  queue.flush(); await delivery;
+  assert.equal(saved.length, 1); assert.equal(saved[0].turns[1].content, 'parcial al salir');
+  queue.cancel();
+});

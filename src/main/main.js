@@ -522,6 +522,15 @@ function statsSnapshot() {
   };
 }
 
+function refreshGuestSettings() {
+  for (const contents of webContents.getAllWebContents()) {
+    const host = hostOf(contents.getURL());
+    if (!contents.isDestroyed() && contents.getType() === 'webview' && isAiHost(host)) {
+      contents.send('nexo:settings', engine.configFor(host));
+    }
+  }
+}
+
 function registerIpc() {
   ipcMain.handle('nexo:config', (_event, payload = {}) => engine.configFor(payload.host || ''));
 
@@ -624,12 +633,14 @@ function registerIpc() {
   ipcMain.handle('nexo:settings:set', (_event, patch) => {
     const next = store.setSettings(patch);
     engine.refresh();
+    refreshGuestSettings();
     broadcast('nexo:settings-changed', next);
     return next;
   });
   ipcMain.handle('nexo:settings:reset', () => {
     const next = store.replaceSettings(DEFAULT_SETTINGS);
     engine.refresh();
+    refreshGuestSettings();
     broadcast('nexo:settings-changed', next);
     return next;
   });
