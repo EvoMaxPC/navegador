@@ -257,3 +257,20 @@ archivos reales. La actualización visual del panel, foco, navegación real y el
 instalador Windows quedan pendientes de prueba manual. No se afirma rendimiento,
 precisión semántica general ni validación de otra capa. No se modificó la UI para
 esta entrega; la prueba verifica el estado y la persistencia que ella consulta.
+
+
+## Comprensión por etapas — primera entrega posterior
+
+Véase [plan, arquitectura y validación de etapa 1](NEXO-COMPRENSION-ETAPAS.md).
+Se añadieron observación incremental de usuarios, extractos del asistente sin
+autoridad normativa y renovación automática agrupada del inspector, sin modificar
+la clasificación actual ni incorporar un modelo semántico. EVO sigue siendo
+opcional. El nuevo registro observacional es aditivo y validado, sin reemplazar
+la representación normativa ni los archivos EVO.
+
+Resultados ejecutados: **62/62 focalizadas**; `npm test`: **802 totales, 801
+aprobadas, 0 fallidas y 1 omitida** (empaquetado Windows real). Build de inyección
+correcto. Las 14 pruebas nuevas se enumeran en el documento de etapas. No hubo
+validación visual en Electron real ni prueba con cuenta ChatGPT real. No se
+declaran satisfechos los 72 requisitos: sólo la primera base observacional, con
+las limitaciones semánticas y de ventana allí detalladas.

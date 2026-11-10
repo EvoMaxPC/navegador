@@ -1,4 +1,9 @@
 /** UUE main: usa la persistencia atómica existente de EVO, sin cambiar sus archivos. */
+import {
+  planObservation,
+  validateObservation,
+  emptyObservation,
+} from '../core/conversationObservation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { fileStorage } from './memory.js';
@@ -35,6 +40,7 @@ export class UserUnderstandingService {
     this.bindings = new Map();
     this.reports = new Map();
     this.recent = new Map();
+    this.liveConversations = new Map();
     this.data = { version: 1, contexts: [], deleted_revisions: {} };
     this.loadError = null;
     try {
@@ -91,6 +97,7 @@ export class UserUnderstandingService {
     const ids = new Set();
     for (const row of d.contexts) {
       validateUnderstanding(row.state);
+      if (row.conversation) validateObservation(row.conversation);
       if (
         !/^c-[a-f0-9]{32}$/.test(row.state.context_id) ||
         ids.has(row.state.context_id) ||
@@ -211,7 +218,12 @@ export class UserUnderstandingService {
           'limit',
         );
       next.contexts.push({ state: result.state, url });
-    } else next.contexts[index] = { state: result.state, url: row.url || url };
+    } else
+      next.contexts[index] = {
+        ...next.contexts[index],
+        state: result.state,
+        url: row.url || url,
+      };
     delete next.deleted_revisions[id];
     this.commit(next);
     this.reports.set(id, result.report);
@@ -251,6 +263,11 @@ export class UserUnderstandingService {
       observationError: this.reports.get(`error-${contents.id}`)?.error || null,
       memoryReferences,
       observationEnabled: true,
+      conversation: structuredClone(
+        this.liveConversations.get(id) ||
+          this.row(id).conversation ||
+          emptyObservation(),
+      ),
       erased: Object.hasOwn(this.data.deleted_revisions, id),
     };
   }
@@ -335,22 +352,87 @@ export class UserUnderstandingService {
       return { ok: false, error: error.message };
     }
   }
-  observeConversation(contents, turns) {
-    const user = turns
-      .filter(
-        (t) =>
-          t?.role === 'user' &&
-          typeof t.content === 'string' &&
-          t.content.trim(),
-      )
-      .at(-1);
-    if (!user) return { skipped: 'no-user-turn' };
-    if (user.clipped) return { skipped: 'clipped-user-turn' };
-    return this.observe(contents, user.content, {
-      messageId: String(user.id || hash(user.content)),
-      channel: 'conversation-read',
-    });
+  observeConversation(contents, turns, { streaming = false } = {}) {
+    try {
+      if (!isAiHost(new URL(contents.getURL()).hostname))
+        return { skipped: 'not-ai' };
+      const id = this.contextFor(contents),
+        url = this.document(contents);
+      if (Object.hasOwn(this.data.deleted_revisions, id))
+        return { skipped: 'erased' };
+      const row = this.row(id, url),
+        previous = this.liveConversations.get(id) || row.conversation;
+      const prepared = turns
+        .filter(
+          (t) =>
+            t &&
+            ['user', 'assistant'].includes(t.role) &&
+            typeof t.content === 'string' &&
+            t.content.trim(),
+        )
+        .map((t) => ({
+          ...t,
+          id: String(t.id || hash(t.content)).slice(0, 256),
+          digest: hash(t.content),
+        }));
+      const plan = planObservation(previous, prepared, {
+        bootstrap: row.state.revision === 0,
+        streaming,
+        now: this.now(),
+      });
+      if (plan.skipped) return { skipped: plan.skipped };
+      let result = { ok: true, duplicate: !plan.changed };
+      for (const user of plan.users) {
+        result = this.observe(contents, user.content, {
+          messageId: user.id,
+          channel: 'conversation-read',
+        });
+        if (result.ok === false || result.skipped) return result;
+      }
+      if (result.independent) return result;
+      if (plan.changed) {
+        // El stream se muestra en RAM; sólo respuestas estables y la continuidad del
+        // usuario se guardan, no un archivo por cada fragmento de respuesta.
+        const stable = {
+          ...plan.observation,
+          messages: plan.observation.messages.filter(
+            (m) => m.status !== 'streaming',
+          ),
+        };
+        const saved = this.row(id, url).conversation || emptyObservation();
+        if (
+          JSON.stringify({ ...saved, revision: 0 }) !==
+          JSON.stringify({ ...stable, revision: 0 })
+        ) {
+          const next = structuredClone(this.data),
+            index = next.contexts.findIndex((r) => r.state.context_id === id);
+          if (index < 0) {
+            if (next.contexts.length >= 50)
+              throw new UnderstandingError('Máximo 50 contextos', 'limit');
+            next.contexts.push({ ...this.row(id, url), conversation: stable });
+          } else next.contexts[index].conversation = stable;
+          this.commit(next);
+        }
+        this.liveConversations.delete(id);
+        this.liveConversations.set(id, plan.observation);
+        if (this.liveConversations.size > 50)
+          this.liveConversations.delete(
+            this.liveConversations.keys().next().value,
+          );
+        this.notify('nexo:understanding-changed', {
+          contextId: id,
+          revision: this.row(id).state.revision,
+          conversationRevision: plan.observation.revision,
+        });
+      }
+      this.reports.delete(`error-${contents.id}`);
+      return result;
+    } catch (error) {
+      this.reports.set(`error-${contents.id}`, { error: error.message });
+      return { ok: false, error: error.message };
+    }
   }
+
   edit(contents, operation) {
     const id = this.contextFor(contents),
       url = this.document(contents);
@@ -440,6 +522,7 @@ export class UserUnderstandingService {
     next.deleted_revisions[id] = revision + 1;
     this.commit(next);
     this.reports.delete(id);
+    this.liveConversations.delete(id);
     this.notify('nexo:understanding-changed', {
       contextId: id,
       revision: revision + 1,

@@ -1,5 +1,10 @@
 # NEXO AI 0.1.33 — Capa 1: User Understanding Engine
 
+> Desarrollo posterior: [Comprensión en siete etapas](NEXO-COMPRENSION-ETAPAS.md).
+> La etapa 1 amplía la recepción incremental y observación del asistente, con
+> renovación automática del panel; las descripciones de iteraciones anteriores
+> de este documento deben leerse como evidencia histórica, no como límite actual.
+
 ## Alcance y estado real
 
 Implementación local, independiente y reutilizable, integrada al flujo de preparación de mensajes y al consumidor del lector de conversaciones ChatGPT existente. No es un nuevo expediente ni una copia de EVO MEMORY. No incorpora LLM, agente, ejecución, elección de herramientas, evaluación/corrección de respuestas ni segunda capa de mediación. No cambia prompts a partir del nuevo estado: entrega una representación estructurada y aclaraciones para revisión humana y para futuros consumidores.

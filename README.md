@@ -5,6 +5,11 @@ con IA, no acumular funciones. Sin cambiar silenciosamente el objetivo ni invent
 información para corregir respuestas.
 [Prioridades y criterios de revisión](docs/NEXO-CRITERIOS-RECTORES.md).
 
+**Comprensión por etapas:** [plan de siete bloques y alcance comprobado de la etapa 1](docs/NEXO-COMPRENSION-ETAPAS.md).
+La etapa actual incorpora observación por roles, mensajes nuevos en orden, respuestas
+no verificadas del asistente y renovación automática del panel. No completa aún los
+72 requisitos ni añade autonomía.
+
 **0.1.33 · Capa 1 — User Understanding Engine:** objetivo literal persistente,
 restricciones separadas de preferencias, tarea/subobjetivos, procedencia, vigencia,
 incertidumbre y aclaraciones revisables. Integrado a preparación de mensajes y

@@ -1,3 +1,5 @@
+import { createUnderstandingRefresh } from './understandingRefresh.js';
+
 /** Inspector y aclaraciones UUE. No envía prompts ni ejecuta herramientas. */
 const LABELS = {
   subgoals: 'Subobjetivos',
@@ -36,6 +38,11 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
   const body = create('div', undefined, 'work-content');
   root.append(status, body);
   const tabButton = document.getElementById('panel-tab-understanding');
+  const autoRefresh = createUnderstandingRefresh({
+    refresh,
+    isBusy: () => busy,
+    isActive: () => root.classList.contains('active'),
+  });
   function target() {
     try {
       return activeTab()?.view.getWebContentsId();
@@ -82,15 +89,32 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
       status.textContent = r?.error || 'No se pudo leer.';
       return;
     }
+    const scroll = root.scrollTop,
+      focused = document.activeElement;
+    const focusKey = focused?.dataset?.understandingDraft,
+      selection = focusKey
+        ? [focused.selectionStart, focused.selectionEnd]
+        : null;
     snapshot = r;
     render();
+    if (focusKey) {
+      const replacement = [
+        ...body.querySelectorAll('[data-understanding-draft]'),
+      ].find((e) => e.dataset.understandingDraft === focusKey);
+      if (replacement) {
+        replacement.focus({ preventScroll: true });
+        if (selection.every(Number.isInteger))
+          replacement.setSelectionRange(...selection);
+      }
+    }
+    root.scrollTop = scroll;
     status.textContent =
       r.observationError ||
       (r.erased
         ? 'Contexto eliminado: la observación automática no lo volverá a importar hasta una edición explícita.'
         : r.observationEnabled
           ? 'Comprensión local · no modifica tus prompts ni llama a modelos.'
-          : 'Observación pausada porque EVO MEMORY está desactivada.');
+          : 'No se pudo confirmar el estado de observación.');
     tabButton?.classList.toggle(
       'has-question',
       r.state.pending_questions.some((q) => q.status === 'open'),
@@ -128,6 +152,7 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
     input.rows = name === 'goal' ? 6 : 4;
     input.maxLength = name === 'recall' ? 4000 : 200000;
     input.required = true;
+    input.dataset.understandingDraft = key;
     input.value = drafts.get(key) ?? defaultText ?? '';
     label.append(input);
     f.append(label);
@@ -197,6 +222,55 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
       ),
     );
     body.append(button('Recargar sin perder borradores', refresh));
+    const observation = snapshot.conversation;
+    if (observation) {
+      const conversation = create('details');
+      conversation.open = true;
+      conversation.append(
+        create(
+          'summary',
+          `Conversación observada · revisión ${observation.revision}`,
+        ),
+      );
+      conversation.append(
+        create(
+          'p',
+          'Ventana local limitada: metadatos del usuario y extractos de respuestas. Lo dicho por ChatGPT no es una decisión tuya ni evidencia de ejecución. No se guarda una segunda transcripción completa.',
+          'note',
+        ),
+      );
+      for (const warning of observation.warnings)
+        conversation.append(create('p', warning, 'work-status'));
+      for (const m of observation.messages) {
+        const card = create('article', undefined, 'work-card');
+        card.append(
+          create(
+            'h3',
+            m.role === 'user'
+              ? 'Usuario · mensaje observado'
+              : 'ChatGPT · respuesta observada, no verificada',
+          ),
+        );
+        card.append(
+          create(
+            'p',
+            `${m.id} · ${m.chars} caracteres · ${m.status === 'streaming' ? 'En generación (sólo RAM)' : m.status === 'clipped' ? 'Recortado' : 'Texto estable en el DOM; no confirma tarea completada'}`,
+            'note',
+          ),
+        );
+        if (m.role === 'assistant') card.append(create('p', m.preview));
+        if (m.preview_clipped)
+          card.append(
+            create(
+              'p',
+              'Se muestra un extracto de hasta 4.000 caracteres.',
+              'note',
+            ),
+          );
+        conversation.append(card);
+      }
+      body.append(conversation);
+    }
     if (s.last_interaction)
       body.append(
         create(
@@ -448,10 +522,7 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         'Comprensión: hay una aclaración pendiente en un contexto',
       );
     }
-    if (snapshot?.state.context_id === p.contextId && !busy) {
-      status.textContent =
-        'El contexto se actualizó. Recargá para revisar; se conservarán tus borradores.';
-    }
+    if (snapshot?.state.context_id === p.contextId) autoRefresh.schedule();
   });
   return {
     refresh,

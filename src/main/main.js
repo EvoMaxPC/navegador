@@ -692,7 +692,7 @@ function registerIpc() {
     const snapshot = repetitionSnapshot(payload);
     if (!snapshot) return { ok: false };
     // Consumir la vista literal ya validada: existe aun con EVO desactivada.
-    if(isUnderstandingSource(event))userUnderstanding?.observeConversation(sender,snapshot.turns);
+    if(isUnderstandingSource(event))userUnderstanding?.observeConversation(sender,snapshot.turns,{streaming:snapshot.streaming});
     const next = { ...snapshot, href, webContentsId: sender.id };
     const previous = repetitionSnapshots.get(sender.id);
     repetitionSnapshots.set(sender.id, next);
@@ -735,7 +735,7 @@ function registerIpc() {
     }
     // UUE no depende ni del interruptor ni del resultado de la captura EVO.
     const observation = isUnderstandingSource(event)
-      ? userUnderstanding?.observeConversation(event.sender,payload.turns)
+      ? userUnderstanding?.observeConversation(event.sender,payload.turns,{streaming:payload.streaming===true})
       : { skipped: 'snapshot-no-autorizado' };
     const observed = observation?.ok === true || observation?.duplicate === true;
     if(store.settings.memory?.enabled === false) {
