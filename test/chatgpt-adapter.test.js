@@ -167,6 +167,43 @@ test('DOM observado de ChatGPT: si la etiqueta sólo detecta al usuario, recuper
     ['Pregunta de prueba', 'Respuesta real de ChatGPT']);
 });
 
+test('DOM real: evita duplicar etiquetas y selectores estructurales anidados del mismo mensaje', () => {
+  const userText = { innerText: 'Pregunta original' };
+  const userInner = { innerText: 'Pregunta original', parentElement: null, getAttribute: (name) => name === 'data-message-author-role' ? 'user' : null, querySelector: () => userText };
+  const userWrapper = { innerText: 'Pregunta original', parentElement: null, contains: (node) => node === userInner, querySelector: (selector) => selector === '.whitespace-pre-wrap' ? userText : null };
+  userInner.parentElement = userWrapper;
+  const assistantText = { innerText: 'Respuesta original' };
+  const assistantInner = { innerText: 'Respuesta original', parentElement: null, getAttribute: (name) => name === 'data-message-author-role' ? 'assistant' : null, querySelector: (selector) => selector === '.markdown' ? assistantText : null };
+  const assistantWrapper = { innerText: 'Respuesta original', parentElement: null, contains: (node) => node === assistantInner, querySelector: (selector) => selector === '.markdown' ? assistantText : null };
+  assistantInner.parentElement = assistantWrapper;
+  const headers = [
+    { textContent: 'Dijiste:', nextElementSibling: userWrapper },
+    { textContent: 'ChatGPT dijo:', nextElementSibling: assistantWrapper },
+  ];
+  const document = { querySelectorAll(selector) {
+    if (selector === 'main h4') return headers;
+    if (selector === '[data-message-author-role]') return [userInner, assistantInner];
+    return [];
+  } };
+  const selected = selectChatGptMessages(document);
+  assert.deepEqual(selected.messages.map((entry) => entry.role), ['user', 'assistant']);
+  assert.deepEqual(readChatGptConversation(document).map((turn) => turn.content), ['Pregunta original', 'Respuesta original']);
+});
+
+test('DOM parcial: ordena usuario y asistente según su posición aunque se detecten por estrategias distintas', () => {
+  const user = { innerText: 'Pregunta', parentElement: null, getAttribute: (name) => name === 'data-message-author-role' ? 'user' : null, querySelector: () => null };
+  const assistant = { innerText: 'Respuesta', parentElement: null, getAttribute: () => null, querySelector: (selector) => selector === '.markdown' ? { innerText: 'Respuesta' } : null };
+  user.compareDocumentPosition = (other) => other === assistant ? 4 : 0;
+  assistant.compareDocumentPosition = (other) => other === user ? 2 : 0;
+  const headers = [{ textContent: 'ChatGPT dijo:', nextElementSibling: assistant }];
+  const document = { querySelectorAll(selector) {
+    if (selector === 'main h4') return headers;
+    if (selector === '[data-message-author-role]') return [user];
+    if (selector === 'article') return [assistant];
+    return [];
+  } };
+  assert.deepEqual(readChatGptConversation(document).map((turn) => turn.role), ['user', 'assistant']);
+});
 test('DOM observado de ChatGPT: las dos etiquetas visibles extraen usuario y respuesta', () => {
   const userNode = { innerText: 'Pregunta', querySelector: () => null };
   const assistantNode = { innerText: 'Respuesta', querySelector: () => null };
