@@ -112,6 +112,16 @@
       </section>
 
       <section class="panel-view" data-panel="memory" id="panel-memory" role="tabpanel" aria-labelledby="panel-tab-memory" tabindex="0">
+        <section class="chat-capture-card" aria-live="polite" aria-labelledby="chatCaptureTitle">
+          <div class="chat-capture-heading"><span class="capture-indicator" id="chatCaptureDot"></span><div><p class="eyebrow">CAPTURA EN VIVO</p><h2 id="chatCaptureTitle">Lectura de ChatGPT</h2></div></div>
+          <p class="chat-capture-status" id="chatCaptureStatus">Esperando una conversación de ChatGPT…</p>
+          <div class="chat-capture-stats">
+            <div><b id="chatCaptureCurrent">0</b><span>mensajes detectados ahora</span></div>
+            <div><b id="chatCaptureSaved">0</b><span>mensajes guardados</span></div>
+            <div><b id="chatCaptureConversations">0</b><span>conversaciones guardadas</span></div>
+          </div>
+          <p class="note" id="chatCaptureDetail">Abrí un chat de ChatGPT en NEXO. Se mostrarán aquí los mensajes que estén cargados en pantalla.</p>
+        </section>
         <div class="stats">
           <div class="stat"><b id="memItems">0</b><span>memorias</span></div>
           <div class="stat"><b id="memTokens">0</b><span>tokens guardados</span></div>
