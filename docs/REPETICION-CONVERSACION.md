@@ -43,6 +43,10 @@ Flujo: DOM → bundle → preload aislado → `nexo:repetition:snapshot` → cac
 - Test del circuito de producción: DOM simulado → bundle generado → preload real → IPC del principal → consulta desde shell, incluyendo respuesta de más de 18k, actualización sin duplicación y fetch de paso directo con memoria/mediación apagadas.
 - Tests del renderer: sólo texto, no ejecución HTML, actualización del mismo nodo sin duplicados, vaciado, aviso de límites y respeto del scroll del usuario.
 - Chromium headless con fixture local y MutationObserver real: panel a 1440×1000 y 760×900, ambos roles exactos, conservación de espacios/saltos/Unicode, actualización automática, ausencia de HTML ejecutable, chat vacío y memoria apagada. Sin errores JS ni infracciones detectadas por axe WCAG 2 A/AA en ese recorrido. No es certificación de accesibilidad ni una sesión real de ChatGPT.
-- Benchmark existente ejecutado sin cambiar presupuestos; bundle de inyección aproximadamente **52,0 kB** (antes de esta función, 51,3 kB). Sin dependencias nuevas de producción.
+- Benchmark existente ejecutado sin cambiar presupuestos; bundle de inyección aproximadamente **53,7 kB** en el estado integrado (baseline previo: 51,3 kB; el total incluye también el espejo de diagnóstico remoto). Sin dependencias nuevas de producción.
 
 Pendiente: confirmar los selectores, lectura completa del contenido cargado, cambios de conversación y generación en una sesión propia de ChatGPT dentro de Electron/Windows. Los tests y fixtures no equivalen a esa comprobación.
+
+## Integración concurrente
+
+Se conservaron e integraron los commits remotos `2bb1696` y `4ec73d2`, que muestran un espejo temporal de captura dentro de la propia pestaña. Ese espejo de diagnóstico no sustituye este panel lateral: no muestra por sí mismo ambos roles ni todo el historial cargado. Su Shadow DOM cerrado no se recorre al leer los mensajes. Se completó el mock de Document con `addEventListener` para probar también ese arranque sin alterar la lógica de producción del espejo.

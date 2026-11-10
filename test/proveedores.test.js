@@ -538,7 +538,7 @@ async function montarPagina({ host = 'chatgpt.com', href = 'https://chatgpt.com/
   const antes = { window: globalThis.window, location: globalThis.location, document: globalThis.document };
   globalThis.window = window_;
   globalThis.location = window_.location;
-  globalThis.document = { querySelector: () => null, readyState: 'loading' };
+  globalThis.document = { querySelector: () => null, readyState: 'loading', addEventListener() {} };
 
   await import(`../src/inject/index.js?pagina=${Math.random()}`);
 
