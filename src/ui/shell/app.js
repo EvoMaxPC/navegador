@@ -657,9 +657,11 @@ async function refreshRepetition() {
   }
 }
 nexo.on('nexo:repetition-changed', (snapshot) => {
-  if (!isPanelActive('repetition')) return;
   const source = repetitionSource();
   if (!source || snapshot.webContentsId !== source.webContentsId || (snapshot.href && snapshot.href !== source.href)) return;
+  memState.liveSnapshot = snapshot.href ? snapshot : null;
+  if (isPanelActive('memory')) uiTasks.schedule('chat-capture', renderChatCapture);
+  if (!isPanelActive('repetition')) return;
   repetitionTicket += 1;
   uiTasks.schedule('repetition', () => {
     const current = repetitionSource();
@@ -894,6 +896,12 @@ const MEM = {
   importBtn: document.getElementById('memImport'),
   clear: document.getElementById('memClear'),
   file: document.getElementById('memFile'),
+  captureStatus: document.getElementById('chatCaptureStatus'),
+  captureCurrent: document.getElementById('chatCaptureCurrent'),
+  captureSaved: document.getElementById('chatCaptureSaved'),
+  captureConversations: document.getElementById('chatCaptureConversations'),
+  captureDetail: document.getElementById('chatCaptureDetail'),
+  captureDot: document.getElementById('chatCaptureDot'),
 };
 
 const MEM_KIND_LABEL = {
@@ -910,7 +918,27 @@ const MEM_KIND_LABEL = {
   question: 'pregunta',
 };
 
-const memState = { items: [], stats: null, lastPacket: null };
+const memState = { items: [], stats: null, lastPacket: null, conversations: [], liveSnapshot: null };
+
+function renderChatCapture() {
+  const conversations = memState.conversations || [];
+  const savedTurns = conversations.reduce((sum, entry) => sum + (entry.turns?.length || 0), 0);
+  const live = memState.liveSnapshot;
+  const liveTurns = live?.turns || [];
+  const users = liveTurns.filter((turn) => turn.role === 'user').length;
+  const assistants = liveTurns.filter((turn) => turn.role === 'assistant').length;
+  MEM.captureCurrent.textContent = num(liveTurns.length);
+  MEM.captureSaved.textContent = num(savedTurns);
+  MEM.captureConversations.textContent = num(conversations.length);
+  MEM.captureDot.dataset.active = String(Boolean(live?.href && liveTurns.length));
+  if (live?.href && liveTurns.length) {
+    MEM.captureStatus.textContent = live.streaming ? 'ChatGPT está generando; lectura en curso.' : 'ChatGPT detectado · lectura automática activa.';
+    MEM.captureDetail.textContent = `En esta pestaña: ${users} mensajes tuyos y ${assistants} respuestas de ChatGPT${live.clipped ? ' · vista parcial: hay mensajes recortados u omitidos' : ''}. El historial guardado se actualiza automáticamente.`;
+  } else {
+    MEM.captureStatus.textContent = 'Esperando una conversación de ChatGPT…';
+    MEM.captureDetail.textContent = 'Abrí un chat de ChatGPT en NEXO. Se mostrarán aquí los mensajes que estén cargados en pantalla.';
+  }
+}
 
 function renderMemoryItems(entries) {
   if (!entries.length) {
@@ -968,12 +996,15 @@ async function refreshMemory() {
     }
     MEM.file.textContent = memState.stats.file ? `Archivo: ${memState.stats.file}` : '';
     renderMemoryItems(memState.items.slice(0, 40));
-    if (MEM.conversations?.closest('details')?.open && nexo.memory.conversations) {
-      const conversations = await nexo.memory.conversations();
-      MEM.conversations.innerHTML = conversations.length ? conversations.map((entry) =>
-        `<li><details><summary>${escapeHtml(entry.conversationId)} · ${entry.turns.length} mensajes${entry.clipped ? ' (recortado)' : ''}</summary>${entry.turns.map((turn) =>
-          `<p><b>${turn.role === 'user' ? 'Vos' : 'ChatGPT'}</b></p><pre class="mem-text">${escapeHtml(turn.content)}</pre>`).join('')}</details></li>`
-      ).join('') : '<li class="empty">Todavía no se leyeron mensajes de ChatGPT.</li>';
+    if (nexo.memory.conversations) {
+      memState.conversations = await nexo.memory.conversations();
+      renderChatCapture();
+      if (MEM.conversations?.closest('details')?.open) {
+        MEM.conversations.innerHTML = memState.conversations.length ? memState.conversations.map((entry) =>
+          `<li><details><summary>${escapeHtml(entry.conversationId)} · ${entry.turns.length} mensajes${entry.clipped ? ' (recortado)' : ''}</summary>${entry.turns.map((turn) =>
+            `<p><b>${turn.role === 'user' ? 'Vos' : 'ChatGPT'}</b></p><pre class="mem-text">${escapeHtml(turn.content)}</pre>`).join('')}</details></li>`
+        ).join('') : '<li class="empty">Todavía no se leyeron mensajes de ChatGPT.</li>';
+      }
     }
   } catch {
     /* el panel de memoria es opcional frente al navegador */
