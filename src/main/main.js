@@ -733,10 +733,16 @@ function registerIpc() {
       (event.senderFrame && event.sender?.mainFrame && event.senderFrame !== event.sender.mainFrame) || !Array.isArray(payload?.turns) || payload.turns.length > 200) {
       return { ok: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
     }
-    // UUE no depende ni del interruptor ni del resultado de la captura EVO.
-    if(isUnderstandingSource(event))userUnderstanding?.observeConversation(event.sender,payload.turns);
+    // UUE observa siempre; EVO sólo controla la captura/recuperación de antecedentes.
+    const understandingResult = isUnderstandingSource(event)
+      ? userUnderstanding?.observeConversation(event.sender, payload.turns)
+      : null;
     if(store.settings.memory?.enabled === false) {
-      return { ok: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
+      // Confirmar el IPC si UUE recibió el snapshot evita que el lector reintente
+      // indefinidamente sólo porque la persistencia EVO está desactivada.
+      return understandingResult
+        ? { ok: true, observed: true, memoryDisabled: true }
+        : { ok: false, skipped: 'understanding-source-rejected', hrefMatches: sameDocument };
     }
     const url = pageUrl;
     // Nunca confiar en el ID del documento para escribir otra conversación.
