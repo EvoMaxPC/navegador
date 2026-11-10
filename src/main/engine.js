@@ -450,7 +450,7 @@ export class Engine {
     if (!fragment) return { ok: true, skipped: 'empty' };
     const now = Date.now();
     const pending = this.#pendingTurn(webContentsId, now);
-    const messageId = String(payload.messageId || pending?.entry?.messageId || '');
+    const messageId = this.resolveMessageId(webContentsId, payload.messageId || pending?.entry?.messageId || '') || '';
     const rendered = (this.recentTexts.get(webContentsId) || []).findLast(item =>
       item.rendered && item.messageId === this.resolveMessageId(webContentsId, messageId));
     if (rendered && payload.source !== 'dom-render') return { ok: true, skipped: 'rendered-authoritative' };

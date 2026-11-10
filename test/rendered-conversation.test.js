@@ -134,3 +134,23 @@ test('pagehide puede vaciar la cola sin esperar a la siguiente escritura agrupad
   assert.equal(saved.length, 1); assert.equal(saved[0].turns[1].content, 'parcial al salir');
   queue.cancel();
 });
+
+
+test('alias del mismo envío no reinicia el provisional DOM ni duplica palabras', () => {
+  const e = engine(); send(e);
+  e.messageAliases.set('1|request-alias', 'm1');
+  e.onRenderedConversation(1, snapshot('uno dos'), snapshot(''));
+  e.onStreamProgress(1, { messageId: 'request-alias', text: 'uno dos tres', host: 'chatgpt.com' });
+  assert.equal(e.stats().outputTokens, 2);
+  close(e, 'uno dos tres', 'request-alias');
+  assert.equal(e.stats().outputTokens, 2); assert.equal(e.stats().responses, 1);
+});
+
+test('red sin texto antes del DOM recupera palabras de la respuesta ya contada', () => {
+  const e = engine(); send(e); e.onNetworkResponse(1, { host: 'chatgpt.com' });
+  assert.equal(e.stats().responses, 1);
+  e.onRenderedConversation(1, snapshot('uno dos', false), snapshot(''));
+  assert.equal(e.stats().outputTokens, 2); assert.equal(e.stats().responses, 1);
+  close(e, 'uno dos tres cuatro');
+  assert.equal(e.stats().outputTokens, 2); assert.equal(e.stats().responses, 1);
+});
