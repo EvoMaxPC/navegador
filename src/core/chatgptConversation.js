@@ -12,22 +12,124 @@ export function isChatGptMemoryUrl(value) {
   } catch { return false; }
 }
 
+const MESSAGE_STRATEGIES = [
+  {
+    name: 'author-role',
+    selector: '[data-message-author-role]',
+    role: (node) => node.getAttribute?.('data-message-author-role'),
+  },
+  {
+    name: 'data-turn',
+    selector: '[data-turn]',
+    role: (node) => {
+      const value = node.getAttribute?.('data-turn');
+      if (value === 'user' || value === 'assistant') return value;
+      if (node.querySelector?.('[data-message-author-role="user"]')) return 'user';
+      if (node.querySelector?.('[data-message-author-role="assistant"]')) return 'assistant';
+      if (node.querySelector?.('.markdown, .prose')) return 'assistant';
+      if (node.querySelector?.('.whitespace-pre-wrap')) return 'user';
+      return '';
+    },
+  },
+  {
+    name: 'conversation-turn',
+    selector: '[data-testid^="conversation-turn"]',
+    role: (node, index) => {
+      if (node.querySelector?.('[data-message-author-role="user"]')) return 'user';
+      if (node.querySelector?.('[data-message-author-role="assistant"]')) return 'assistant';
+      if (node.querySelector?.('.markdown, .prose')) return 'assistant';
+      if (node.querySelector?.('.whitespace-pre-wrap')) return 'user';
+      // Último respaldo de EVO Memory: los turnos de conversación alternan
+      // usuario/asistente cuando el DOM no expone atributos semánticos.
+      return index % 2 === 0 ? 'user' : 'assistant';
+    },
+  },
+  {
+    name: 'article',
+    selector: 'article',
+    role: (node, index) => {
+      if (node.querySelector?.('[data-message-author-role="user"]')) return 'user';
+      if (node.querySelector?.('[data-message-author-role="assistant"]')) return 'assistant';
+      if (node.querySelector?.('.markdown, .prose')) return 'assistant';
+      if (node.querySelector?.('.whitespace-pre-wrap')) return 'user';
+      return index % 2 === 0 ? 'user' : 'assistant';
+    },
+  },
+];
+
+function outermost(nodes) {
+  return nodes.filter((node) => !nodes.some((other) => other !== node && other.contains?.(node)));
+}
+
+function safeQueryAll(document, selector) {
+  try {
+    return outermost(Array.from(document?.querySelectorAll?.(selector) || []));
+  } catch {
+    return [];
+  }
+}
+
+function messageHash(value) {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash + value.charCodeAt(index)) | 0;
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function contentNodeFor(node, role, literal) {
+  if (role === 'assistant') {
+    return node.querySelector?.('.markdown') ||
+      node.querySelector?.('.prose, [data-message-content]') || node;
+  }
+  if (role === 'user') {
+    return node.querySelector?.('.whitespace-pre-wrap, [data-message-content]') || node;
+  }
+  return node;
+}
+
+/** Elige el primer selector compatible con el DOM actual de ChatGPT. */
+function locateMessageNodes(document) {
+  for (const strategy of MESSAGE_STRATEGIES) {
+    const nodes = safeQueryAll(document, strategy.selector);
+    if (!nodes.length) continue;
+    const messages = nodes.map((node, index) => ({
+      node,
+      role: strategy.role(node, index),
+      index,
+    })).filter((item) => item.role === 'user' || item.role === 'assistant');
+    if (messages.length) return { strategy: strategy.name, messages, totalNodes: nodes.length };
+  }
+  return { strategy: 'none', messages: [], totalNodes: 0 };
+}
+
+/** Devuelve los mensajes que ChatGPT tiene renderizados, con IDs estables y deduplicables. */
 export function readChatGptConversation(document, { literal = false } = {}) {
-  const nodes = Array.from(document?.querySelectorAll?.('[data-message-author-role]') || []);
-  return nodes.slice(-MAX_CONVERSATION_TURNS).flatMap((node, index) => {
-    const role = node.getAttribute?.('data-message-author-role');
-    if (!['user', 'assistant'].includes(role)) return [];
-    const contentNode = role === 'assistant'
-      ? node.querySelector?.('.markdown') || node.querySelector?.('.prose, [data-message-content]') || node
-      : (literal ? node.querySelector?.('.whitespace-pre-wrap') || node : node);
-    const value = String(contentNode.innerText ?? contentNode.textContent ?? '');
+  const located = locateMessageNodes(document);
+  const occurrences = new Map();
+  const offset = Math.max(0, located.totalNodes - MAX_CONVERSATION_TURNS);
+  return located.messages.slice(-MAX_CONVERSATION_TURNS).flatMap(({ node, role, index }) => {
+    const contentNode = contentNodeFor(node, role, literal);
+    const value = String(contentNode?.innerText ?? contentNode?.textContent ?? '');
     const raw = literal ? value : value.trim();
     if (!raw) return [];
-    const id = node.getAttribute?.('data-message-id') ||
+
+    const nativeId = node.getAttribute?.('data-message-id') ||
+      node.getAttribute?.('data-turn-id') ||
       node.closest?.('[data-message-id]')?.getAttribute?.('data-message-id') ||
-      node.closest?.('article[data-testid]')?.getAttribute?.('data-testid') || `visible-${Math.max(0, nodes.length - MAX_CONVERSATION_TURNS) + index}`;
+      node.closest?.('[data-turn-id]')?.getAttribute?.('data-turn-id') ||
+      node.closest?.('article[data-testid]')?.getAttribute?.('data-testid');
+    const signature = `${role}:${messageHash(raw)}`;
+    const occurrence = occurrences.get(signature) || 0;
+    occurrences.set(signature, occurrence + 1);
+    const id = nativeId || `visible-${signature}-${occurrence}`;
     const limit = literal ? REPETITION_MAX_TURN_CHARS : MAX_TURN_CHARS;
-    return [{ id: literal ? String(id).slice(0, 256) : id, role, content: raw.slice(0, limit), clipped: raw.length > limit }];
+    return [{
+      id: literal ? String(id).slice(0, 256) : String(id),
+      role,
+      content: raw.slice(0, limit),
+      clipped: raw.length > limit,
+    }];
   });
 }
 
@@ -44,7 +146,7 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
       if (publishLive) {
         const turns = readChatGptConversation(document, { literal: true });
         let remaining = REPETITION_MAX_CHARS;
-        let clipped = (document.querySelectorAll?.('[data-message-author-role]') || []).length > MAX_CONVERSATION_TURNS;
+        let clipped = locateMessageNodes(document).totalNodes > MAX_CONVERSATION_TURNS;
         const bounded = turns.flatMap((turn) => {
           if (!remaining) { clipped = true; return []; }
           const content = turn.content.slice(0, remaining);
@@ -65,7 +167,6 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
       last = signature;
       publish(payload);
     } catch (error) {
-      // La página no debe romperse si cambia el DOM; error visible al consumidor.
       publish({ error: String(error?.message || error) });
     }
   };
@@ -74,7 +175,13 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
     if (stopped) return;
     if (window.MutationObserver && document.body && !observer) {
       observer = new window.MutationObserver(schedule);
-      observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-message-id', 'data-message-author-role'] });
+      observer.observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['data-message-id', 'data-message-author-role', 'data-turn', 'data-turn-id', 'data-testid'],
+      });
     }
     schedule();
   };
