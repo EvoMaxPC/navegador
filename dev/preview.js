@@ -5,7 +5,7 @@ let settings = structuredClone(DEFAULT_SETTINGS);
 const empty = async () => [];
 const result = async () => ({ ok: true, removed: 0 });
 window.nexo = {
-  getConfig: async () => ({ version: '0.1.27 · vista web', pagePreload: null }),
+  getConfig: async () => ({ version: '0.1.28 · vista web', pagePreload: null }),
   getSettings: async () => settings,
   setSettings: async (patch) => (settings = mergeSettings(settings, patch)),
   resetSettings: async () => (settings = structuredClone(DEFAULT_SETTINGS)),

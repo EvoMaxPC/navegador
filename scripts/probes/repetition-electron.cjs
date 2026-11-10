@@ -26,12 +26,13 @@ async function until(fn, label) {
   for (let i = 0; i < 100; i++) { if (await fn()) { report.checks.push(label); return; } await pause(100); }
   throw Error(label);
 }
+let suppressAutomaticSnapshot = false;
 const realHandle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, listener) => realHandle(channel, async (event, payload) => {
   const result = await listener(event, payload);
   if (channel === 'nexo:repetition:snapshot') report.snapshots.push({ turns: payload?.turns?.length, accepted: result?.ok,
     senderType: event.sender.getType(), mainFrame: event.senderFrame === event.sender.mainFrame, matchingUrl: payload?.href === event.sender.getURL() });
-  return result;
+  return channel === 'nexo:repetition:get' && suppressAutomaticSnapshot ? null : result;
 });
 
 // Intercepta HTTPS en esta sesión aislada. No relaja TLS ni modifica producción.
@@ -46,6 +47,8 @@ app.whenReady().then(() => {
   await app.whenReady();
   await until(() => BrowserWindow.getAllWindows().some(w => w.webContents.getURL().startsWith('nexo://app/')), 'shell creada');
   const shell = BrowserWindow.getAllWindows()[0].webContents;
+  const realSend = shell.send.bind(shell);
+  shell.send = (channel, ...args) => { if (channel !== 'nexo:repetition-changed' || !suppressAutomaticSnapshot) realSend(channel, ...args); };
   await until(() => shell.executeJavaScript('Boolean(window.nexo && document.querySelector("webview"))').catch(() => false), 'shell lista');
   await shell.executeJavaScript(`(async()=>{await nexo.setSettings({enabled:false,memory:{enabled:false}});document.getElementById('omnibox').value='https://chatgpt.com/c/fixture';document.getElementById('omniboxForm').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));document.querySelector('.stab[data-panel="repetition"]').click();})()`);
   await until(() => webContents.getAllWebContents().some(w => w.getType() === 'webview' && w.getURL() === 'https://chatgpt.com/c/fixture'), 'webview HTTPS cargada');
@@ -84,6 +87,18 @@ app.whenReady().then(() => {
     await until(() => shell.executeJavaScript('document.querySelectorAll("#repetitionList .repeat-text").length===1 && document.querySelector("#repetitionList .repeat-text").textContent==="GPT tras reemplazar body"'), 'lector aislado sobrevive APIs de página alteradas y body sustituido');
     await guest.executeJavaScript(`window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));document.getElementsByTagName('pre')[0].textContent='GPT después de pageshow';window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));`);
     await until(() => shell.executeJavaScript('document.querySelector("#repetitionList .repeat-text")?.textContent==="GPT después de pageshow"'), 'reanuda tras eventos pagehide/pageshow sintéticos');
+    // Forzar la rama de respaldo de la shell: sin caché consultable ni eventos
+    // automáticos visibles, aunque el DOM HTTPS contiene ambos mensajes.
+    suppressAutomaticSnapshot = true;
+    await shell.executeJavaScript(`document.getElementById('omnibox').value='https://chatgpt.com/c/direct-fallback-only';document.getElementById('omniboxForm').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));`);
+    await until(() => guest.getURL() === 'https://chatgpt.com/c/direct-fallback-only' && !guest.isLoading(), 'documento nuevo para respaldo directo');
+    await shell.executeJavaScript(`document.querySelector('.stab[data-panel="memory"]').click()`);
+    await until(() => shell.executeJavaScript(`document.getElementById('memoryLiveConversation').dataset.strategy==='direct-console-injection' && document.querySelectorAll('#memoryLiveConversation .repeat-text').length===2`), 'respaldo executeJavaScript muestra ambos roles sin snapshot automático');
+    const directText = await guest.executeJavaScript(`[...document.querySelectorAll('main h4')].map(h=>h.nextElementSibling.innerText)`);
+    const displayed = await shell.executeJavaScript(`[...document.querySelectorAll('#memoryLiveConversation .repeat-text')].map(n=>n.textContent)`);
+    if (JSON.stringify(displayed) !== JSON.stringify(directText)) throw Error('El respaldo no conserva innerText literal');
+    report.checks.push('texto literal del respaldo comparado contra DOM real del webview');
+    suppressAutomaticSnapshot = false;
     finish();
   } catch (error) {
     report.reader = await guest.executeJavaScript('window.__nexo?.conversationReader?.()').catch(() => null);

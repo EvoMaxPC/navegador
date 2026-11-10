@@ -7,6 +7,7 @@ export const REPETITION_MAX_CHARS = 1000000;
 
 /** Valida texto, nunca HTML. No recorta, resume, normaliza ni interpreta mensajes. */
 function validStrategy(value) {
+  if (value === 'direct-console-injection') return value;
   if (typeof value !== 'string' || !value) return 'none';
   const parts = value.split('+');
   return parts.length > 0 && parts.every((part) => CHATGPT_STRATEGIES.includes(part)) &&

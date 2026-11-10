@@ -1,3 +1,4 @@
+import { readMemoryConversation, sameConversationSource } from './chatgptDirect.js';
 import { createRepetitionView } from './repetition.js';
 import { isChatGptMemoryUrl } from '../../core/chatgptConversation.js';
 /**
@@ -641,6 +642,7 @@ const repetitionView = createRepetitionView({
   scroller: document.getElementById('panel-repetition'),
 });
 let repetitionTicket = 0;
+let memoryRefreshTicket = 0, memoryLiveRevision = 0;
 let repetitionSourceKey = '';
 function repetitionSource() {
   const tab = activeTab();
@@ -686,7 +688,8 @@ nexo.on('nexo:repetition-changed', (snapshot) => {
       if (incoming.origin !== current.origin || incoming.pathname !== current.pathname) return;
     } catch { return; }
   }
-  memState.liveSnapshot = snapshot.href ? snapshot : null;
+  memoryLiveRevision += 1;
+  memState.liveSnapshot = snapshot.href ? { ...snapshot, href: source.href } : null;
   if (isPanelActive('memory')) uiTasks.schedule('chat-capture', renderChatCapture);
   if (!isPanelActive('repetition')) return;
   repetitionTicket += 1;
@@ -953,54 +956,19 @@ const memoryLiveView = createRepetitionView({
   scroller: document.getElementById('panel-memory'),
 });
 
-/**
- * Captura directa del DOM de ChatGPT desde el webview.
- * Es el equivalente a ejecutar el lector en la consola del sitio: devuelve
- * los mensajes visibles ya renderizados sin depender del watcher del preload.
- */
-async function readChatGptDirect(tab) {
-  if (!tab?.view || typeof tab.view.executeJavaScript !== 'function') return null;
-  const script = `(() => {
-    const main = document.querySelector('main');
-    if (!main) return [];
-    return [...main.querySelectorAll('h4')].map((heading) => {
-      const label = (heading.innerText || heading.textContent || '').trim();
-      const content = heading.nextElementSibling;
-      if (!content) return null;
-      const role = /Dijiste:|You said:/i.test(label) ? 'user'
-        : /ChatGPT dijo:|ChatGPT said:/i.test(label) ? 'assistant' : null;
-      if (!role) return null;
-      const text = (content.innerText || content.textContent || '').trim();
-      return text ? { role, content: text } : null;
-    }).filter(Boolean);
-  })()`;
-  try {
-    const turns = await tab.view.executeJavaScript(script, true);
-    if (!Array.isArray(turns) || !turns.length) return null;
-    return {
-      webContentsId: tab.view.getWebContentsId(),
-      href: tab.view.getURL(),
-      turns: turns.map((turn, index) => ({ ...turn, id: `direct-${index}` })),
-      strategy: 'direct-console-injection',
-      streaming: false,
-      clipped: false,
-    };
-  } catch (error) {
-    console.warn('[nexo] captura directa de ChatGPT falló:', error?.message || error);
-    return null;
-  }
-}
-
 function renderChatCapture() {
   const conversations = memState.conversations || [];
   const savedTurns = conversations.reduce((sum, entry) => sum + (entry.turns?.length || 0), 0);
-  const live = memState.liveSnapshot;
+  const live = sameConversationSource(memState.liveSnapshot, repetitionSource()) ? memState.liveSnapshot : null;
+  document.getElementById('memoryLiveConversation').dataset.strategy = live?.strategy || 'none';
   const liveTurns = live?.turns || [];
   memoryLiveView.render(live, 'Esperando los mensajes renderizados de esta pestaña…');
   const liveStatus = document.getElementById('memoryLiveStatus');
   if (liveTurns.length) liveStatus.textContent += state.settings?.memory?.enabled === false
     ? ' · Guardado local desactivado: esta copia sólo está en RAM.'
-    : ' · Vista en RAM inmediata; guardado local agrupado cada 500 ms.';
+    : live.strategy === 'direct-console-injection'
+      ? ' · Lectura directa de respaldo en RAM; no confirma guardado local.'
+      : ' · Vista en RAM inmediata; guardado local agrupado cada 500 ms.';
   const users = liveTurns.filter((turn) => turn.role === 'user').length;
   const assistants = liveTurns.filter((turn) => turn.role === 'assistant').length;
   MEM.captureCurrent.textContent = num(liveTurns.length);
@@ -1009,7 +977,7 @@ function renderChatCapture() {
   MEM.captureDot.dataset.active = String(Boolean(live?.href && liveTurns.length));
   if (live?.href && liveTurns.length) {
     MEM.captureStatus.textContent = live.streaming ? 'ChatGPT está generando; lectura en curso.' : 'ChatGPT detectado · lectura automática activa.';
-    MEM.captureDetail.textContent = `En esta pestaña: ${users} mensajes tuyos y ${assistants} respuestas de ChatGPT${live.clipped ? ' · vista parcial: hay mensajes recortados u omitidos' : ''}. El historial guardado se actualiza automáticamente.`;
+    MEM.captureDetail.textContent = `En esta pestaña: ${users} mensajes tuyos y ${assistants} respuestas de ChatGPT${live.clipped ? ' · vista parcial: hay mensajes recortados u omitidos' : ''}. ${live.strategy === 'direct-console-injection' ? 'Respaldo directo del DOM; esta lectura no confirma persistencia.' : 'El historial guardado se actualiza automáticamente.'}`;
   } else {
     MEM.captureStatus.textContent = 'Esperando una conversación de ChatGPT…';
     MEM.captureDetail.textContent = 'Abrí un chat de ChatGPT en NEXO. Se mostrarán aquí los mensajes que estén cargados en pantalla.';
@@ -1049,6 +1017,8 @@ function renderMemoryItems(entries) {
 
 async function refreshMemory() {
   if (!nexo.memory) return;
+  const ticket = ++memoryRefreshTicket, source = repetitionSource(), tab = activeTab();
+  if (!sameConversationSource(memState.liveSnapshot, source)) { memState.liveSnapshot = null; renderChatCapture(); }
   try {
     memState.stats = await nexo.memory.stats();
     memState.items = await nexo.memory.list();
@@ -1074,20 +1044,14 @@ async function refreshMemory() {
     renderMemoryItems(memState.items.slice(0, 40));
     if (nexo.memory.conversations) {
       memState.conversations = await nexo.memory.conversations();
-      // No depender de que el renderer haya recibido el evento en vivo:
-      // consultar también el último snapshot almacenado al abrir/actualizar Memoria.
-      const source = repetitionSource();
-      // Primero usamos el snapshot automático. Si el lector aislado no entregó
-      // mensajes, ejecutamos una lectura directa en el webview (como en consola).
-      const fetchedLive = source ? await nexo.repetition.get(source) : null;
-      if (fetchedLive?.turns?.length) {
-        memState.liveSnapshot = fetchedLive;
-      } else if (source && !memState.liveSnapshot?.turns?.length) {
-        const direct = await readChatGptDirect(activeTab());
-        if (direct?.turns?.length && direct.webContentsId === source.webContentsId) {
-          memState.liveSnapshot = direct;
-        }
-      }
+      const live = await readMemoryConversation({ source, tab,
+        getSource: () => ticket === memoryRefreshTicket ? repetitionSource() : null,
+        getCached: source => nexo.repetition.get(source),
+        getLive: () => memState.liveSnapshot,
+        getRevision: () => memoryLiveRevision,
+      });
+      if (ticket !== memoryRefreshTicket) return;
+      if (live !== undefined) memState.liveSnapshot = live;
       renderChatCapture();
       if (MEM.conversations?.closest('details')?.open) {
         MEM.conversations.innerHTML = memState.conversations.length ? memState.conversations.map((entry) =>
