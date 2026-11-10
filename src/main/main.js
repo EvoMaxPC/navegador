@@ -1,3 +1,4 @@
+import { isPublicAssetPath } from './internalAssets.js';
 import { createCaptureDiagnostic } from './captureDiagnostic.js';
 import { isChatGptMemoryUrl } from '../core/chatgptConversation.js';
 /**
@@ -11,7 +12,7 @@ import { isChatGptMemoryUrl } from '../core/chatgptConversation.js';
 import { app, BrowserWindow, ipcMain, protocol, session, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { appendFile, readFile, stat, writeFile } from 'node:fs/promises';
-import { dirname, extname, join, normalize, sep } from 'node:path';
+import { dirname, extname, join, normalize, relative, sep } from 'node:path';
 import { Store } from './store.js';
 import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
@@ -208,7 +209,9 @@ function registerProtocol() {
 async function servirArchivo(request) {
     let pathname;
     try {
-      pathname = decodeURIComponent(new URL(request.url).pathname);
+      const requested = new URL(request.url);
+      if (requested.hostname !== 'app') return new Response('No encontrado', { status: 404 });
+      pathname = decodeURIComponent(requested.pathname);
     } catch {
       return new Response('Pedido inválido', { status: 400 });
     }
@@ -218,6 +221,7 @@ async function servirArchivo(request) {
     if (!file.startsWith(ROOT + sep)) {
       return new Response('Prohibido', { status: 403 });
     }
+    if (!isPublicAssetPath(relative(ROOT, file).split(sep).join('/'))) return new Response('No encontrado', { status: 404 });
     try {
       const info = await stat(file);
       if (!info.isFile()) return new Response('No encontrado', { status: 404 });
@@ -325,11 +329,17 @@ function createWindow() {
       preload: SHELL_PRELOAD,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       webviewTag: true,
       spellcheck: false,
     },
   });
+
+  // La shell privilegiada no navega a sitios ni abre ventanas remotas.
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url !== 'nexo://app/src/ui/shell/index.html') event.preventDefault();
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   mark('visible');
   if (isSmoke) {
@@ -444,7 +454,7 @@ function createWindow() {
     contents.on('did-start-navigation', (_e, url, _inPage, isMainFrame) => {
       if (!isMainFrame || _inPage) return;
       engine?.onTurnInterrupted(contents.id);
-      broadcast('nexo:stats-changed', engine.stats());
+      broadcast('nexo:stats-changed', statsSnapshot());
       if (cdp && CdpObserver.wants(url)) cdp.attach(contents, url);
       else cdp?.release(contents);
     });
@@ -464,7 +474,7 @@ function createWindow() {
     contents.on('destroyed', () => {
       cdp?.release(contents);
       engine?.dropTab(contents.id);
-      broadcast('nexo:stats-changed', engine.stats());
+      broadcast('nexo:stats-changed', statsSnapshot());
       if (profile) profile.saveAll();
     });
     if (isDev) contents.on('console-message', (_e, level, message) => console.log('[pestaña]', message));
@@ -474,6 +484,18 @@ function createWindow() {
   win.loadURL('nexo://app/src/ui/shell/index.html');
   if (isDev) win.webContents.openDevTools({ mode: 'detach' });
   return win;
+}
+
+function statsSnapshot() {
+  return {
+    ...engine.stats(),
+    log: store.log.length,
+    cdpObserver: cdp?.status() || null,
+    captureDiagnosticFile,
+    // Estado de la captura, para la línea de diagnóstico del panel. No son
+    // contadores de la conversación: son hechos del propio vigilante.
+    capture: { ...capture },
+  };
 }
 
 function registerIpc() {
@@ -499,7 +521,7 @@ function registerIpc() {
     // La capa de la página sólo pide mediación cuando ya reconoció una petición
     // de chat. Si el motor la descarta, es un dato: significa que el sitio no se
     // está mediando. Antes, ese silencio se veía como «0 turnos» y nada más.
-    broadcast('nexo:stats-changed', engine.stats());
+    broadcast('nexo:stats-changed', statsSnapshot());
     if (result?.skipped === 'fuera-de-alcance') {
       const host = hostOf(String(payload?.url || '')) || String(payload?.site || 'sitio');
       noteDiagnostic({
@@ -519,7 +541,7 @@ function registerIpc() {
     }
     if (payload.phase === 'started') return engine.onTurnStarted(event.sender.id, payload);
     const result = engine.onTurnResult(event.sender.id, payload);
-    broadcast('nexo:stats-changed', engine.stats());
+    broadcast('nexo:stats-changed', statsSnapshot());
     return result;
   });
   ipcMain.handle('nexo:stream-progress', (event, payload) => {
@@ -527,7 +549,7 @@ function registerIpc() {
       return { skipped: 'progreso-invalido' };
     }
     const result = engine.onStreamProgress(event.sender.id, payload);
-    broadcast('nexo:stats-changed', engine.stats());
+    broadcast('nexo:stats-changed', statsSnapshot());
     return result;
   });
   ipcMain.handle('nexo:stream-end', (event, payload) => {
@@ -569,7 +591,7 @@ function registerIpc() {
       if (store) store.pushLog(entry);
       broadcast('nexo:event', { type: 'intervention', payload: entry });
     }
-    broadcast('nexo:stats-changed', engine.stats());
+    broadcast('nexo:stats-changed', statsSnapshot());
     return result;
   });
   ipcMain.handle('nexo:stream-stop', (event, payload) => engine.onStreamStop(event.sender.id, payload));
@@ -596,15 +618,7 @@ function registerIpc() {
   // `cdp` son los contadores del motor (turnos observados y descartados);
   // `cdpObserver` es el estado del transporte. Van separados a propósito: uno
   // cuenta lo que se registró y el otro lo que se vio en el cable.
-  ipcMain.handle('nexo:stats', () => ({
-    ...engine.stats(),
-    log: store.log.length,
-    cdpObserver: cdp?.status() || null,
-    captureDiagnosticFile,
-    // Estado de la captura, para la línea de diagnóstico del panel. No son
-    // contadores de la conversación: son hechos del propio vigilante.
-    capture: { ...capture },
-  }));
+  ipcMain.handle('nexo:stats', statsSnapshot);
 
   // Estado de la observación CDP. La interfaz todavía no lo pide; existe para
   // diagnóstico, para el informe y para las pruebas de contrato.
@@ -658,7 +672,7 @@ function registerIpc() {
           text: captured.content, chars: captured.content.length, finished: true,
           model: '',
         });
-        broadcast('nexo:stats-changed', engine.stats());
+        broadcast('nexo:stats-changed', statsSnapshot());
       }
     }
     writeCaptureTrace('conversation-read', { host: url.hostname, source: 'dom', chars: assistantChars,
@@ -774,7 +788,7 @@ function registerIpc() {
       };
       if (store) store.pushLog(entry);
       broadcast('nexo:event', { type: 'intervention', payload: entry });
-      broadcast('nexo:stats-changed', engine.stats());
+      broadcast('nexo:stats-changed', statsSnapshot());
       return;
     }
 
@@ -1184,7 +1198,7 @@ function noteUserMessageFromNetwork(details = {}) {
   };
   if (store) store.pushLog(entry);
   broadcast('nexo:event', { type: 'intervention', payload: entry });
-  broadcast('nexo:stats-changed', engine.stats());
+  broadcast('nexo:stats-changed', statsSnapshot());
   return { seen: true, counted: true, conversation: true };
 }
 
@@ -1319,7 +1333,7 @@ function watchProviderNetwork(s) {
               };
               if (store) store.pushLog(entry);
               broadcast('nexo:event', { type: 'intervention', payload: entry });
-              broadcast('nexo:stats-changed', engine.stats());
+              broadcast('nexo:stats-changed', statsSnapshot());
             } catch (error) {
               console.log('[red] al contar la respuesta:', error?.message || error);
             }
@@ -1485,7 +1499,7 @@ app.whenReady().then(async () => {
     memory: created.memory,
     onEvent: (entry) => {
       broadcast('nexo:event', { type: 'intervention', payload: entry });
-      if (entry.code === 'turn-result') broadcast('nexo:stats-changed', engine.stats());
+      if (entry.code === 'turn-result') broadcast('nexo:stats-changed', statsSnapshot());
     },
   });
   mark('motor');
@@ -1547,7 +1561,7 @@ app.whenReady().then(async () => {
           });
           if (event.duplicate) {
             // La respuesta no es nueva, pero CDP pudo recuperar texto/tokens.
-            broadcast('nexo:stats-changed', engine.stats());
+            broadcast('nexo:stats-changed', statsSnapshot());
             return;
           }
           const capture = event.capture || {};
@@ -1579,7 +1593,7 @@ app.whenReady().then(async () => {
         } else {
           return;
         }
-        broadcast('nexo:stats-changed', engine.stats());
+        broadcast('nexo:stats-changed', statsSnapshot());
       } catch (error) {
         console.log('[cdp] al avisar:', error?.message || error);
       }

@@ -51,3 +51,29 @@ test('el bridge real convierte el aviso outgoing antes de enviarlo por IPC', asy
   assert.equal(sent[0].payload.payload.tokens, countO200k(text));
   assert.ok(!('tokenText' in sent[0].payload.payload));
 });
+
+test('una página no puede elegir canales privilegiados a través del bridge', async () => {
+  const handlers = new Map();
+  const invoked = [];
+  const replies = [];
+  const ipcRenderer = { on() {}, send() {}, sendSync: () => ({ enabled: false, settings: { memory: { enabled: false } } }),
+    invoke: async (channel, payload) => { invoked.push({ channel, payload }); return { ok: true }; } };
+  const window = { addEventListener: (name, handler) => handlers.set(name, handler), postMessage: (reply) => replies.push(reply) };
+  vm.runInNewContext(readFileSync(new URL('../src/preload/bridge.cjs', import.meta.url), 'utf8'), {
+    require: (name) => name === 'electron' ? { ipcRenderer, webFrame: {} } : requireBridge(name),
+    __dirname: new URL('../src/preload/', import.meta.url).pathname,
+    window, location: { protocol: 'https:', hostname: 'chatgpt.com', href: 'https://chatgpt.com/' }, console,
+  });
+  const receive = handlers.get('message');
+  for (const type of ['memory:clear', 'memory:list', 'settings:set', 'data:clear', 'open-external', '__proto__', null, {}]) {
+    await receive({ source: window, data: { __nexo: 'call', id: 'blocked', type } });
+    assert.equal(invoked.length, 0);
+    assert.equal(replies.at(-1).error, 'canal-no-permitido');
+  }
+  await receive({ source: {}, data: { __nexo: 'call', type: 'prepare' } });
+  assert.equal(invoked.length, 0, 'no acepta mensajes de otro frame');
+  await receive({ source: window, data: { __nexo: 'call', id: 'allowed', type: 'prepare', payload: { text: 'hola' } } });
+  assert.equal(invoked.length, 1);
+  assert.equal(invoked[0].channel, 'nexo:prepare');
+  assert.equal(replies.at(-1).payload.ok, true);
+});

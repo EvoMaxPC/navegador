@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { createFrameQueue } from '../src/ui/shell/scheduler.js';
 import { readFileSync } from 'node:fs';
 import { register, createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -60,11 +61,12 @@ let refreshFromIpc;
 const ui = vm.createContext({
   nexo: { getStats: stats, on: (_channel, listener) => { refreshFromIpc = listener; } },
   els: { stats: elements },
+  uiTasks: createFrameQueue((run) => run()),
 });
 vm.runInContext(appSource.slice(appSource.indexOf('function num(value)'), appSource.indexOf('const MEM =')), ui);
 vm.runInContext(appSource.match(/nexo\.on\?\.\('nexo:stats-changed',[\s\S]*?\n\}\);/)[0], ui);
-journal.windows[0].webContents.on('sent', ({ channel }) => {
-  if (channel === 'nexo:stats-changed') refreshFromIpc();
+journal.windows[0].webContents.on('sent', ({ channel, payload }) => {
+  if (channel === 'nexo:stats-changed') refreshFromIpc(payload);
 });
 
 async function openTab() {

@@ -24,6 +24,12 @@ Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar e
 parcial al detener la respuesta. Estimación directa en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
+**Interfaz 0.1.22:** nueva pestaña con búsqueda, panel EVO claro con navegación
+por teclado, actualizaciones agrupadas por cuadro y paneles bajo demanda.
+Puente de páginas restringido, favicons sin HTML y shell con sandbox.
+[Arquitectura, mediciones y límites de validación](docs/INTERFAZ-0.1.22.md).
+Vista de interfaz sin Electron: `node dev/serve.mjs 3200 --browser`.
+
 **Diagnóstico de captura 0.1.21:** se genera `NEXO-CAPTURE-DIAGNOSTIC.jsonl` en
 Documentos. Registra detección de envíos, respuestas y confirmación de memoria,
 sin copiar conversaciones ni URLs/IDs crudos. ChatGPT permite observación pasiva

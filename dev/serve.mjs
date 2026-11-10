@@ -9,8 +9,9 @@
 
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
+import { isPublicAssetPath } from '../src/main/internalAssets.js';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -42,17 +43,28 @@ const server = createServer(async (req, res) => {
   try {
     let pathname = new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname;
     if (pathname === '/' || pathname === '') {
-      res.writeHead(302, { Location: '/demo/' });
+      res.writeHead(302, { Location: process.argv.includes('--browser') ? '/browser/' : '/demo/' });
       res.end();
       return;
     }
 
+    if (pathname === '/browser/' || pathname === '/browser') {
+      let html = await readFile(join(ROOT, 'src/ui/shell/index.html'), 'utf8');
+      html = html.replace('href="./styles.css"', 'href="/src/ui/shell/styles.css"')
+        .replace('<script type="module" src="./app.js"></script>', '<script type="module" src="/dev/preview.js"></script><script type="module" src="/src/ui/shell/app.js"></script>');
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      res.end(html); return;
+    }
     let file = safePath(pathname);
     if (!file) {
       res.writeHead(403).end('Prohibido');
       return;
     }
 
+    const resource = file.slice(ROOT.length + 1).split(sep).join('/');
+    if (resource !== 'dev/preview.js' && !isPublicAssetPath(resource.endsWith('/') ? resource + 'index.html' : extname(resource) ? resource : resource + '/index.html')) {
+      res.writeHead(404).end('No encontrado'); return;
+    }
     let info = await stat(file).catch(() => null);
     if (info?.isDirectory()) {
       file = join(file, 'index.html');
@@ -66,7 +78,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, {
       'content-type': MIME[extname(file)] || 'application/octet-stream',
       'cache-control': 'no-cache',
-      'access-control-allow-origin': '*',
+      'x-content-type-options': 'nosniff',
     });
     createReadStream(file).pipe(res);
   } catch (error) {

@@ -2,8 +2,9 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self' nexo:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' nexo: https: http:;" />
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' nexo:; frame-src 'self' nexo: https: http:; object-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>Nexo</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -11,13 +12,14 @@
   <div class="browser with-sidebar">
     <header class="chrome">
       <div class="tabstrip">
+        <div class="chrome-brand" aria-label="Nexo"><span class="brand-symbol">n</span><span>NEXO</span></div>
         <div class="tabs" id="tabs" role="tablist"></div>
         <button class="icon-btn new-tab" id="newTab" title="Pestaña nueva (Ctrl+T)" aria-label="Pestaña nueva">+</button>
         <div class="chrome-right">
           <span class="engine-pill" id="enginePill" title="Estado del motor de mediación">
             <span class="dot"></span><span id="enginePillText">Mediación activa</span>
           </span>
-          <button class="icon-btn" id="toggleSidebar" title="Panel EVO (Ctrl+Shift+I)" aria-label="Panel EVO">
+          <button class="icon-btn" id="toggleSidebar" title="Panel EVO (Ctrl+Shift+I)" aria-label="Panel EVO" aria-controls="sidebar" aria-expanded="true">
             <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 5h16v14H4z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 5v14" stroke="currentColor" stroke-width="1.6"/></svg>
           </button>
         </div>
@@ -37,8 +39,9 @@
         </div>
 
         <form class="omnibox-form" id="omniboxForm" autocomplete="off">
+          <span class="connection-indicator" id="connectionIndicator" role="img" aria-label="Página local de Nexo" title="Página local de Nexo">◇</span>
           <input class="omnibox" id="omnibox" type="text" spellcheck="false"
-                 placeholder="Buscá o escribí una dirección…" aria-label="Barra de direcciones" />
+                 placeholder="Buscá o escribí una dirección…" aria-label="Barra de direcciones" role="combobox" aria-autocomplete="list" aria-controls="suggestions" aria-expanded="false" />
           <button class="icon-btn star" id="bookmarkBtn" type="button" title="Marcar esta página (Ctrl+D)"
                   aria-label="Marcar esta página" aria-pressed="false">☆</button>
           <div class="suggestions" id="suggestions" hidden role="listbox"></div>
@@ -59,18 +62,21 @@
     </main>
 
     <aside class="sidebar" id="sidebar" aria-label="Panel de Nexo">
-      <div class="sidebar-tabs" role="tablist">
-        <button class="stab active" data-panel="activity">Actividad</button>
-        <button class="stab" data-panel="memory">Memoria</button>
-        <button class="stab" data-panel="history">Historial</button>
-        <button class="stab" data-panel="bookmarks">Marcadores</button>
-        <button class="stab" data-panel="downloads">Descargas</button>
-        <button class="stab" data-panel="sites">Sitios</button>
-        <button class="stab" data-panel="settings">Ajustes</button>
-        <button class="stab" data-panel="about">Acerca</button>
+      <div class="sidebar-heading"><div><span class="eyebrow">TU ESPACIO DE TRABAJO</span><h1 id="panelTitle">Actividad</h1></div>
+        <span class="local-badge"><span></span>Local</span><button class="icon-btn" id="closeSidebar" aria-label="Cerrar panel EVO" title="Cerrar panel">×</button></div>
+      <div class="sidebar-tabs" role="tablist" aria-label="Herramientas de Nexo" aria-orientation="vertical">
+        <button class="stab active" data-panel="activity" id="panel-tab-activity" role="tab" aria-controls="panel-activity" aria-selected="true" tabindex="0" title="Actividad" aria-label="Actividad"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Actividad</span></button>
+        <button class="stab" data-panel="memory" id="panel-tab-memory" role="tab" aria-controls="panel-memory" aria-selected="false" tabindex="-1" title="Memoria" aria-label="Memoria"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M8 3H5v18h14V3h-3M8 3v6h8V3M8 15h8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Memoria</span></button>
+        <button class="stab" data-panel="history" id="panel-tab-history" role="tab" aria-controls="panel-history" aria-selected="false" tabindex="-1" title="Historial" aria-label="Historial"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6M3 3v6h6M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Historial</span></button>
+        <button class="stab" data-panel="bookmarks" id="panel-tab-bookmarks" role="tab" aria-controls="panel-bookmarks" aria-selected="false" tabindex="-1" title="Marcadores" aria-label="Marcadores"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Marcadores</span></button>
+        <button class="stab" data-panel="downloads" id="panel-tab-downloads" role="tab" aria-controls="panel-downloads" aria-selected="false" tabindex="-1" title="Descargas" aria-label="Descargas"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Descargas</span></button>
+        <button class="stab" data-panel="sites" id="panel-tab-sites" role="tab" aria-controls="panel-sites" aria-selected="false" tabindex="-1" title="Sitios" aria-label="Sitios"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Sitios</span></button>
+        <button class="stab" data-panel="settings" id="panel-tab-settings" role="tab" aria-controls="panel-settings" aria-selected="false" tabindex="-1" title="Ajustes" aria-label="Ajustes"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 7h16M4 17h16M8 3v8M16 13v8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Ajustes</span></button>
+        <button class="stab" data-panel="about" id="panel-tab-about" role="tab" aria-controls="panel-about" aria-selected="false" tabindex="-1" title="Acerca" aria-label="Acerca"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M12 11v6M12 7h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Acerca</span></button>
       </div>
 
-      <section class="panel-view active" data-panel="activity">
+      <section class="panel-view active" data-panel="activity" id="panel-activity" role="tabpanel" aria-labelledby="panel-tab-activity" tabindex="0">
+        <div class="panel-intro"><p class="eyebrow">CONVERSACIONES, EN CLARO</p><h2>Todo bajo tu control.</h2><p>Tu actividad de IA, sin perder el foco.</p></div>
         <div class="stats" id="stats">
           <div class="stat"><b id="statMessages">0</b><span>mensajes del usuario</span></div>
           <div class="stat"><b id="statResponses">0</b><span>respuestas de la IA</span></div>
@@ -81,12 +87,14 @@
           <div class="stat"><b id="statTurnsFailed">0</b><span>turnos fallidos</span></div>
           <div class="stat"><b id="statTurnsPerformed">0</b><span>turnos realizados</span></div>
         </div>
+        <details class="technical-details"><summary>Cómo se mide tu actividad</summary>
         <p class="note capture" id="captureLine">Captura: sin datos todavía.</p>
         <p class="note" id="statsNote">
           * Entrada: BPE local para GPT. Salida IA: estimación por palabras del texto
           capturado (1 unidad por palabra), sin tokenizador. No es el consumo real de OpenAI. No incluye contenido no recibido. «Intervenciones» cuenta la
           actividad: +1 al enviar un mensaje y +1 al recibir una respuesta.
         </p>
+        </details>
         <div class="panel-head">
           <h2>Intervenciones</h2>
           <button class="link" id="clearLog">Limpiar</button>
@@ -94,7 +102,7 @@
         <ul class="log" id="log"></ul>
       </section>
 
-      <section class="panel-view" data-panel="memory">
+      <section class="panel-view" data-panel="memory" id="panel-memory" role="tabpanel" aria-labelledby="panel-tab-memory" tabindex="0">
         <div class="stats">
           <div class="stat"><b id="memItems">0</b><span>memorias</span></div>
           <div class="stat"><b id="memTokens">0</b><span>tokens guardados</span></div>
@@ -116,7 +124,7 @@
 
         <div class="panel-head"><h2>Continuidad</h2></div>
         <p class="note">
-          Las memorias son lo que EVO destiló de la conversación (hechos, decisiones y
+          Las memorias destiladas son lo que EVO extrajo de la conversación (hechos, decisiones y
           resúmenes llamados «episodios») — no un registro de mensajes ni de respuestas.
           El paquete de continuidad es un texto plano con lo esencial del proyecto. Pegalo al
           empezar una conversación en cualquier IA y seguís donde estabas.
@@ -133,7 +141,7 @@
         <p class="note" id="memFile"></p>
       </section>
 
-      <section class="panel-view" data-panel="history">
+      <section class="panel-view" data-panel="history" id="panel-history" role="tabpanel" aria-labelledby="panel-tab-history" tabindex="0">
         <form class="mem-search" id="historySearchForm">
           <input id="historySearch" type="text" spellcheck="false" placeholder="Buscar en el historial…" />
         </form>
@@ -152,7 +160,7 @@
         <p class="note" id="historyNote"></p>
       </section>
 
-      <section class="panel-view" data-panel="bookmarks">
+      <section class="panel-view" data-panel="bookmarks" id="panel-bookmarks" role="tabpanel" aria-labelledby="panel-tab-bookmarks" tabindex="0">
         <form class="mem-search" id="bookmarkSearchForm">
           <input id="bookmarkSearch" type="text" spellcheck="false" placeholder="Buscar en marcadores…" />
         </form>
@@ -163,7 +171,7 @@
         <ul class="nav-list" id="bookmarkList"></ul>
       </section>
 
-      <section class="panel-view" data-panel="downloads">
+      <section class="panel-view" data-panel="downloads" id="panel-downloads" role="tabpanel" aria-labelledby="panel-tab-downloads" tabindex="0">
         <div class="panel-head">
           <h2>Descargas</h2>
           <button class="link" id="downloadsClear">Limpiar terminadas</button>
@@ -172,7 +180,7 @@
         <p class="note" id="downloadNote"></p>
       </section>
 
-      <section class="panel-view" data-panel="sites">
+      <section class="panel-view" data-panel="sites" id="panel-sites" role="tabpanel" aria-labelledby="panel-tab-sites" tabindex="0">
         <div class="panel-head"><h2>Sitio actual</h2></div>
         <p class="note" id="siteHost">Ninguna página abierta</p>
         <div class="zoom-row">
@@ -196,7 +204,7 @@
         <p class="note" id="profileNote"></p>
       </section>
 
-      <section class="panel-view" data-panel="settings">
+      <section class="panel-view" data-panel="settings" id="panel-settings" role="tabpanel" aria-labelledby="panel-tab-settings" tabindex="0">
         <div class="panel-head"><h2>Mediación</h2></div>
         <label class="switch-row">
           <span>Motor activo</span>
@@ -245,10 +253,10 @@
         <button class="ghost danger" id="resetSettings">Restablecer ajustes</button>
       </section>
 
-      <section class="panel-view" data-panel="about">
+      <section class="panel-view" data-panel="about" id="panel-about" role="tabpanel" aria-labelledby="panel-tab-about" tabindex="0">
         <div class="about">
           <h2>Nexo</h2>
-          <p class="version" id="version">v0.1.21</p>
+          <p class="version" id="version">v0.1.22</p>
           <p>
             Navegador basado en Chromium que se sienta entre vos y los chatbots: reescribe el
             mensaje antes de enviarlo y filtra la respuesta antes de mostrarla.

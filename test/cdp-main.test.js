@@ -305,6 +305,7 @@ test('un turno ya contado por el camino HTTP/SSE no se cuenta otra vez por CDP',
 });
 
 test('ChatGPT sigue observado para EVO MEMORY aunque la mediación esté apagada', async () => {
+  const beforeStats = await callIpc('nexo:stats', {});
   await callIpc('nexo:settings:set', { sites: { chatgpt: { enabled: false } }, memory: { enabled: true } });
   const win = journal.windows[0];
   const view = win.attachWebview('https://chatgpt.com/c/memory-passive');
@@ -335,10 +336,10 @@ test('ChatGPT sigue observado para EVO MEMORY aunque la mediación esté apagada
   view.debugger.emitEvent('Network.loadingFinished', { requestId: 'req-memory-passive' });
   await settle();
   const stats = await callIpc('nexo:stats', {});
-  assert.equal(stats.responses, 1, 'la respuesta pasiva también se contabiliza');
+  assert.equal(stats.responses, beforeStats.responses + 1, 'la respuesta pasiva también se contabiliza sin depender de pruebas anteriores');
   assert.ok(stats.outputTokens > 0, 'se calculan tokens de salida desde el texto capturado');
-  assert.equal(stats.tabs, 0, 'la observación pasiva no crea un guardián de mediación');
-  assert.equal(stats.mediatedInterventions, 0, 'la captura no interviene en el prompt ni en la respuesta');
+  assert.equal(stats.tabs, beforeStats.tabs, 'la observación pasiva no crea un guardián de mediación');
+  assert.equal(stats.mediatedInterventions, beforeStats.mediatedInterventions, 'la captura no interviene en el prompt ni en la respuesta');
 
   const artifacts = await callIpc('nexo:memory:list', {});
   assert.ok(artifacts.some((item) => item.kind === 'artifact' && item.text.includes(respuesta)),

@@ -38,8 +38,17 @@ test('el arranque crea una ventana con la interfaz y la endurece', async () => {
   const win = journal.windows[0];
   assert.match(win.loadedUrl, /^nexo:\/\/app\/src\/ui\/shell\/index\.html$/);
   assert.equal(win.options.webPreferences.contextIsolation, true);
+  assert.equal(win.options.webPreferences.sandbox, true);
   assert.equal(win.options.webPreferences.nodeIntegration, false);
   assert.equal(win.options.webPreferences.webviewTag, true);
+});
+
+test('la shell privilegiada bloquea navegación remota y ventanas nuevas', () => {
+  const contents = journal.windows[0].webContents;
+  let blocked = false;
+  contents.emit('will-navigate', { preventDefault() { blocked = true; } }, 'https://example.com');
+  assert.equal(blocked, true);
+  assert.equal(contents.windowOpenHandler({ url: 'https://example.com' }).action, 'deny');
 });
 
 test('registra el esquema nexo y su manejador con control de ruta', async () => {
@@ -68,6 +77,9 @@ test('registra el esquema nexo y su manejador con control de ruta', async () => 
   assert.match(script.headers.get('content-type') || '', /^text\/javascript/);
 
   // Codificación rota y rutas inexistentes no deben romper el proceso.
+  for (const url of ['nexo://other/src/ui/shell/index.html', 'nexo://app/.git/config', 'nexo://app/package.json', 'nexo://app/src/main/main.js', 'nexo://app/src/preload/shell.cjs']) {
+    assert.equal((await handler({ url })).status, 404, url);
+  }
   assert.equal((await handler({ url: 'nexo://app/%E0%A4%A' })).status, 400);
   assert.equal((await handler({ url: 'nexo://app/src/no-existe.js' })).status, 404);
   assert.equal((await handler({ url: 'nexo://app/src' })).status, 404, 'un directorio no es un archivo');

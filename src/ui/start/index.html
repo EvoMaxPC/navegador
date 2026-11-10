@@ -3,114 +3,37 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action https:;" />
-  <title>Pestaña nueva</title>
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background: radial-gradient(1200px 600px at 50% -10%, #1a2036 0%, #07080c 60%);
-      color: #e8ecf4;
-      font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-      padding: 40px 20px;
-    }
-    main { width: min(680px, 100%); }
-    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
-    .logo {
-      width: 40px; height: 40px; border-radius: 12px;
-      background: linear-gradient(135deg, #8f9dff, #3ee0b0);
-      display: grid; place-items: center;
-      color: #08090f; font-weight: 800; font-size: 19px;
-    }
-    h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
-    .sub { margin: 2px 0 0; color: #8b93a7; font-size: 12.5px; }
-    form { display: flex; gap: 8px; }
-    input[type="search"] {
-      flex: 1;
-      padding: 13px 15px;
-      border-radius: 12px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background: rgba(255, 255, 255, 0.05);
-      color: inherit;
-      font: inherit;
-      font-size: 14.5px;
-    }
-    input[type="search"]:focus { outline: none; border-color: rgba(124, 140, 255, 0.65); }
-    button {
-      padding: 13px 18px;
-      border-radius: 12px;
-      border: none;
-      background: linear-gradient(135deg, #8f9dff, #6f7dff);
-      color: #0a0b12;
-      font: inherit;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #8b93a7; margin: 30px 0 10px; }
-    ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
-    a {
-      display: flex; align-items: center; gap: 9px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.07);
-      background: rgba(255, 255, 255, 0.03);
-      color: inherit; text-decoration: none; font-size: 13px;
-    }
-    a:hover { background: rgba(124, 140, 255, 0.14); border-color: rgba(124, 140, 255, 0.35); }
-    .dot { width: 8px; height: 8px; border-radius: 3px; flex: 0 0 auto; }
-    footer { margin-top: 34px; color: #6b7385; font-size: 12px; }
-    kbd {
-      padding: 1px 5px; border-radius: 4px;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.05); font-size: 11px;
-    }
-  </style>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; object-src 'none'; form-action https://duckduckgo.com;" />
+  <title>Pestaña nueva · Nexo</title>
+  <link rel="stylesheet" href="./start.css" />
 </head>
 <body>
+  <header class="page-header"><a class="wordmark" href="./index.html" aria-label="Nexo, inicio"><span class="symbol">n</span>NEXO</a><span class="header-divider"></span><span>Tu espacio personal</span><span class="local-label"><i></i>Análisis local</span></header>
   <main>
-    <div class="brand">
-      <div class="logo">N</div>
-      <div>
-        <h1>Nexo</h1>
-        <p class="sub">Navegador con mediación de IA · tus conversaciones no salen de esta máquina</p>
+    <section class="welcome" aria-labelledby="welcomeTitle">
+      <p class="eyebrow"><span></span>UN NUEVO PUNTO DE PARTIDA</p>
+      <h1 id="welcomeTitle">Menos ruido.<br><em>Más posibilidades.</em></h1>
+      <p class="intro">Un espacio para explorar, conversar y conectar ideas.<br>Vos elegís el rumbo.</p>
+      <form id="startSearch" action="https://duckduckgo.com/" method="get" role="search">
+        <svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+        <input id="searchInput" type="search" name="q" placeholder="Buscá algo o escribí una dirección" aria-label="Buscar en la web o abrir una dirección" autocomplete="off" spellcheck="false" />
+        <button type="submit" aria-label="Buscar o navegar">Ir <span aria-hidden="true">↗</span></button>
+      </form>
+      <p class="search-hint">Búsquedas con DuckDuckGo <span>·</span> <kbd>Ctrl</kbd> + <kbd>L</kbd> para ir a la barra</p>
+    </section>
+    <section class="destinations" aria-labelledby="destinationsTitle">
+      <div class="section-heading"><h2 id="destinationsTitle">Una idea. Muchas formas de empezar.</h2><span>CONVERSAR CON IA</span></div>
+      <div class="destination-grid">
+        <a class="destination" href="https://chatgpt.com"><span class="app-icon gpt" aria-hidden="true">◎</span><span class="arrow" aria-hidden="true">↗</span><h3>ChatGPT</h3><p>Explorá una idea.</p></a>
+        <a class="destination" href="https://claude.ai"><span class="app-icon claude" aria-hidden="true">✳</span><span class="arrow" aria-hidden="true">↗</span><h3>Claude</h3><p>Dale forma a tus palabras.</p></a>
+        <a class="destination" href="https://gemini.google.com"><span class="app-icon gemini" aria-hidden="true">✦</span><span class="arrow" aria-hidden="true">↗</span><h3>Gemini</h3><p>Conectá posibilidades.</p></a>
+        <a class="destination" href="https://www.perplexity.ai"><span class="app-icon perplexity" aria-hidden="true">⌘</span><span class="arrow" aria-hidden="true">↗</span><h3>Perplexity</h3><p>Seguí tu curiosidad.</p></a>
       </div>
-    </div>
-
-    <form action="https://duckduckgo.com/" method="get" role="search">
-      <input type="search" name="q" placeholder="Buscá en la web o escribí una dirección" autofocus
-             aria-label="Buscar en la web" />
-      <button type="submit">Buscar</button>
-    </form>
-
-    <h2>Chatear con IA</h2>
-    <ul>
-      <li><a href="https://chatgpt.com"><span class="dot" style="background:#10a37f"></span>ChatGPT</a></li>
-      <li><a href="https://claude.ai"><span class="dot" style="background:#d97757"></span>Claude</a></li>
-      <li><a href="https://gemini.google.com"><span class="dot" style="background:#4285f4"></span>Gemini</a></li>
-      <li><a href="https://www.perplexity.ai"><span class="dot" style="background:#20b8cd"></span>Perplexity</a></li>
-      <li><a href="https://chat.deepseek.com"><span class="dot" style="background:#4d6bfe"></span>DeepSeek</a></li>
-      <li><a href="https://copilot.microsoft.com"><span class="dot" style="background:#0f6cbd"></span>Copilot</a></li>
-      <li><a href="https://chat.mistral.ai"><span class="dot" style="background:#fa520f"></span>Le Chat</a></li>
-      <li><a href="http://localhost:11434"><span class="dot" style="background:#8b93a7"></span>Ollama local</a></li>
-    </ul>
-
-    <h2>Trabajo</h2>
-    <ul>
-      <li><a href="https://github.com"><span class="dot" style="background:#c9d1d9"></span>GitHub</a></li>
-      <li><a href="https://news.ycombinator.com"><span class="dot" style="background:#ff6600"></span>Hacker News</a></li>
-      <li><a href="https://developer.mozilla.org"><span class="dot" style="background:#83d0f2"></span>MDN</a></li>
-      <li><a href="https://stackoverflow.com"><span class="dot" style="background:#f48024"></span>Stack Overflow</a></li>
-    </ul>
-
-    <footer>
-      <kbd>Ctrl</kbd>+<kbd>T</kbd> pestaña nueva · <kbd>Ctrl</kbd>+<kbd>L</kbd> barra de direcciones ·
-      <kbd>Ctrl</kbd>+<kbd>H</kbd> historial · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> panel EVO
-    </footer>
+      <div class="more-destinations"><span>También a mano</span><a href="https://chat.deepseek.com">DeepSeek ↗</a><a href="https://copilot.microsoft.com">Copilot ↗</a><a href="https://chat.mistral.ai">Le Chat ↗</a><a href="http://localhost:11434">Ollama local ↗</a></div>
+    </section>
+    <section class="workspace" aria-labelledby="workspaceTitle"><div><p class="eyebrow">PARA TU PRÓXIMO PROYECTO</p><h2 id="workspaceTitle">De la idea a la acción.</h2></div><nav aria-label="Herramientas de trabajo"><a href="https://github.com"><b aria-hidden="true">↳</b>GitHub<span>Crear</span></a><a href="https://developer.mozilla.org"><b aria-hidden="true">{ }</b>MDN<span>Aprender</span></a><a href="https://news.ycombinator.com"><b aria-hidden="true">Y</b>Hacker News<span>Descubrir</span></a><a href="https://stackoverflow.com"><b aria-hidden="true">≋</b>Stack Overflow<span>Resolver</span></a></nav></section>
   </main>
+  <footer><span><i class="tiny-symbol">n</i> Más espacio para lo que importa.</span><span><kbd>Ctrl T</kbd> Nueva pestaña <span class="footer-gap"><kbd>Ctrl Shift I</kbd> Panel EVO</span></span></footer>
+  <script type="module" src="./start.js"></script>
 </body>
 </html>

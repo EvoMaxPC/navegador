@@ -6,11 +6,15 @@
  * proceso principal le empuja por IPC.
  */
 
+import { createFrameQueue } from './scheduler.js';
+import { navigationStatus, safeFaviconUrl } from './security.js';
 import { SITES } from '../../core/sites.js';
 import { displayUrl, hostOf, resolveInput } from '../../nav/url.js';
 import { ZOOM_STEPS, clampZoom, zoomLabel } from '../../nav/zoom.js';
 
 const nexo = window.nexo;
+const uiTasks = createFrameQueue();
+const isPanelActive = (name) => els.browser.classList.contains('with-sidebar') && document.querySelector(`.stab[data-panel="${name}"]`)?.classList.contains('active');
 
 const els = {
   browser: document.querySelector('.browser'),
@@ -39,6 +43,9 @@ const els = {
     capture: document.getElementById('captureLine'),
   },
   sidebar: document.getElementById('sidebar'),
+  connection: document.getElementById('connectionIndicator'),
+  panelTitle: document.getElementById('panelTitle'),
+  closeSidebar: document.getElementById('closeSidebar'),
   suggestions: document.getElementById('suggestions'),
   bookmarkBtn: document.getElementById('bookmarkBtn'),
   findbar: document.getElementById('findbar'),
@@ -130,12 +137,20 @@ function createTab(url = START_URL, { activate = true } = {}) {
   const tabEl = document.createElement('div');
   tabEl.className = 'tab';
   tabEl.dataset.id = id;
+  tabEl.id = `${id}-label`;
+  tabEl.setAttribute('aria-keyshortcuts', 'Delete Control+w');
   tabEl.setAttribute('role', 'tab');
+  tabEl.setAttribute('tabindex', '-1');
+  tabEl.setAttribute('aria-selected', 'false');
+  tabEl.setAttribute('aria-controls', `${id}-view`);
+  view.id = `${id}-view`;
+  view.setAttribute('role', 'tabpanel');
+  view.setAttribute('aria-labelledby', tabEl.id);
   tabEl.innerHTML = `
     <span class="favicon">◆</span>
     <span class="title">Cargando…</span>
     <span class="cut-dot" hidden></span>
-    <button class="close" title="Cerrar pestaña" aria-label="Cerrar pestaña">×</button>`;
+    <span class="close" title="Cerrar pestaña (Supr o Ctrl+W)" aria-hidden="true">×</span>`;
 
   tabEl.addEventListener('click', (event) => {
     if (event.target.classList.contains('close')) return;
@@ -146,6 +161,20 @@ function createTab(url = START_URL, { activate = true } = {}) {
     closeTab(id);
   });
 
+  tabEl.addEventListener('keydown', (event) => {
+    if (event.key === 'Delete') {
+      event.preventDefault(); closeTab(id); activeTab()?.tabEl.focus(); return;
+    }
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    if (event.target.classList.contains('close')) return;
+    event.preventDefault();
+    const ids = [...state.tabs.keys()];
+    const index = ids.indexOf(id);
+    const next = event.key === 'Home' ? ids[0] : event.key === 'End' ? ids.at(-1)
+      : ids[(index + (event.key === 'ArrowRight' ? 1 : -1) + ids.length) % ids.length];
+    activateTab(next);
+    state.tabs.get(next)?.tabEl.focus();
+  });
   els.tabs.appendChild(tabEl);
 
   const tab = { id, view, tabEl, url, title: 'Nueva pestaña', cut: 0 };
@@ -169,15 +198,19 @@ function createTab(url = START_URL, { activate = true } = {}) {
   }
   view.addEventListener('did-navigate', (event) => {
     tab.url = event.url;
-    if (state.activeId === id) els.omnibox.value = event.url;
+    if (state.activeId === id) { els.omnibox.value = event.url; updateNavigation(); }
   });
   view.addEventListener('did-navigate-in-page', (event) => {
     tab.url = event.url;
-    if (state.activeId === id) els.omnibox.value = event.url;
+    if (state.activeId === id) { els.omnibox.value = event.url; updateNavigation(); }
   });
   view.addEventListener('page-favicon-updated', (event) => {
-    const icon = event.favicons?.[0];
-    if (icon) faviconEl.innerHTML = `<img src="${encodeURI(icon)}" alt="" />`;
+    const icon = safeFaviconUrl(event.favicons?.[0]);
+    if (!icon) { faviconEl.textContent = '◆'; return; }
+    const image = document.createElement('img');
+    image.alt = ''; image.referrerPolicy = 'no-referrer'; image.src = icon;
+    image.addEventListener('error', () => { faviconEl.textContent = '◆'; }, { once: true });
+    faviconEl.replaceChildren(image);
   });
   view.addEventListener('did-fail-load', (event) => {
     if (event.errorCode === -3) return; // navegación cancelada
@@ -200,7 +233,7 @@ function createTab(url = START_URL, { activate = true } = {}) {
     tabEl.classList.add('loaded');
     if (state.activeId === id) {
       updateStar();
-      renderSitePanel();
+      if (isPanelActive('sites')) renderSitePanel();
     }
     scheduleSessionCapture();
   });
@@ -220,6 +253,8 @@ function activateTab(id) {
   for (const [otherId, other] of state.tabs) {
     const active = otherId === id;
     other.tabEl.classList.toggle('active', active);
+    other.tabEl.setAttribute('aria-selected', String(active));
+    other.tabEl.tabIndex = active ? 0 : -1;
     other.view.classList.toggle('hidden', !active);
   }
   els.omnibox.value =
@@ -230,7 +265,8 @@ function activateTab(id) {
   tab.tabEl.querySelector('.cut-dot').hidden = true;
   hideSuggestions();
   updateStar();
-  renderSitePanel();
+  updateNavigation();
+  if (isPanelActive('sites')) renderSitePanel();
   scheduleSessionCapture();
 }
 
@@ -323,8 +359,26 @@ els.reload.addEventListener('click', () => activeTab()?.view.reload());
 els.newTab.addEventListener('click', () => createTab(START_URL));
 
 els.toggleSidebar.addEventListener('click', () => {
-  els.browser.classList.toggle('with-sidebar');
+  const open = !els.browser.classList.contains('with-sidebar');
+  setSidebar(open);
 });
+
+function setSidebar(open) {
+  els.browser.classList.toggle('with-sidebar', open);
+  els.toggleSidebar.setAttribute('aria-expanded', String(open));
+  if (open) refreshActivePanel();
+}
+els.closeSidebar.addEventListener('click', () => { setSidebar(false); els.toggleSidebar.focus(); });
+
+function updateNavigation() {
+  const tab = activeTab();
+  els.back.disabled = !tab?.view.canGoBack?.();
+  els.forward.disabled = !tab?.view.canGoForward?.();
+  const status = navigationStatus(tab?.url);
+  els.connection.dataset.kind = status.kind;
+  els.connection.title = status.label;
+  els.connection.setAttribute('aria-label', status.label);
+}
 
 /* ------------------------------------------------------------------ */
 /* sitios                                                              */
@@ -371,7 +425,10 @@ function scheduleSessionCapture() {
 let suggestTimer = null;
 
 function hideSuggestions() {
+  state.suggestToken += 1;
   els.suggestions.hidden = true;
+  els.omnibox.setAttribute('aria-expanded', 'false');
+  els.omnibox.removeAttribute('aria-activedescendant');
   els.suggestions.innerHTML = '';
 }
 
@@ -379,7 +436,7 @@ function renderSuggestions(items) {
   if (!items.length) return hideSuggestions();
   els.suggestions.innerHTML = items
     .map(
-      (item, index) => `<button class="suggestion" data-url="${escapeHtml(item.url)}" data-index="${index}" role="option">
+      (item, index) => `<button class="suggestion" data-url="${escapeHtml(item.url)}" data-index="${index}" id="suggestion-${index}" role="option" aria-selected="false">
         <span class="s-kicker">${item.kind === 'bookmark' ? '★' : item.kind === 'top' ? '↑' : '↺'}</span>
         <span class="s-title">${escapeHtml(item.title || item.url)}</span>
         <span class="s-url">${escapeHtml(displayUrl(item.url))}</span>
@@ -387,6 +444,7 @@ function renderSuggestions(items) {
     )
     .join('');
   els.suggestions.hidden = false;
+  els.omnibox.setAttribute('aria-expanded', 'true');
 }
 
 async function loadSuggestions() {
@@ -422,11 +480,13 @@ els.omnibox.addEventListener('keydown', (event) => {
   if (event.key === 'ArrowDown') {
     event.preventDefault();
     const next = (activeIndex + 1) % options.length;
-    options.forEach((option, i) => option.classList.toggle('active', i === next));
+    options.forEach((option, i) => { option.classList.toggle('active', i === next); option.setAttribute('aria-selected', String(i === next)); });
+    els.omnibox.setAttribute('aria-activedescendant', options[next].id);
   } else if (event.key === 'ArrowUp') {
     event.preventDefault();
     const next = (activeIndex - 1 + options.length) % options.length;
-    options.forEach((option, i) => option.classList.toggle('active', i === next));
+    options.forEach((option, i) => { option.classList.toggle('active', i === next); option.setAttribute('aria-selected', String(i === next)); });
+    els.omnibox.setAttribute('aria-activedescendant', options[next].id);
   } else if (event.key === 'Enter' && activeIndex >= 0) {
     event.preventDefault();
     els.omnibox.value = options[activeIndex].dataset.url;
@@ -674,9 +734,9 @@ function renderLog() {
   els.log.innerHTML = state.logs
     .slice(0, 80)
     .map(
-      (e) => `<li class="log-item ${e.severity || 'info'}">
+      (e) => `<li class="log-item ${escapeHtml(e.severity || 'info')}">
         <div class="meta">
-          <span class="kind ${e.kind}">${KIND_LABEL[e.kind] || e.kind || 'nexo'}</span>
+          <span class="kind ${escapeHtml(e.kind || '')}">${escapeHtml(KIND_LABEL[e.kind] || e.kind || 'nexo')}</span>
           <span class="time">${timeOf(e.ts)}</span>
         </div>
         <div class="title">${escapeHtml(e.title || e.code || '')}</div>
@@ -699,8 +759,8 @@ function pushLocalNotice(text) {
 function pushIntervention(entry) {
   state.logs.unshift(entry);
   if (state.logs.length > 200) state.logs.length = 200;
-  renderLog();
-  refreshMemory();
+  if (isPanelActive('activity')) uiTasks.schedule('log', renderLog);
+  if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
 
   // Marca la pestaña activa cuando hay un corte en vivo.
   if (entry.kind === 'receiving') {
@@ -740,23 +800,29 @@ function captureLine(stats = {}) {
   return `Captura — ${partes.join(' · ')}`;
 }
 
-async function refreshStats() {
-  try {
-    const stats = await nexo.getStats();
-    // Los resultados de turno son exclusivos. Mensajes, respuestas, tokens y
-    // actividad siguen siendo las métricas independientes del motor.
-    els.stats.messages.textContent = num(stats.messages);
-    els.stats.responses.textContent = num(stats.responses);
-    for (const key of ['turnsCancelled', 'turnsFailed', 'turnsPerformed']) {
-      els.stats[key].textContent = num(stats[key]);
-    }
-    els.stats.inTokens.textContent = num(stats.inputTokens);
-    els.stats.outTokens.textContent = num(stats.outputTokens);
-    els.stats.interventions.textContent = num(stats.interventions);
-    if (els.stats.capture) els.stats.capture.textContent = captureLine(stats);
-  } catch {
-    /* la shell sigue funcionando sin estadísticas */
+let lastStats = {};
+let statsRevision = 0;
+function renderStats(next) {
+  statsRevision += 1;
+  const stats = { ...lastStats, ...next };
+  lastStats = stats;
+  // Los resultados de turno son exclusivos. Mensajes, respuestas, tokens y
+  // actividad siguen siendo las métricas independientes del motor.
+  els.stats.messages.textContent = num(stats.messages);
+  els.stats.responses.textContent = num(stats.responses);
+  for (const key of ['turnsCancelled', 'turnsFailed', 'turnsPerformed']) {
+    els.stats[key].textContent = num(stats[key]);
   }
+  els.stats.inTokens.textContent = num(stats.inputTokens);
+  els.stats.outTokens.textContent = num(stats.outputTokens);
+  els.stats.interventions.textContent = num(stats.interventions);
+  if (els.stats.capture) els.stats.capture.textContent = captureLine(stats);
+}
+async function refreshStats() {
+  if (refreshStats.pending) return refreshStats.pending;
+  const revision = statsRevision;
+  refreshStats.pending = Promise.resolve(nexo.getStats()).then((stats) => { if (revision === statsRevision) renderStats(stats); }).catch(() => {}).finally(() => { refreshStats.pending = null; });
+  return refreshStats.pending;
 }
 
 /* ------------------------------------------------------------------ */
@@ -853,7 +919,7 @@ async function refreshMemory() {
     }
     MEM.file.textContent = memState.stats.file ? `Archivo: ${memState.stats.file}` : '';
     renderMemoryItems(memState.items.slice(0, 40));
-    if (MEM.conversations && nexo.memory.conversations) {
+    if (MEM.conversations?.closest('details')?.open && nexo.memory.conversations) {
       const conversations = await nexo.memory.conversations();
       MEM.conversations.innerHTML = conversations.length ? conversations.map((entry) =>
         `<li><details><summary>${escapeHtml(entry.conversationId)} · ${entry.turns.length} mensajes${entry.clipped ? ' (recortado)' : ''}</summary>${entry.turns.map((turn) =>
@@ -864,6 +930,8 @@ async function refreshMemory() {
     /* el panel de memoria es opcional frente al navegador */
   }
 }
+
+MEM.conversations.closest('details').addEventListener('toggle', () => { if (MEM.conversations.closest('details').open) refreshMemory(); });
 
 MEM.list.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-action]');
@@ -1166,18 +1234,18 @@ els.findClose.addEventListener('click', closeFind);
 
 /* ---------------- avisos del proceso principal ---------------- */
 
-nexo.on('nexo:downloads-changed', () => renderDownloads());
+nexo.on('nexo:downloads-changed', () => { if (isPanelActive('downloads')) uiTasks.schedule('downloads', renderDownloads); });
 nexo.on('nexo:download-done', (payload) => {
   if (!payload) return;
   const state = payload.state === 'completed' ? 'completada' : payload.state;
   pushLocalNotice(`Descarga ${state}: ${payload.filename}`);
-  renderDownloads();
+  if (isPanelActive('downloads')) uiTasks.schedule('downloads', renderDownloads);
 });
 nexo.on('nexo:bookmarks-changed', () => {
-  renderBookmarks();
+  if (isPanelActive('bookmarks')) uiTasks.schedule('bookmarks', renderBookmarks);
   updateStar();
 });
-nexo.on('nexo:profile-changed', () => renderSitePanel());
+nexo.on('nexo:profile-changed', () => { if (isPanelActive('sites')) uiTasks.schedule('sites', renderSitePanel); });
 
 // Al cerrar la ventana se guarda la sesión con los datos más frescos. Se usa
 // `send` y no `invoke` porque en `beforeunload` no hay tiempo para una respuesta.
@@ -1188,31 +1256,37 @@ window.addEventListener('beforeunload', () => {
   nexo.session.saveNow([{ tabs, activeIndex }]);
 });
 
-document.querySelectorAll('.stab').forEach((tab) => {
+function refreshActivePanel() {
+  const current = document.querySelector('.stab.active')?.dataset.panel;
+  const renders = { activity: () => { renderLog(); refreshStats(); }, memory: refreshMemory,
+    history: renderHistory, bookmarks: renderBookmarks, downloads: renderDownloads, sites: renderSitePanel };
+  if (els.browser.classList.contains('with-sidebar')) uiTasks.schedule(`panel-${current}`, renders[current] || (() => {}));
+}
+const panelTabs = [...document.querySelectorAll('.stab')];
+panelTabs.forEach((tab, index) => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.stab').forEach((t) => t.classList.toggle('active', t === tab));
-    document.querySelectorAll('.panel-view').forEach((panel) => {
-      panel.classList.toggle('active', panel.dataset.panel === tab.dataset.panel);
-    });
-    const panel = tab.dataset.panel;
-    if (panel === 'memory') refreshMemory();
-    if (panel === 'history') renderHistory();
-    if (panel === 'bookmarks') renderBookmarks();
-    if (panel === 'downloads') renderDownloads();
-    if (panel === 'sites') renderSitePanel();
+    panelTabs.forEach((t) => { const active = t === tab; t.classList.toggle('active', active); t.setAttribute('aria-selected', String(active)); t.tabIndex = active ? 0 : -1; });
+    document.querySelectorAll('.panel-view').forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === tab.dataset.panel));
+    els.panelTitle.textContent = tab.getAttribute('aria-label');
+    refreshActivePanel();
+  });
+  tab.addEventListener('keydown', (event) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? panelTabs.length - 1
+      : (index + (event.key === 'ArrowDown' ? 1 : -1) + panelTabs.length) % panelTabs.length;
+    panelTabs[next].focus(); panelTabs[next].click();
   });
 });
-
-/** Abre el panel lateral en la solapa pedida. */
 function showPanel(name) {
-  els.browser.classList.add('with-sidebar');
+  setSidebar(true);
   document.querySelector(`.stab[data-panel="${name}"]`)?.click();
 }
 
 // El proceso principal avisa cuando la memoria cambia por otra vía (importación,
 // vaciado) para que el panel no muestre datos viejos.
 nexo.on?.('nexo:memory-changed', () => {
-  if (document.querySelector('.stab[data-panel="memory"]')?.classList.contains('active')) refreshMemory();
+  if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
 });
 
 /* ------------------------------------------------------------------ */
@@ -1229,8 +1303,9 @@ nexo.on('nexo:event', (message) => {
 // Los contadores se refrescan también cuando el motor prepara un envío o cierra
 // una respuesta, no sólo cuando llega una intervención: un turno mediado sin
 // avisos dejaba el panel en cero.
-nexo.on?.('nexo:stats-changed', () => {
-  refreshStats();
+nexo.on?.('nexo:stats-changed', (stats) => {
+  if (stats) uiTasks.schedule('stats', () => renderStats(stats));
+  else refreshStats();
 });
 
 nexo.on('nexo:settings-changed', (settings) => {
@@ -1257,7 +1332,7 @@ nexo.on('nexo:command', (command) => {
       patchSettings({ enabled: state.settings?.enabled === false });
       break;
     case 'toggle-sidebar':
-      els.browser.classList.toggle('with-sidebar');
+      setSidebar(!els.browser.classList.contains('with-sidebar'));
       break;
     case 'settings':
       showPanel('settings');
@@ -1466,14 +1541,9 @@ async function boot() {
   state.logs = logs;
   renderLog();
 
-  await Promise.all([
-    refreshStats(),
-    refreshMemory(),
-    renderHistory(),
-    renderBookmarks(),
-    renderDownloads(),
-    renderSitePanel(),
-  ]);
+  await refreshStats();
+  // Los paneles secundarios se cargan sólo cuando el usuario los abre.
+  refreshActivePanel();
   paso('paneles');
   reportarMedidas(marcas);
 }
