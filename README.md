@@ -24,6 +24,10 @@ Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar e
 parcial al detener la respuesta. Estimación directa en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
+**Lector de ChatGPT 0.1.25:** adaptación del método EVO con cuatro estrategias
+de detección, estado de respuesta sin confundirlo con dictado y diagnóstico
+de la estrategia activa en el panel de repetición. Lectura sin escribir en el composer.
+
 **Repetición de conversación 0.1.24:** panel separado que refleja tus mensajes
 y las respuestas de ChatGPT desde el texto cargado en la pestaña activa. Se
 actualiza en vivo, también al abrir chats antiguos, sin resumir ni reescribir,

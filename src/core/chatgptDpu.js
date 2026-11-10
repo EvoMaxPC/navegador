@@ -1,3 +1,5 @@
+import { selectChatGptMessages, chatGptMessageContent } from './chatgptAdapter.js';
+
 /**
  * Lectura del transporte DPU usado por ChatGPT en el modo web sin iniciar sesión.
  *
@@ -130,52 +132,19 @@ export function extractChatGptDpuAnswer(bodyText, prompt = '') {
 }
 
 
-/** Lee sólo el mensaje assistant posterior al último usuario coincidente.
+/** Lee el mensaje assistant posterior al último usuario renderizado.
  * Los atributos de rol no dependen del idioma de las etiquetas de accesibilidad.
  * La lectura textual antigua queda como respaldo para layouts sin esos nodos.
  */
 export function readChatGptDpuAnswer(document, prompt = '') {
-  const normalize = (text) => String(text || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
-  const textOf = (node) => String(node?.innerText ?? node?.textContent ?? '').trim();
-  const outer = (items) => items.filter((node) =>
-    !items.some((other) => other !== node && other.contains?.(node))
-  );
-  const all = (selector) => {
-    try { return outer(Array.from(document?.querySelectorAll?.(selector) || [])); }
-    catch { return []; }
-  };
-
-  // Mismo criterio que EVO Memory: leer los mensajes reales ya renderizados,
-  // no reconstruir la respuesta buscando el prompt dentro de todo el body.
-  const strategies = [
-    { name: 'author-role', selector: '[data-message-author-role]',
-      role: (node) => node.getAttribute?.('data-message-author-role') },
-    { name: 'data-turn', selector: '[data-turn]',
-      role: (node) => node.getAttribute?.('data-turn') },
-    { name: 'conversation-turn', selector: '[data-testid^="conversation-turn"]',
-      role: (node) => node.querySelector?.('[data-message-author-role="assistant"], .markdown') ? 'assistant'
-        : node.querySelector?.('[data-message-author-role="user"]') ? 'user' : '' },
-    { name: 'article', selector: 'article',
-      role: (node) => node.querySelector?.('[data-message-author-role="assistant"], .markdown') ? 'assistant'
-        : node.querySelector?.('[data-message-author-role="user"]') ? 'user' : '' },
-  ];
-
-  for (const strategy of strategies) {
-    const nodes = all(strategy.selector);
-    if (!nodes.length) continue;
-    const messages = nodes.map((node) => ({ node, role: strategy.role(node) }))
-      .filter((item) => item.role === 'user' || item.role === 'assistant');
-    const userIndex = messages.findLastIndex((item) => item.role === 'user');
-    if (userIndex < 0) continue;
+  const { messages } = selectChatGptMessages(document);
+  const userIndex = messages.findLastIndex((message) => message.role === 'user');
+  if (userIndex >= 0) {
     const user = messages[userIndex].node;
-    // Ampliar selectores no autoriza asociar la respuesta de otro envío al actual.
-    if (prompt && normalize(textOf(user)) !== normalize(prompt)) return { text: '', user, assistant: null, body: '' };
-    const assistant = messages.slice(userIndex + 1).findLast((item) => item.role === 'assistant')?.node || null;
+    const assistant = messages.slice(userIndex + 1).findLast((message) => message.role === 'assistant')?.node || null;
     if (!assistant) return { text: '', user, assistant: null, body: '' };
-
-    const content = assistant.querySelector?.('.markdown') ||
-      assistant.querySelector?.('.prose, [data-message-content]') || assistant;
-    return { text: textOf(content), user, assistant, body: '' };
+    const content = chatGptMessageContent(assistant, 'assistant');
+    return { text: String(content.innerText ?? content.textContent ?? '').trim(), user, assistant, body: '' };
   }
 
   const body = String(document?.body?.innerText || '');

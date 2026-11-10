@@ -1,3 +1,5 @@
+import { CHATGPT_STRATEGIES } from './chatgptAdapter.js';
+
 /** Límites exclusivos de la vista literal; no cambian EVO MEMORY ni contadores. */
 export const REPETITION_MAX_TURNS = 200;
 export const REPETITION_MAX_TURN_CHARS = 200000;
@@ -15,5 +17,5 @@ export function repetitionSnapshot(payload) {
     if (chars > REPETITION_MAX_CHARS) return null;
     turns.push({ id: turn.id, role: turn.role, content: turn.content, clipped: turn.clipped === true });
   }
-  return { turns, streaming: payload.streaming === true, clipped: payload.clipped === true || turns.some((turn) => turn.clipped) };
+  return { turns, strategy: CHATGPT_STRATEGIES.includes(payload.strategy) ? payload.strategy : 'none', streaming: payload.streaming === true, clipped: payload.clipped === true || turns.some((turn) => turn.clipped) };
 }

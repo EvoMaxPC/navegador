@@ -550,3 +550,6 @@ button, input, textarea, select { font-family: inherit; }
 .repeat-message.from-user { background: #edf3eb; }
 .repeat-message h3 { font-size: 11px; margin: 0 0 9px; color: var(--accent); }
 .repeat-text { margin: 0; font: 12px/1.65 system-ui, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; user-select: text; }
+
+.repeat-diagnostic { font-size: 11px; color: var(--muted); line-height: 1.7; }
+.repeat-diagnostic p { white-space: pre-line; }

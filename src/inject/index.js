@@ -1,3 +1,4 @@
+import { isChatGptStreaming, diagnoseChatGptReader } from '../core/chatgptAdapter.js';
 /**
  * Capa de inyección (mundo principal de la página).
  *
@@ -1085,7 +1086,7 @@ if (site.id === 'chatgpt') {
 if (site.id === 'chatgpt') {
   watchChatGptConversation({ document, window,
     isEnabled: () => state.settings.memory?.enabled !== false,
-    isStreaming: () => Boolean(document.querySelector?.(site.stopButton)),
+    isStreaming: () => isChatGptStreaming(document),
     publishLive: (payload) => bridge.event('conversation-repetition', payload),
     publish: (payload) => payload.error
       ? bridge.event('error', { stage: 'conversation-memory', message: payload.error })
@@ -1100,4 +1101,5 @@ window.__nexo = {
   setComposerText,
   submitContinuation,
   getPath,
+  conversationReader: () => diagnoseChatGptReader(document),
 };

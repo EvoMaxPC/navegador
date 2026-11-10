@@ -1,5 +1,5 @@
 /** Vista literal: sólo textContent, sin Markdown/HTML ejecutable ni resúmenes. */
-export function createRepetitionView({ list, status, scroller }) {
+export function createRepetitionView({ list, status, scroller, diagnostics }) {
   const rows = new Map();
   return {
     render(snapshot, emptyMessage = 'Todavía no hay mensajes cargados en esta conversación.') {
@@ -28,6 +28,12 @@ export function createRepetitionView({ list, status, scroller }) {
         ? 'Vista limitada por tamaño o cantidad. Hay mensajes recortados u omitidos; no es la conversación completa.'
         : `${turns.length} mensajes cargados · ${snapshot.streaming ? 'ChatGPT está respondiendo' : 'Lectura automática activa'}`;
       status.dataset.limited = String(Boolean(snapshot?.clipped));
+      if (diagnostics) {
+        const strategy = snapshot?.strategy || 'none';
+        const user = turns.filter((turn) => turn.role === 'user').length;
+        const assistant = turns.filter((turn) => turn.role === 'assistant').length;
+        diagnostics.textContent = `Estrategia: ${strategy === 'none' ? 'ninguna detectada' : strategy}\nMensajes en el panel: ${turns.length} · Vos: ${user} · ChatGPT: ${assistant}\n${snapshot?.streaming ? 'Respuesta en curso' : 'Sin botón de detener activo'}`;
+      }
       if (follow) scroller.scrollTop = scroller.scrollHeight;
     },
   };

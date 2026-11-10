@@ -627,6 +627,7 @@ function renderDownloads() {
 /* ---------------- repetición literal de la pestaña activa ---------------- */
 const repetitionView = createRepetitionView({
   list: document.getElementById('repetitionList'), status: document.getElementById('repetitionStatus'),
+  diagnostics: document.getElementById('repetitionDiagnostic'),
   scroller: document.getElementById('panel-repetition'),
 });
 let repetitionTicket = 0;

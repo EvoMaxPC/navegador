@@ -1,3 +1,4 @@
+import { selectChatGptMessages, chatGptMessageContent, chatGptMessageId, isChatGptStreaming } from './chatgptAdapter.js';
 import { REPETITION_MAX_CHARS, REPETITION_MAX_TURN_CHARS } from './conversationRepetition.js';
 
 /** Historial visible de ChatGPT. Nunca lee composer, cookies ni campos de formulario. */
@@ -12,27 +13,21 @@ export function isChatGptMemoryUrl(value) {
   } catch { return false; }
 }
 
-export function readChatGptConversation(document, { literal = false } = {}) {
-  const nodes = Array.from(document?.querySelectorAll?.('[data-message-author-role]') || []);
-  return nodes.slice(-MAX_CONVERSATION_TURNS).flatMap((node, index) => {
-    const role = node.getAttribute?.('data-message-author-role');
-    if (!['user', 'assistant'].includes(role)) return [];
-    const contentNode = role === 'assistant'
-      ? node.querySelector?.('.markdown') || node.querySelector?.('.prose, [data-message-content]') || node
-      : (literal ? node.querySelector?.('.whitespace-pre-wrap') || node : node);
+export function readChatGptConversation(document, { literal = false, selection = selectChatGptMessages(document) } = {}) {
+  const nodes = selection.messages;
+  return nodes.slice(-MAX_CONVERSATION_TURNS).flatMap(({ node, role }, index) => {
+    const contentNode = chatGptMessageContent(node, role);
     const value = String(contentNode.innerText ?? contentNode.textContent ?? '');
     const raw = literal ? value : value.trim();
     if (!raw) return [];
-    const id = node.getAttribute?.('data-message-id') ||
-      node.closest?.('[data-message-id]')?.getAttribute?.('data-message-id') ||
-      node.closest?.('article[data-testid]')?.getAttribute?.('data-testid') || `visible-${Math.max(0, nodes.length - MAX_CONVERSATION_TURNS) + index}`;
+    const id = chatGptMessageId(node, Math.max(0, nodes.length - MAX_CONVERSATION_TURNS) + index);
     const limit = literal ? REPETITION_MAX_TURN_CHARS : MAX_TURN_CHARS;
     return [{ id: literal ? String(id).slice(0, 256) : id, role, content: raw.slice(0, limit), clipped: raw.length > limit }];
   });
 }
 
 /** Un solo observador, agrupado; funciona aunque ChatGPT no use nuestro fetch. */
-export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => false, publishLive = null }) {
+export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => isChatGptStreaming(document), publishLive = null }) {
   if (typeof document?.querySelectorAll !== 'function') return { read() {}, disconnect() {} };
   let timer = null, last = '', lastLive = '', observer = null, stopped = false;
   const session = `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -41,22 +36,23 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
     if (stopped || (!isEnabled() && !publishLive) || !isChatGptMemoryUrl(window.location.href)) return;
     try {
       const url = new URL(window.location.href);
+      const selection = selectChatGptMessages(document);
       if (publishLive) {
-        const turns = readChatGptConversation(document, { literal: true });
+        const turns = readChatGptConversation(document, { literal: true, selection });
         let remaining = REPETITION_MAX_CHARS;
-        let clipped = (document.querySelectorAll?.('[data-message-author-role]') || []).length > MAX_CONVERSATION_TURNS;
+        let clipped = selection.messages.length > MAX_CONVERSATION_TURNS;
         const bounded = turns.flatMap((turn) => {
           if (!remaining) { clipped = true; return []; }
           const content = turn.content.slice(0, remaining);
           remaining -= content.length;
           return [{ ...turn, content, clipped: turn.clipped || content.length < turn.content.length }];
         });
-        const live = { href: window.location.href, turns: bounded, clipped, streaming: Boolean(isStreaming()) };
+        const live = { href: window.location.href, strategy: selection.strategy, turns: bounded, clipped, streaming: Boolean(isStreaming()) };
         const signature = JSON.stringify(live);
         if (signature !== lastLive) { lastLive = signature; publishLive(live); }
       }
       if (!isEnabled()) return;
-      const turns = readChatGptConversation(document);
+      const turns = readChatGptConversation(document, { selection });
       if (!turns.length) return;
       const conversationId = url.pathname.includes('/c/') ? url.pathname : `${url.pathname}#${session}`;
       const payload = { conversationId, href: window.location.href, turns, streaming: Boolean(isStreaming()) };
@@ -74,7 +70,7 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
     if (stopped) return;
     if (window.MutationObserver && document.body && !observer) {
       observer = new window.MutationObserver(schedule);
-      observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-message-id', 'data-message-author-role'] });
+      observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-message-id', 'data-message-author-role', 'data-turn', 'data-turn-id', 'data-testid', 'aria-label', 'disabled'] });
     }
     schedule();
   };

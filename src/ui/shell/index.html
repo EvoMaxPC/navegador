@@ -107,6 +107,7 @@
         <div class="panel-intro"><p class="eyebrow">LECTURA LITERAL · EN VIVO</p><h2>Repetición de conversación</h2><p>Vos y ChatGPT, en el mismo orden. Sin resumir ni reescribir el texto leído.</p></div>
         <p class="note">Refleja el texto cargado en la pestaña activa de ChatGPT, incluso en chats antiguos. Si faltan mensajes antiguos, desplazate por el chat para que ChatGPT los cargue. No incluye chats temporales.</p>
         <p id="repetitionStatus" class="repeat-status" role="status">Abrí una conversación de ChatGPT para ver tus mensajes y sus respuestas.</p>
+        <details class="repeat-diagnostic"><summary>Diagnóstico de lectura</summary><p id="repetitionDiagnostic">Todavía no se recibió un diagnóstico.</p></details>
         <ol id="repetitionList" class="repetition-list" aria-label="Mensajes de la conversación"></ol>
       </section>
 
@@ -264,7 +265,7 @@
       <section class="panel-view" data-panel="about" id="panel-about" role="tabpanel" aria-labelledby="panel-tab-about" tabindex="0">
         <div class="about">
           <h2>Nexo</h2>
-          <p class="version" id="version">v0.1.24</p>
+          <p class="version" id="version">v0.1.25</p>
           <p>
             Navegador basado en Chromium que se sienta entre vos y los chatbots: reescribe el
             mensaje antes de enviarlo y filtra la respuesta antes de mostrarla.

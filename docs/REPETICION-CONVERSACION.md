@@ -37,13 +37,13 @@ Flujo: DOM → bundle → preload aislado → `nexo:repetition:snapshot` → cac
 
 ## Validación
 
-- Suite completa: **640 pruebas, 639 aprobadas, una omitida, cero fallos**.
+- Suite completa: **655 pruebas, 654 aprobadas, una omitida, cero fallos**.
 - Tests del lector: espacios, saltos, Unicode, chats ya abiertos, cambios parciales, cambio SPA/chat vacío, exclusión de temporales, mensajes mayores de 10k y límites explícitos.
 - Tests de IPC: memoria/mediación apagadas, aislamiento por pestaña, cambio de URL, limpieza al destruir, rechazo de páginas ajenas, subframes y lectores no privilegiados; la repetición no mueve contadores ni memorias.
 - Test del circuito de producción: DOM simulado → bundle generado → preload real → IPC del principal → consulta desde shell, incluyendo respuesta de más de 18k, actualización sin duplicación y fetch de paso directo con memoria/mediación apagadas.
 - Tests del renderer: sólo texto, no ejecución HTML, actualización del mismo nodo sin duplicados, vaciado, aviso de límites y respeto del scroll del usuario.
 - Chromium headless con fixture local y MutationObserver real: panel a 1440×1000 y 760×900, ambos roles exactos, conservación de espacios/saltos/Unicode, actualización automática, ausencia de HTML ejecutable, chat vacío y memoria apagada. Sin errores JS ni infracciones detectadas por axe WCAG 2 A/AA en ese recorrido. No es certificación de accesibilidad ni una sesión real de ChatGPT.
-- Benchmark existente ejecutado sin cambiar presupuestos; bundle de inyección aproximadamente **54,4 kB** en el estado integrado (baseline previo: 51,3 kB; el total incluye también el espejo de diagnóstico remoto). Sin dependencias nuevas de producción.
+- Benchmark existente ejecutado sin cambiar presupuestos; bundle de inyección aproximadamente **55,6 kB** en el estado integrado (baseline previo: 51,3 kB; el total incluye también el espejo de diagnóstico remoto). Sin dependencias nuevas de producción.
 
 Pendiente: confirmar los selectores, lectura completa del contenido cargado, cambios de conversación y generación en una sesión propia de ChatGPT dentro de Electron/Windows. Los tests y fixtures no equivalen a esa comprobación.
 
@@ -51,4 +51,14 @@ Pendiente: confirmar los selectores, lectura completa del contenido cargado, cam
 
 Se conservaron e integraron los commits remotos `2bb1696`, `4ec73d2` y `71c6512`, que muestran un espejo temporal de captura dentro de la propia pestaña. Ese espejo de diagnóstico no sustituye este panel lateral: no muestra por sí mismo ambos roles ni todo el historial cargado. Su Shadow DOM cerrado no se recorre al leer los mensajes. Se completó el mock de Document con `addEventListener` para probar también ese arranque sin alterar la lógica de producción del espejo.
 
-También se integró `131920a`, que amplía selectores de lectura DPU. Se conservó la correlación con el prompt actual: si el último usuario visible no coincide con ese envío, no se toma su respuesta como la del turno pendiente. Las regresiones existentes detectaron esa pérdida de asociación; el panel de repetición no usa esa correlación porque refleja ambos roles del documento completo.
+También se integraron `131920a` y `ae9fbbd`, con lectura DPU del último assistant posterior al último usuario renderizado, aunque el prompt proporcionado difiera. Se conservan los controles existentes de generación vigente y frescura del observador de espera; esto no demuestra por sí mismo que un turno pertenezca a una petición de red concreta.
+
+## Adaptador EVO — 0.1.25
+
+`src/core/chatgptAdapter.js` centraliza las cuatro estrategias, en orden: `[data-message-author-role]`, `[data-turn]`, `[data-testid^="conversation-turn"]`, `article`. Conversación, DPU y detección de streaming reutilizan este módulo. Se eliminan candidatos anidados y no se inventan roles por alternancia: se usan atributos de rol, descendientes explícitos o las estructuras conocidas de burbuja/Markdown. Contenedores ambiguos se omiten.
+
+El texto visible se conserva con `innerText`; los bloques de código siguen dentro del mensaje, sin duplicarse. El helper de código permite leer lenguaje y código por separado cuando se necesite. IDs existentes de mensaje/turno se priorizan, con posición DOM como alternativa estable durante una generación (sin hash del texto cambiante). No se añadieron funciones para insertar texto ni leer el composer.
+
+El estado de generación reconoce Stop/Detener/Parar, descarta botones deshabilitados y etiquetas de dictado/voz/micrófono. El diagnóstico desplegable del panel muestra estrategia, número de mensajes visibles y estado; `window.__nexo.conversationReader()` añade los conteos de candidatos sin contenido, IDs ni rutas. La estrategia que cruza IPC se valida contra una lista permitida.
+
+Validación adicional: cuatro estrategias con ambos roles, literalidad, DPU, prioridad de selectores, anidamiento, rechazo de roles ambiguos, IDs, código, botones y metadatos sin contenido. Chromium con DOM/MutationObserver reales: estrategias alternativas en la fixture del panel, texto exacto, sin duplicados ni errores JS; cero infracciones axe detectadas en el recorrido. Captura: `/home/user/nexo-repeticion-adaptador.png`. No se probó una cuenta real de ChatGPT ni el ejecutable Windows de esta versión.
