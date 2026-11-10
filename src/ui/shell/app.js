@@ -200,11 +200,19 @@ function createTab(url = START_URL, { activate = true } = {}) {
   }
   view.addEventListener('did-navigate', (event) => {
     tab.url = event.url;
-    if (state.activeId === id) { els.omnibox.value = event.url; updateNavigation(); if (isPanelActive('repetition')) refreshRepetition(); }
+    if (state.activeId === id) {
+      els.omnibox.value = event.url; updateNavigation();
+      if (isPanelActive('repetition')) refreshRepetition();
+      if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
+    }
   });
   view.addEventListener('did-navigate-in-page', (event) => {
     tab.url = event.url;
-    if (state.activeId === id) { els.omnibox.value = event.url; updateNavigation(); if (isPanelActive('repetition')) refreshRepetition(); }
+    if (state.activeId === id) {
+      els.omnibox.value = event.url; updateNavigation();
+      if (isPanelActive('repetition')) refreshRepetition();
+      if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
+    }
   });
   view.addEventListener('page-favicon-updated', (event) => {
     const icon = safeFaviconUrl(event.favicons?.[0]);
@@ -237,6 +245,7 @@ function createTab(url = START_URL, { activate = true } = {}) {
       updateStar();
       if (isPanelActive('sites')) renderSitePanel();
       if (isPanelActive('repetition')) refreshRepetition();
+      if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
     }
     scheduleSessionCapture();
   });
@@ -271,6 +280,7 @@ function activateTab(id) {
   updateNavigation();
   if (isPanelActive('sites')) renderSitePanel();
   if (isPanelActive('repetition')) refreshRepetition();
+  if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
   scheduleSessionCapture();
 }
 
@@ -634,8 +644,15 @@ let repetitionTicket = 0;
 let repetitionSourceKey = '';
 function repetitionSource() {
   const tab = activeTab();
-  if (!tab || !isChatGptMemoryUrl(tab.url)) return null;
-  try { return { webContentsId: tab.view.getWebContentsId(), href: tab.url }; } catch { return null; }
+  if (!tab) return null;
+  try {
+    // El URL del webview es la fuente de verdad; tab.url puede quedar un evento
+    // de navegación atrás y provocar que el snapshot no coincida.
+    const href = tab.view.getURL();
+    if (!isChatGptMemoryUrl(href)) return null;
+    tab.url = href;
+    return { webContentsId: tab.view.getWebContentsId(), href };
+  } catch { return null; }
 }
 async function refreshRepetition() {
   const ticket = ++repetitionTicket;
@@ -998,6 +1015,10 @@ async function refreshMemory() {
     renderMemoryItems(memState.items.slice(0, 40));
     if (nexo.memory.conversations) {
       memState.conversations = await nexo.memory.conversations();
+      // No depender de que el renderer haya recibido el evento en vivo:
+      // consultar también el último snapshot almacenado al abrir/actualizar Memoria.
+      const source = repetitionSource();
+      memState.liveSnapshot = source ? await nexo.repetition.get(source) : null;
       renderChatCapture();
       if (MEM.conversations?.closest('details')?.open) {
         MEM.conversations.innerHTML = memState.conversations.length ? memState.conversations.map((entry) =>
