@@ -10,7 +10,7 @@ La comprensión automática es **determinista y conservadora, con reglas ES/EN**
 
 1. `src/core/userUnderstanding.js`: contrato versionado, función pura `updateUnderstanding(state, operation, metadata, now)`, interpretación `interpretMessage`, proyección de contexto vigente `effectiveUnderstanding`, validación y políticas invariantes. Exportado también por `src/core/index.js`. Sin Electron, disco, red o dependencia nueva.
 2. `src/main/userUnderstanding.js`: servicio persistente, identidad de contextos, procedencia, revisión optimista, deduplicación, expiración temporal, referencias a EVO y seis IPC limitados a la shell. Reutiliza **`fileStorage` de `src/main/memory.js`**, con el mismo mecanismo temporal + rename; no reemplaza ni migra los archivos EVO.
-3. `src/main/main.js`: instancia el servicio junto al EVO existente; observa texto original después de `Engine.prepare`; observa el último turno de usuario después de una captura aceptada por EVO; valida frame principal, tipo de webContents y propiedad del guest. Libera referencias por pestaña al destruirla. No se modifica el lector, el transporte CDP, el contador ni el guard.
+3. `src/main/main.js`: instancia el servicio junto al EVO existente; observa texto original después de `Engine.prepare`; observa el último turno de usuario desde la vista literal validada y antes de la captura EVO, sin depender de su resultado; valida frame principal, tipo de webContents y propiedad del guest. Libera referencias por pestaña al destruirla. No se modifica el lector, el transporte CDP, el contador ni el guard.
 4. `src/ui/shell/understandingPanel.js`: inspector/control de comprensión integrado al rail, menú y buscador de comandos. Reutiliza BLACK & ELECTRIC BLUE y las superficies existentes. Objetivo, reglas, procedencia, certeza, vigencia, historia, incertidumbre, preguntas concretas, consulta explícita a EVO, selección de contexto y eliminación.
 5. Puente `src/preload/shell.cjs`: API de comprensión sólo para la shell; no se agrega API privilegiada al preload web. La preview avisa que el estado requiere Electron, sin simular persistencia.
 
@@ -52,8 +52,8 @@ Se excluyen bloques de código, líneas de cita y secciones explícitas de ejemp
 
 ## Integración real, deduplicación y continuidad
 
-- `nexo:prepare` puede no terminar en un envío. Se registra con origen **prepare**, nunca como envío confirmado; no se incrementan contadores por comprender. Sólo observa si la preparación fue admitida, EVO no está desactivada y el guest/frame están autorizados.
-- La captura ChatGPT mantiene sus validaciones, contenido y persistencia anteriores. El consumidor nuevo toma **sólo el último turno con rol user**, con identidad estable; no interpreta respuestas del assistant como órdenes y omite turnos recortados. No recorre toda una conversación histórica para activar reglas antiguas fuera de vigencia.
+- `nexo:prepare` puede no terminar en un envío. Se registra con origen **prepare**, nunca como envío confirmado; no se incrementan contadores por comprender. UUE observa independientemente de EVO y también cuando la preparación retorna `disabled` por mediación apagada, conservando la exclusión de rutas de autenticación y la validación del guest/frame.
+- La captura ChatGPT mantiene sus validaciones, contenido y persistencia anteriores. UUE consume la vista literal en vivo ya validada, disponible aun con EVO apagada, y también el snapshot de persistencia antes de comprobar el interruptor o resultado EVO. Ambos caminos usan la deduplicación existente de UUE, sin lecturas DOM, publicaciones IPC ni capturas EVO nuevas. El consumidor toma **sólo el último turno con rol user**, con identidad estable; no interpreta respuestas del assistant como órdenes y omite turnos recortados. No recorre toda una conversación histórica para activar reglas antiguas fuera de vigencia.
 - El servicio correlaciona hashes del original y del texto realmente preparado para que la relectura de un prompt mediado no interprete bloques añadidos por NEXO como instrucciones nuevas. Reconocida la equivalencia, sólo confirma la identidad del snapshot en el registro de deduplicación. Si hay bloques NEXO/EVO y no existe un original inequívoco asociado, omite la interpretación y lo informa: no intenta reconstruir un objetivo inventado quitando texto a ciegas.
 - Un snapshot ya conocido no se aplica repetidamente, incluso después de reiniciar, dentro de la ventana persistida de identidades. No se modifican el mecanismo de lectura, las estrategias DOM, el transporte CDP ni la deduplicación de contadores existente.
 - Identidad: proyecto EVO al arrancar + origen/ruta de la conversación. Se omiten query y hash. Raíces sin identidad tienen contexto temporal por pestaña/sesión; se pueden recuperar explícitamente mediante el selector. Sólo se migra una raíz a una primera ruta conversacional identificable **del mismo origen**, sin sobrescribir un contexto existente o eliminado. No se arrastra el objetivo a otra web o a ajustes.
@@ -61,7 +61,7 @@ Se excluyen bloques de código, líneas de cita y secciones explícitas de ejemp
 
 ## EVO MEMORY sin duplicación
 
-`recall` y `list` son las interfaces existentes. La búsqueda local se solicita explícitamente, devuelve hasta seis candidatos de objetivo/restricción/tarea/decisión/preferencia y crea preguntas de vinculación; **no activa instrucciones a partir de memorias destiladas**.
+`recall` y `list` son las interfaces existentes. La disponibilidad de EVO se consulta mediante `memoryEnabled`; el parámetro anterior `enabled` se conserva como alias compatible exclusivamente para antecedentes, no para detener UUE. La observación y persistencia UUE permanecen activas. Con EVO desactivada no se llama a `list` ni `recall` desde UUE, no se muestran textos de referencias y no se aceptan vínculos a memorias; las referencias propias se conservan sin reimportarlas y pueden volver a consultarse al reactivar EVO. La búsqueda local se solicita explícitamente, devuelve hasta seis candidatos de objetivo/restricción/tarea/decisión/preferencia y crea preguntas de vinculación; **no activa instrucciones a partir de memorias destiladas**.
 
 Se guardan IDs/proyecto/tipo de referencia, no una copia de sus textos. El panel consulta la disponibilidad/texto actuales de EVO para mostrarlos como antecedentes **no verificados**. Confirmar un vínculo sólo agrega una referencia contextual. Si la memoria se olvida o desaparece, la propuesta no puede aceptarse y el contenido no se restaura desde UUE. El borrado de comprensión no borra EVO; sus controles de borrado siguen separados.
 
@@ -113,3 +113,22 @@ No detecta todas las instrucciones implícitas, objetivos sin declaración ident
 Las preguntas se notifican en el acceso Comprensión y se muestran al abrir el inspector; no bloquean ni cancelan el envío al proveedor. Esta capa ofrece control y representación, **no mediación completa ni garantía de cumplimiento**. El estado aún no se inyecta en prompts ni reemplaza el contexto EVO existente. No empezar una capa posterior hasta validar este alcance real y los gates manuales.
 
 Gate manual recomendado: abrir Comprensión en Electron → fijar un objetivo extenso → enviar una restricción → comprobar origen y literal → generar contradicción y revisar pregunta → rechazar/confirmar propuesta concreta → cambiar de conversación y comprobar aislamiento → elegir contexto previo → reiniciar y revisar continuidad/vigencias → consultar y olvidar referencia EVO → borrar contexto y verificar que el lector no lo recrea. Revisar además que conteos, captura y comportamiento anterior continúan intactos.
+
+
+## Corrección localizada posterior — independencia de EVO (misma versión 0.1.33)
+
+La implementación inicial condicionaba UUE al interruptor y a `result.ok` de EVO.
+Esta corrección elimina ambos acoplamientos sin modificar esquema, archivo de UUE,
+lector, preload, nombres/cargas/respuestas de canales IPC, panel, Engine, guard,
+CDP ni contadores. Los errores de captura EVO conservan su tratamiento anterior;
+UUE ya observó y persistió antes de esa operación. El resultado de
+`nexo:conversation-snapshot` continúa indicando exclusivamente la captura EVO:
+si EVO está apagada mantiene su respuesta anterior de omisión, aunque UUE haya
+consumido el turno. El lector apagado para persistencia aporta la vista literal
+a través del flujo en vivo que ya existía; no se simula una captura nueva.
+
+La persistencia UUE sigue usando su propio archivo y el adaptador ya existente,
+sin migración ni cambios de persistencia general. Se conservan también sus
+salvaguardas: sólo fuentes admitidas, recortes omitidos, aislamiento y exclusión
+tras borrado explícito. Independencia de EVO no implica levantar esos controles.
+Resultados nuevos, archivos y límites en [validación](NEXO-CAPA1-VALIDACION.md#corrección-de-independencia-uueevo--auditoría-local-posterior).

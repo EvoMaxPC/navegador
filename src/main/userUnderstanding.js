@@ -18,13 +18,16 @@ export class UserUnderstandingService {
     storage,
     memory = null,
     enabled = () => true,
+    memoryEnabled = enabled,
     now = Date.now,
     notify = () => {},
     file = null,
   } = {}) {
     this.storage = storage || (file ? fileStorage(file) : null);
     this.memory = memory;
-    this.enabled = enabled;
+    // `enabled` se conserva como alias compatible: sólo habilita antecedentes EVO.
+    // La observación y persistencia propias de UUE no dependen de este callback.
+    this.enabled = memoryEnabled;
     this.now = now;
     this.notify = notify;
     this.projectId = memory?.projectId || 'default';
@@ -228,7 +231,9 @@ export class UserUnderstandingService {
       ...state.relevant_context.map((e) => e.reference),
       ...state.pending_questions.map((q) => q.proposed?.reference),
     ].filter(Boolean);
-    const memories = this.memory?.list({ limit: 6000 }) || [];
+    const memories = this.enabled()
+      ? this.memory?.list({ limit: 6000 }) || []
+      : [];
     const memoryReferences = references.map((ref) => {
       const found = memories.find((e) => e.id === ref.id);
       return {
@@ -245,7 +250,7 @@ export class UserUnderstandingService {
       report: this.reports.get(id) || null,
       observationError: this.reports.get(`error-${contents.id}`)?.error || null,
       memoryReferences,
-      observationEnabled: this.enabled(),
+      observationEnabled: true,
       erased: Object.hasOwn(this.data.deleted_revisions, id),
     };
   }
@@ -254,7 +259,6 @@ export class UserUnderstandingService {
     text,
     { messageId, channel = 'prepare', transmittedText } = {},
   ) {
-    if (!this.enabled()) return { skipped: 'disabled' };
     try {
       if (!isAiHost(new URL(contents.getURL()).hostname))
         return { skipped: 'not-ai' };
@@ -356,9 +360,10 @@ export class UserUnderstandingService {
       );
       if (
         q?.proposed?.reference &&
-        !this.memory
-          ?.list({ limit: 6000 })
-          .some((e) => e.id === q.proposed.reference.id)
+        (!this.enabled() ||
+          !this.memory
+            ?.list({ limit: 6000 })
+            .some((e) => e.id === q.proposed.reference.id))
       )
         throw new UnderstandingError(
           'La referencia EVO ya no está disponible; no se reintroducirá.',

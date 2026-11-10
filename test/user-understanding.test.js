@@ -434,10 +434,11 @@ test('servicio usa EVO real para recuperar referencias; olvidar EVO no reintrodu
   );
   assert.equal(s.snapshot(g).memoryReferences[0].available, false);
 });
-test('observación pausada y host no IA no almacenan; pregunta independiente en automático no persiste', () => {
+test('EVO desactivada no pausa UUE; host no IA y pregunta independiente no se conservan', () => {
   const s = service({ enabled: () => false });
-  assert.equal(s.observe(guest(), 'Mi objetivo: privado').skipped, 'disabled');
-  assert.equal(s.data.contexts.length, 0);
+  assert.equal(s.observe(guest(), 'Mi objetivo: privado').ok, true);
+  assert.equal(s.snapshot(guest()).state.user_goal.text, 'privado');
+  assert.equal(s.snapshot(guest()).observationEnabled, true);
   const on = service();
   assert.equal(
     on.observe(guest(2, 'https://example.com/a'), 'Mi objetivo: no leer')
@@ -639,4 +640,129 @@ test('reglas, preferencias y aclaraciones no sustituyen la tarea por una instruc
   c.message('Aclaración: No ejecutes código');
   assert.equal(c.state.explicit_constraints.at(-1).text, 'No ejecutes código');
   assert.deepEqual(c.state.current_task, task);
+});
+
+test('desacoplamiento A/B/C: disponibilidad EVO sólo controla list/recall/confirmación de referencias, no UUE ni su persistencia', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'uue-independent-evo-')),
+    file = join(dir, 'uue.json'),
+    g = guest();
+  const memory = createMemory({ dir }).memory;
+  memory.remember({
+    role: 'user',
+    content: 'El objetivo es construir un navegador accesible y estable',
+  });
+  let enabled = true,
+    lists = 0,
+    recalls = 0;
+  const list = memory.list.bind(memory),
+    recall = memory.recall.bind(memory);
+  memory.list = (...args) => {
+    assert.equal(enabled, true, 'No consultar EVO apagada');
+    lists++;
+    return list(...args);
+  };
+  memory.recall = (...args) => {
+    assert.equal(enabled, true, 'No recuperar EVO apagada');
+    recalls++;
+    return recall(...args);
+  };
+  const s = service({
+    file,
+    storage: fileStorage(file),
+    memory,
+    memoryEnabled: () => enabled,
+  });
+  assert.equal(s.observe(g, 'Mi objetivo: continuidad independiente').ok, true);
+  s.recall(g, 'navegador accesible', s.snapshot(g).state.revision);
+  const initial = s.snapshot(g),
+    q = initial.state.pending_questions.find(
+      (q) => q.kind === 'context-reference',
+    );
+  assert.ok(q);
+  assert.ok(initial.memoryReferences.some((r) => r.available));
+  enabled = false;
+  const before = { lists, recalls };
+  const off = s.snapshot(g);
+  assert.equal(off.observationEnabled, true);
+  assert.ok(off.memoryReferences.every((r) => !r.available && r.text === null));
+  assert.throws(
+    () => s.recall(g, 'navegador', off.state.revision),
+    /desactivada/,
+  );
+  assert.throws(
+    () =>
+      s.edit(g, {
+        type: 'resolve',
+        revision: off.state.revision,
+        id: q.id,
+        accept: true,
+      }),
+    /ya no está disponible/,
+  );
+  assert.equal(s.observe(g, 'No ejecutes código').ok, true);
+  assert.equal(
+    s.snapshot(g).state.explicit_constraints[0].text,
+    'No ejecutes código',
+  );
+  assert.deepEqual({ lists, recalls }, before);
+  const reopened = service({
+    file,
+    storage: fileStorage(file),
+    memory,
+    memoryEnabled: () => enabled,
+  });
+  assert.equal(
+    reopened.snapshot(g).state.user_goal.id,
+    initial.state.user_goal.id,
+  );
+  assert.equal(
+    reopened.snapshot(g).state.explicit_constraints[0].text,
+    'No ejecutes código',
+  );
+  assert.deepEqual({ lists, recalls }, before);
+  enabled = true;
+  const on = reopened.snapshot(g);
+  assert.ok(on.memoryReferences.some((r) => r.available));
+  assert.equal(on.state.user_goal.id, initial.state.user_goal.id);
+  reopened.recall(g, 'navegador accesible', on.state.revision);
+  assert.ok(recalls > before.recalls);
+});
+
+test('desacoplamiento B: sin instancia EVO, UUE identifica categorías y reabre su propio archivo sin errores', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'uue-no-evo-')), 'uue.json'),
+    g = guest();
+  let s = service({
+    file,
+    storage: fileStorage(file),
+    memory: null,
+    memoryEnabled: () => false,
+  });
+  for (const [i, text] of [
+    'Mi objetivo: independiente sin memoria',
+    'Usa español',
+    'No borres información',
+    'Preferencia: respuestas breves',
+    'Decisión confirmada: mantener Electron',
+    'Avance: revisada la arquitectura',
+  ].entries())
+    assert.equal(s.observe(g, text, { messageId: `m-${i}` }).ok, true);
+  const before = s.snapshot(g);
+  assert.equal(before.observationEnabled, true);
+  s = service({
+    file,
+    storage: fileStorage(file),
+    memory: null,
+    memoryEnabled: () => false,
+  });
+  const after = s.snapshot(g);
+  for (const field of [
+    'user_goal',
+    'active_instructions',
+    'explicit_constraints',
+    'preferences',
+    'confirmed_decisions',
+    'progress',
+  ])
+    assert.deepEqual(after.state[field], before.state[field], field);
+  assert.deepEqual(after.memoryReferences, []);
 });

@@ -46,3 +46,28 @@ EVIDENCIAS EN EL ZIP, NO AGREGADAS AL REPOSITORIO:
 validacion/pruebas-completas.tap
 validacion/build-inject.log
 validacion/chequeos.txt
+
+
+CORRECCIÓN POSTERIOR — UUE INDEPENDIENTE DE EVO (sin commit ni push):
+Base: efa6937c2bf3a75088b76535a88322cf9a5a81f9; misma versión 0.1.33.
+La lista anterior corresponde a la entrega inicial. Para esta corrección:
+
+MODIFICADOS (6):
+src/main/main.js
+src/main/userUnderstanding.js
+test/user-understanding.test.js
+docs/NEXO-CAPA1-0.1.33.md
+docs/NEXO-CAPA1-VALIDACION.md
+docs/NEXO-CAPA1-ARCHIVOS.txt
+
+NUEVO (1):
+test/user-understanding-independence.test.js
+
+EVIDENCIAS EXTERNAS EN EL ZIP (sin agregarlas a Git):
+validacion-correccion/pruebas-especificas.tap
+validacion-correccion/pruebas-completas.tap
+validacion-correccion/build-inject.log
+validacion-correccion/chequeos.txt
+
+Sin cambios de lector/preload/panel, contratos IPC, esquema, persistencia general,
+Engine/guard, EVO, CDP o contadores. Sin funcionalidades nuevas ni Capa 2.

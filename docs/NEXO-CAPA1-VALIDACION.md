@@ -6,7 +6,7 @@ Rama de trabajo: `arena/4678aef7-navegador`. La validación de implementación s
 
 Problema: la continuidad no debería convertir una tarea intermedia, preferencia, referencia destilada o interpretación incierta en un objetivo/regla nueva. Hipótesis acotada: un estado explícito y revisable puede conservar la intención en los nueve escenarios definidos y hacer visibles sus faltantes sin modificar el flujo de lectura/envío existente. Las pruebas comprueban ese comportamiento programado; no miden todavía si reduce esfuerzo o errores en uso real.
 
-## Ejecución final
+## Ejecución inicial de 0.1.33 (antes de la corrección de independencia)
 
 | Comprobación | Resultado | Alcance |
 |---|---|---|
@@ -77,3 +77,91 @@ La interpretación es por reglas y vocabulario limitado, no semántica general. 
 - Medir latencia, coste de escrituras, falsos positivos, errores omitidos, reducción de esfuerzo y utilidad real en tareas equivalentes.
 
 Aplicar el gate manual de la arquitectura antes de declarar cerrada la validación funcional o comenzar la siguiente capa. Las pruebas y la cantidad de campos no sustituyen esa evidencia.
+
+
+## Corrección de independencia UUE/EVO — auditoría local posterior
+
+**Base:** commit `efa6937c2bf3a75088b76535a88322cf9a5a81f9`, rama
+`arena/4678aef7-navegador`. Se conserva **0.1.33**. Esta corrección se entrega
+**sin commit ni push**, por instrucción del usuario. La publicación mencionada al
+principio de este documento corresponde a la implementación anterior, no a esta
+corrección. No se incorpora Capa 2 ni funcionalidad adicional.
+
+### Cambios mínimos
+
+- `src/main/main.js`: configura la disponibilidad de antecedentes mediante
+  `memoryEnabled`, sin desactivar observación UUE. Consume la vista literal ya
+  validada (que el lector sigue emitiendo con EVO apagada). Observa snapshots
+  antes del interruptor/captura EVO, nunca condicionado a `result.ok`. La
+  preparación se observa también con mediación apagada, excluyendo autenticación.
+- `src/main/userUnderstanding.js`: elimina el bloqueo de observación por EVO;
+  `observationEnabled` indica true con los mismos controles de fuentes/borrado.
+  Bloquea `list`, `recall` y aceptación de referencias EVO cuando está apagada.
+  Conserva la firma anterior `enabled` como alias de disponibilidad de antecedentes
+  y añade `memoryEnabled` para expresar inequívocamente esa responsabilidad.
+- `test/user-understanding.test.js`: corrige la expectativa anterior de pausa e
+  incorpora dos pruebas de disponibilidad/ausencia de EVO y reapertura del archivo.
+- `test/user-understanding-independence.test.js` (nuevo): seis pruebas de main,
+  consumidor del lector real contra DOM de fixture, configuración y fallos EVO.
+- Documentación: este archivo, `NEXO-CAPA1-0.1.33.md` y `NEXO-CAPA1-ARCHIVOS.txt`.
+
+No cambian el esquema ni el archivo de persistencia UUE. No se modifican el lector
+ChatGPT, preload, panel Comprensión, contratos/nombres IPC, Engine, guard, CDP,
+contadores, `src/main/memory.js` ni `src/memory/*`. Sólo se añade el consumidor UUE
+en main; no hay lecturas, publicaciones ni capturas EVO duplicadas. Las fuentes
+repetidas se deduplican por identidad/contenido usando el código UUE existente.
+
+### Resultados de esta corrección (fuente final)
+
+| Ejecución | Ejecutadas | Aprobadas | Fallidas | Omitidas | Canceladas |
+|---|---:|---:|---:|---:|---:|
+| Específicas UUE (tres archivos) | **37** | **37** | **0** | **0** | **0** |
+| Suite completa Node | **786** | **785** | **0** | **1** | **0** |
+
+Las 37 específicas incluyen **8 pruebas nuevas** de independencia (2 de servicio,
+6 de integración) y la expectativa corregida; no son 37 capacidades nuevas.
+Comandos ejecutados:
+
+```sh
+node --test --test-reporter=tap test/user-understanding.test.js test/user-understanding-main.test.js test/user-understanding-independence.test.js
+node --test --test-reporter=tap
+npm run build:inject
+```
+
+Duración registrada de suite completa: **98.137,668669 ms**. La única prueba omitida
+sigue siendo `empaquetar.mjs produce un .exe con su asar`, por requerir
+`NEXO_ELECTRON_ZIP_DIR`. Build de inyección correcto. Chequeos `node --check` de
+**149 archivos** correctos, `git diff --check` correcto y versión paquete/lockfile
+0.1.33 verificada sin modificarlos.
+
+### Escenarios A/B/C y bordes
+
+- **A, EVO activada:** objetivos/decisiones UUE observados y persistidos; la captura
+  EVO ocurre una sola vez y aporta antecedentes mediante las interfaces anteriores.
+- **B, EVO apagada:** el lector sin modificaciones emite sólo el flujo en vivo;
+  main alimenta UUE y persiste objetivo/restricción. No se llama a captura EVO.
+  Preparación con EVO y mediación apagadas conserva objetivo/instrucción, pero no
+  ingiere autenticación. No cambian los contadores ni las memorias existentes.
+  Spies de servicio comprueban cero llamadas a `list`/`recall` con EVO apagada;
+  las referencias quedan no disponibles y sin texto, y no pueden aceptarse.
+  También se prueba UUE sin instancia EVO y reapertura de su archivo, conservando
+  objetivo, instrucciones, restricciones, preferencia, decisión y progreso.
+- **C, alternancia:** desactivar/reactivar no cambia ni pierde el estado UUE;
+  las referencias se ocultan y reaparecen sólo al habilitar EVO; la captura EVO
+  vuelve a funcionar y un turno ya observado no se aplica dos veces.
+- **Fallos EVO:** `captureConversation` devuelve `ok:false` o lanza una excepción;
+  UUE ya conserva el objetivo en disco. Se mantiene el resultado/error anterior de
+  captura y no se reintenta ni duplica la operación.
+
+Registros añadidos al ZIP en `validacion-correccion/`:
+`pruebas-especificas.tap`, `pruebas-completas.tap`, `build-inject.log`, `chequeos.txt`.
+La comprobación de integridad del ZIP y el SHA-256 se realizan al empaquetar.
+
+### Alcance y pendientes
+
+Estas pruebas ejecutan código de servicio, handlers de main, lector existente y
+persistencia real de archivos, pero usan **Electron stub y DOM de fixture**.
+**No se probó Electron real, cuenta/proveedor real, interfaz visual ni instalador
+Windows real**. No se midió rendimiento ni se afirma comprensión semántica general.
+Los límites previos de interpretación, identidad, seguridad y persistencia siguen
+vigentes. La corrección se entrega para auditoría; no autoriza avanzar a otra capa.

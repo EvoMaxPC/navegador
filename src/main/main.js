@@ -23,7 +23,7 @@ import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
 import { CdpObserver } from './cdp.js';
 import { isAiHost } from '../core/cdp.js';
-import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
+import { detectSite, isAuthRequest, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS } from '../core/settings.js';
@@ -569,7 +569,7 @@ function registerIpc() {
   });
   ipcMain.handle('nexo:prepare', (event, payload) => {
     const result = engine.prepare(event.sender.id, payload);
-    if(!result?.skipped && isUnderstandingSource(event))userUnderstanding?.observe(event.sender,payload.prompt,{channel:'prepare',transmittedText:result.text});
+    if((!result?.skipped || result.skipped==='disabled') && !isAuthRequest(String(payload?.url || '')) && isUnderstandingSource(event))userUnderstanding?.observe(event.sender,payload.prompt,{channel:'prepare',transmittedText:result.text});
     // La capa de la página sólo pide mediación cuando ya reconoció una petición
     // de chat. Si el motor la descarta, es un dato: significa que el sitio no se
     // está mediando. Antes, ese silencio se veía como «0 turnos» y nada más.
@@ -691,6 +691,8 @@ function registerIpc() {
       (event.senderFrame && sender.mainFrame && event.senderFrame !== sender.mainFrame)) return { ok: false };
     const snapshot = repetitionSnapshot(payload);
     if (!snapshot) return { ok: false };
+    // Consumir la vista literal ya validada: existe aun con EVO desactivada.
+    if(isUnderstandingSource(event))userUnderstanding?.observeConversation(sender,snapshot.turns);
     const next = { ...snapshot, href, webContentsId: sender.id };
     const previous = repetitionSnapshots.get(sender.id);
     repetitionSnapshots.set(sender.id, next);
@@ -728,8 +730,12 @@ function registerIpc() {
       snapshotUrl.origin === pageUrl.origin && snapshotUrl.pathname === pageUrl.pathname);
     if (event.sender?.getType?.() !== 'webview' || !isChatGptMemoryUrl(href) ||
       !sameDocument || !isChatGptMemoryUrl(payload?.href) ||
-      (event.senderFrame && event.sender?.mainFrame && event.senderFrame !== event.sender.mainFrame) || !Array.isArray(payload?.turns) || payload.turns.length > 200 ||
-      store.settings.memory?.enabled === false) {
+      (event.senderFrame && event.sender?.mainFrame && event.senderFrame !== event.sender.mainFrame) || !Array.isArray(payload?.turns) || payload.turns.length > 200) {
+      return { ok: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
+    }
+    // UUE no depende ni del interruptor ni del resultado de la captura EVO.
+    if(isUnderstandingSource(event))userUnderstanding?.observeConversation(event.sender,payload.turns);
+    if(store.settings.memory?.enabled === false) {
       return { ok: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
     }
     const url = pageUrl;
@@ -738,7 +744,6 @@ function registerIpc() {
       : `${url.pathname}#tab-${event.sender.id}`;
     const result = memory.memory.captureConversation({ conversationId, url: `${url.origin}${url.pathname}`,
       turns: payload.turns, streaming: payload.streaming === true });
-    if(result.ok && isUnderstandingSource(event))userUnderstanding?.observeConversation(event.sender,payload.turns);
     if (!result.ok) noteDiagnostic({ code: 'conversation-memory-error', severity: 'warn',
       title: 'No se pudo guardar la conversación', detail: result.error });
 
@@ -1582,7 +1587,7 @@ app.whenReady().then(async () => {
   memory = created;
   userUnderstanding = new UserUnderstandingService({memory:created.memory,
     file:join(app.getPath('userData'),`nexo-understanding-${createHash('sha256').update(created.memory.projectId).digest('hex').slice(0,16)}.json`),
-    enabled:()=>store.settings.memory?.enabled!==false,notify:broadcast});
+    memoryEnabled:()=>store.settings.memory?.enabled!==false,notify:broadcast});
   captureDiagnosticFile = join(app.getPath('documents'), 'NEXO-CAPTURE-DIAGNOSTIC.jsonl');
   captureDiagnostic = createCaptureDiagnostic(captureDiagnosticFile, {
     onError: (code) => console.warn('[nexo] diagnóstico de captura no escrito:', code),
