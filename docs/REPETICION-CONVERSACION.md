@@ -1,11 +1,11 @@
-# Repetición de conversación — Nexo 0.1.26
+# Repetición de conversación — Nexo 0.1.27
 
 ## Uso
 
 1. Abrir una conversación normal de ChatGPT en Nexo, nueva o antigua.
 2. Abrir el panel EVO y elegir el icono de dos hojas, **Repetición de conversación**, debajo de Actividad.
 3. El panel muestra **Vos** y **ChatGPT** en el orden del documento, sin tener que enviar un mensaje nuevo. Las respuestas parciales se actualizan en el mismo mensaje, sin añadir una copia por fragmento.
-4. Los cambios del documento se agrupan aproximadamente cada 500 ms. Al cambiar de pestaña o conversación, se cambia la fuente; nunca se muestra intencionalmente el chat de otra pestaña.
+4. Los cambios visibles del documento se agrupan por cuadro con requestAnimationFrame; el guardado en disco se agrupa cada 500 ms. Al cambiar de pestaña o conversación, se cambia la fuente; nunca se muestra intencionalmente el chat de otra pestaña.
 5. Si se está leyendo arriba, las actualizaciones no fuerzan el scroll al final. El texto se puede seleccionar/copiar normalmente; no se modifica el portapapeles automáticamente.
 
 ## Qué significa «literal»
@@ -29,7 +29,7 @@ Se reutiliza `watchChatGptConversation`: **un solo MutationObserver**, ahora sob
 Flujo: DOM compartido → `build/chatgpt-reader.cjs` en preload aislado → `nexo:repetition:snapshot` → caché volátil por webContentsId/URL → evento a la shell → render por cuadro.
 
 - La repetición funciona aunque mediación y EVO MEMORY estén apagadas. En ese modo el fetch pasa al original sin inspección/reescritura del cuerpo: sólo se lee el DOM para esta vista.
-- La ruta de repetición **no cuenta turnos/respuestas/tokens, no destila y no escribe nuevos archivos**. EVO MEMORY, si está habilitada, mantiene por separado su comportamiento previo.
+- La copia en RAM **no destila ni escribe nuevos archivos**. Desde 0.1.27, el snapshot validado también actualiza la estimación existente de palabras de la respuesta del envío observado, sin un contador paralelo ni actividad ficticia al abrir historiales. EVO MEMORY, si está habilitada, guarda por separado la transcripción.
 - El texto de esta copia sólo vive en memoria mientras está abierta la pestaña. La caché se elimina al navegar/cerrar; al reabrir Nexo se vuelve a leer el documento cargado. La política previa de persistencia de EVO MEMORY no cambia.
 - El receptor sólo acepta snapshots del main frame de un webview ChatGPT HTTPS y exige coincidencia de URL real. Valida roles, estructura y límites antes de guardarlos en RAM.
 - Sólo la shell conocida puede consultar `nexo:repetition:get`; una web no puede leer la repetición de otra pestaña. El puente no habilita canales IPC arbitrarios.
@@ -37,13 +37,13 @@ Flujo: DOM compartido → `build/chatgpt-reader.cjs` en preload aislado → `nex
 
 ## Validación
 
-- Suite completa: **667 pruebas, 666 aprobadas, una omitida, cero fallos**.
+- Suite completa: **681 pruebas, 680 aprobadas, una omitida, cero fallos**.
 - Tests del lector: espacios, saltos, Unicode, chats ya abiertos, cambios parciales, cambio SPA/chat vacío, exclusión de temporales, mensajes mayores de 10k y límites explícitos.
 - Tests de IPC: memoria/mediación apagadas, aislamiento por pestaña, cambio de URL, limpieza al destruir, rechazo de páginas ajenas, subframes y lectores no privilegiados; la repetición no mueve contadores ni memorias.
 - Test del circuito de producción: DOM simulado → bundle generado → preload real → IPC del principal → consulta desde shell, incluyendo respuesta de más de 18k, actualización sin duplicación y fetch de paso directo con memoria/mediación apagadas.
 - Tests del renderer: sólo texto, no ejecución HTML, actualización del mismo nodo sin duplicados, vaciado, aviso de límites y respeto del scroll del usuario.
 - Chromium headless con fixture local y MutationObserver real: panel a 1440×1000 y 760×900, ambos roles exactos, conservación de espacios/saltos/Unicode, actualización automática, ausencia de HTML ejecutable, chat vacío y memoria apagada. Sin errores JS ni infracciones detectadas por axe WCAG 2 A/AA en ese recorrido. No es certificación de accesibilidad ni una sesión real de ChatGPT.
-- Benchmark existente ejecutado sin cambiar presupuestos; bundle de inyección aproximadamente **58,5 kB** sumando el bundle principal y el nuevo bundle del lector (no se oculta el coste trasladado al preload; baseline previo: 51,3 kB). Sin dependencias nuevas de producción.
+- Benchmark existente ejecutado sin cambiar presupuestos; bundle de inyección aproximadamente **59,5 kB** sumando el bundle principal y el nuevo bundle del lector (no se oculta el coste trasladado al preload; baseline previo: 51,3 kB). Sin dependencias nuevas de producción.
 
 Pendiente: confirmar los selectores, lectura completa del contenido cargado, cambios de conversación y generación en una sesión propia de ChatGPT dentro de Electron/Windows. Los tests y fixtures no equivalen a esa comprobación.
 
@@ -63,7 +63,7 @@ El estado de generación reconoce Stop/Detener/Parar, descarta botones deshabili
 
 Validación adicional: cuatro estrategias con ambos roles, literalidad, DPU, prioridad de selectores, anidamiento, rechazo de roles ambiguos, IDs, código, botones y metadatos sin contenido. Chromium con DOM/MutationObserver reales: estrategias alternativas en la fixture del panel, texto exacto, sin duplicados ni errores JS; cero infracciones axe detectadas en el recorrido. Captura: `/home/user/nexo-repeticion-adaptador.png`. No se probó una cuenta real de ChatGPT ni el ejecutable Windows de esta versión.
 
-Se integraron además los cambios concurrentes hasta `e9334eb` y sus seis pruebas del lector histórico/IDs. Se mantuvo el adaptador compartido (sin duplicar estrategias ni asignar roles a ciegas por paridad), con reconocimiento de estructuras anidadas también para `data-turn`. Suite completa posterior a esta integración: 667 pruebas, 666 aprobadas, una omitida y cero fallos.
+Se integraron además los cambios concurrentes hasta `e9334eb` y sus seis pruebas del lector histórico/IDs. Se mantuvo el adaptador compartido (sin duplicar estrategias ni asignar roles a ciegas por paridad), con reconocimiento de estructuras anidadas también para `data-turn`. Suite completa posterior a esta integración: 681 pruebas, 680 aprobadas, una omitida y cero fallos.
 
 ## Corrección del panel vacío — 0.1.26
 
@@ -90,3 +90,7 @@ El principal solicita una relectura al estar listo el DOM, tras navegación SPA 
 - ZIP 0.1.26: https://github.com/EvoMaxPC/navegador/actions/runs/42755430646/artifacts/13735686481 . Incluye la corrección; no es el ZIP anterior 0.1.25.
 
 Pendiente todavía: validación en una sesión real de ChatGPT del usuario. No se afirma haber accedido a su cuenta, su DOM real o su conversación a partir de la imagen.
+
+## Lectura por cuadro y Memoria — 0.1.27
+
+La misma copia se ve ahora dentro de Memoria mientras se renderiza. Se agrupan las escrituras en disco, se propagan los cambios de ajustes a pestañas abiertas y se reconcilian las palabras visibles con SSE/CDP por identidad del envío. Prueba Windows del contador incremental y del archivo persistido aprobada. Ver [capa de render 0.1.27](CAPA-RENDER-0.1.27.md) para arquitectura, límites y artefacto compilado. Las secciones anteriores de integración conservan el historial de correcciones.

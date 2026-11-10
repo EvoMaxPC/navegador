@@ -24,6 +24,12 @@ Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar e
 parcial al detener la respuesta. Estimación directa en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
+**Capa de render 0.1.27:** copia por cuadro del texto visible de ChatGPT a la
+pestaña Memoria y al panel de conversación, guardado local agrupado y contador
+de palabras en vivo sin duplicar SSE/CDP. Probada en Electron real/Windows,
+incluida lectura del archivo guardado.
+[Arquitectura, pruebas y descarga](docs/CAPA-RENDER-0.1.27.md).
+
 **Captura del panel 0.1.26:** el lector corre en el preload aislado y publica
 al panel por IPC directo, sin depender del JS del sitio ni de la inyección de fetch.
 Recupera publicaciones rechazadas, reemplazo de `body` y restauración de página.
