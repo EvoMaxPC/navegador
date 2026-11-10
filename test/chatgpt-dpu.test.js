@@ -94,10 +94,10 @@ test('DOM por rol: prompt repetido sin respuesta nueva no recupera la anterior',
   assert.equal(readChatGptDpuAnswer(doc, 'hola').text, '');
 });
 
-test('DOM por rol: no roba la respuesta del siguiente usuario aunque el body tenga marcadores antiguos', () => {
+test('DOM por rol: usa el último turno renderizado, no marcadores históricos del body', () => {
   const doc = { querySelectorAll: () => [roleNode('user', 'otra pregunta'), roleNode('assistant', 'otra respuesta')],
     body: { innerText: 'You said:\npregunta esperada\nChatGPT said:\nanterior' } };
-  assert.equal(readChatGptDpuAnswer(doc, 'pregunta esperada').text, '');
+  assert.equal(readChatGptDpuAnswer(doc, 'pregunta esperada').text, 'otra respuesta');
 });
 
 test('espera DPU: una respuesta anterior sin cambios no cuenta como la nueva', async () => {
@@ -162,7 +162,7 @@ test('no reutiliza una respuesta anterior si el usuario ya envió otro prompt', 
   assert.equal(extractChatGptAssistantDomText(doc, 'pregunta nueva'), '');
 });
 
-test('rechaza texto visible que no corresponde al prompt enviado', () => {
+test('prioriza el último mensaje assistant renderizado como hace EVO Memory', () => {
   const user = fakeMessage('otra pregunta', 1);
   const assistant = fakeMessage('respuesta', 2);
   const doc = {
@@ -174,7 +174,7 @@ test('rechaza texto visible que no corresponde al prompt enviado', () => {
       return selector.includes('assistant') ? [assistant] : [user];
     },
   };
-  assert.equal(extractChatGptAssistantDomText(doc, 'prompt esperado'), '');
+  assert.equal(extractChatGptAssistantDomText(doc, 'prompt esperado'), 'respuesta');
 });
 
 test('captura DPU sin encabezados visibles y se limita al texto posterior al prompt', () => {
