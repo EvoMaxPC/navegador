@@ -12,8 +12,8 @@ await import('../src/main/main.js');
 await new Promise((resolve) => setTimeout(resolve, 40));
 const owner = journal.windows[0].webContents;
 const event = (sender) => ({ sender, senderFrame: sender.mainFrame });
-const invoke = (channel, sender, payload) =>
-  journal.ipcHandlers.get(channel)(event(sender), payload);
+const invoke = (channel, sender, payload, senderFrame = sender.mainFrame) =>
+  journal.ipcHandlers.get(channel)({ sender, senderFrame }, payload);
 const settings = (patch) => invoke('nexo:settings:set', owner, patch);
 const read = (g) =>
   invoke('nexo:understanding:read', owner, { webContentsId: g.id });
@@ -89,6 +89,8 @@ test('B: lector existente → vista en vivo → UUE con EVO y mediación apagada
   await settings({ enabled: false, memory: { enabled: false } });
   const g = attach('b'),
     calls = [];
+  // Reproduce Electron entregando otro wrapper del mismo WebFrameMain.
+  g.mainFrame = { processId: 501, routingId: 601 };
   const original = EvoMemory.prototype.captureConversation;
   EvoMemory.prototype.captureConversation = function () {
     throw Error('No debe capturar con EVO apagada');
@@ -117,7 +119,7 @@ test('B: lector existente → vista en vivo → UUE con EVO y mediación apagada
     ipcRenderer: {
       invoke(channel, p) {
         calls.push(channel);
-        return Promise.resolve(invoke(channel, g, p));
+        return Promise.resolve(invoke(channel, g, p, { processId: 501, routingId: 601 }));
       },
       send() {},
     },
@@ -134,6 +136,13 @@ test('B: lector existente → vista en vivo → UUE con EVO y mediación apagada
     );
     let snap = await read(g);
     assert.equal(snap.state.user_goal.text, 'comprender sin EVO');
+    const subframe = invoke(
+      'nexo:repetition:snapshot',
+      g,
+      payload(g, 'No debe ingresar desde un subframe', 'subframe'),
+      { processId: 999, routingId: 601 },
+    );
+    assert.equal(subframe.ok, false, 'un frame distinto al principal sigue rechazado');
     assert.equal(snap.observationEnabled, true);
     disk(g, snap);
     nodes[0].innerText = 'No modifiques la funcionalidad';
