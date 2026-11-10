@@ -49,7 +49,8 @@ const bridge = (() => {
 
   window.addEventListener('message', (event) => {
     const data = event.data;
-    if (!data || data.__nexo !== 'reply') return;
+    if (!data || typeof data !== 'object') return;
+    if (data.__nexo !== 'reply') return;
     const entry = pending.get(data.id);
     if (!entry) return;
     pending.delete(data.id);

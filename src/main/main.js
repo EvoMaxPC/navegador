@@ -684,10 +684,22 @@ function registerIpc() {
   /* ---------------- EVO MEMORY ---------------- */
   ipcMain.handle('nexo:conversation-snapshot', (event, payload) => {
     const href = event.sender?.getURL?.() || '';
+    let snapshotUrl = null;
+    try { snapshotUrl = new URL(String(payload?.href || '')); } catch { /* URL inválida */ }
+    let pageUrl = null;
+    try { pageUrl = new URL(href); } catch { /* pestaña sin URL */ }
+    // ChatGPT puede actualizar query/hash durante una navegación SPA entre la
+    // lectura del DOM y la llegada del IPC. Se valida origen y ruta, no la URL
+    // textual completa, para no descartar respuestas reales por esa carrera.
+    const sameDocument = Boolean(pageUrl && snapshotUrl &&
+      snapshotUrl.origin === pageUrl.origin && snapshotUrl.pathname === pageUrl.pathname);
     if (event.sender?.getType?.() !== 'webview' || !isChatGptMemoryUrl(href) ||
-      payload?.href !== href || !Array.isArray(payload?.turns) || payload.turns.length > 200 ||
-      store.settings.memory?.enabled === false) return { ok: false, skipped: 'conversación-no-permitida' };
-    const url = new URL(href);
+      !sameDocument || !isChatGptMemoryUrl(payload?.href) ||
+      (event.senderFrame && event.sender?.mainFrame && event.senderFrame !== event.sender.mainFrame) || !Array.isArray(payload?.turns) || payload.turns.length > 200 ||
+      store.settings.memory?.enabled === false) {
+      return { ok: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
+    }
+    const url = pageUrl;
     // Nunca confiar en el ID del documento para escribir otra conversación.
     const conversationId = url.pathname.includes('/c/') ? url.pathname
       : `${url.pathname}#tab-${event.sender.id}`;
