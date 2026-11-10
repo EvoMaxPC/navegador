@@ -688,7 +688,7 @@ function registerIpc() {
     const sender = event.sender;
     const href = sender?.getURL?.() || '';
     if (sender?.getType?.() !== 'webview' || !isChatGptMemoryUrl(href) || payload?.href !== href ||
-      (event.senderFrame && sender.mainFrame && event.senderFrame !== sender.mainFrame)) return { ok: false };
+      !isMainFrameEvent(event, sender)) return { ok: false };
     const snapshot = repetitionSnapshot(payload);
     if (!snapshot) return { ok: false };
     // Consumir la vista literal ya validada: existe aun con EVO desactivada.
@@ -730,7 +730,7 @@ function registerIpc() {
       snapshotUrl.origin === pageUrl.origin && snapshotUrl.pathname === pageUrl.pathname);
     if (event.sender?.getType?.() !== 'webview' || !isChatGptMemoryUrl(href) ||
       !sameDocument || !isChatGptMemoryUrl(payload?.href) ||
-      (event.senderFrame && event.sender?.mainFrame && event.senderFrame !== event.sender.mainFrame) || !Array.isArray(payload?.turns) || payload.turns.length > 200) {
+      !isMainFrameEvent(event, event.sender) || !Array.isArray(payload?.turns) || payload.turns.length > 200) {
       return { ok: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
     }
     // UUE no depende ni del interruptor ni del resultado de la captura EVO.
@@ -1050,10 +1050,30 @@ function registerIpc() {
 }
 
 /** La observación UUE nunca acepta autoridad desde una página ajena o un subframe. */
+function isMainFrameEvent(event, sender = event?.sender) {
+  const frame = event?.senderFrame;
+  const mainFrame = sender?.mainFrame;
+  if (!frame || !mainFrame) return false;
+  if (frame === mainFrame) return true;
+  // Electron puede exponer wrappers distintos para el mismo WebFrameMain.
+  // La identidad estable del frame es el par processId/routingId.
+  return Number.isInteger(frame.processId) &&
+    Number.isInteger(frame.routingId) &&
+    frame.processId === mainFrame.processId &&
+    frame.routingId === mainFrame.routingId;
+}
+
+/** La observación UUE nunca acepta autoridad desde una página ajena o un subframe. */
 function isUnderstandingSource(event) {
-  const sender=event.sender;
-  if(sender?.getType?.()!=='webview'||!event.senderFrame||event.senderFrame!==sender.mainFrame)return false;
-  return BrowserWindow.getAllWindows().some(w=>{try{return advancedBrowser?.resolveGuest(w.webContents,sender.id)===sender;}catch{return false;}});
+  const sender = event?.sender;
+  if (sender?.getType?.() !== 'webview' || !isMainFrameEvent(event, sender)) return false;
+  return BrowserWindow.getAllWindows().some((window) => {
+    try {
+      return advancedBrowser?.resolveGuest(window.webContents, sender.id) === sender;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /** Guarda el perfil poco después del último cambio, no en cada navegación. */
