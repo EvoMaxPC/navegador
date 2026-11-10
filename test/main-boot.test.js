@@ -563,3 +563,17 @@ test('la memoria no acepta registros cifrados y lo informa por IPC', async () =>
   assert.ok(legible, 'la memoria legible está en el listado del panel');
   assert.equal(legible.readable, true, 'y el panel sabe que se puede leer');
 });
+
+test('la partición de pestañas sirve inicio y sus recursos con la misma lista pública que la shell', async () => {
+  await settle();
+  const handler = journal.sessions.get('persist:nexo')?.schemeHandlers.get('nexo');
+  assert.equal(typeof handler, 'function');
+  assert.equal(handler, journal.schemeHandlers.get('nexo'));
+  for (const path of ['src/ui/start/index.html', 'src/ui/start/start.css', 'src/ui/start/start.js', 'src/ui/assets/services/openai.svg']) {
+    const response = await handler({ url: `nexo://app/${path}` });
+    assert.equal(response.status, 200, path);
+  }
+  for (const path of ['src/preload/shell.cjs', 'src/main/main.js', 'package.json']) {
+    assert.equal((await handler({ url: `nexo://app/${path}` })).status, 404, path);
+  }
+});

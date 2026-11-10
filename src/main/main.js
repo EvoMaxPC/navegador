@@ -204,7 +204,7 @@ function registerProtocol() {
   // esto, el problema es el protocolo y no la página.
   let pedidos = 0;
   let total = 0;
-  protocol.handle('nexo', async (request) => {
+  const serveInternal = async (request) => {
     const t0 = performance.now();
     try {
       return await servirArchivo(request);
@@ -214,7 +214,11 @@ function registerProtocol() {
       setPerf('proto-pedidos', pedidos);
       setPerf('proto-ms', total);
     }
-  });
+  };
+  protocol.handle('nexo', serveInternal);
+  // Los protocolos son por sesión. Las pestañas usan esta partición, no la
+  // sesión de la shell. Mismo handler y allowlist; no se amplían permisos.
+  session.fromPartition('persist:nexo').protocol.handle('nexo', serveInternal);
 }
 
 /**

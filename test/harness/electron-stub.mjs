@@ -181,6 +181,8 @@ class FakeSession extends EventEmitter {
     super();
     this.partition = partition;
     this.cleared = [];
+    this.schemeHandlers = new Map();
+    this.protocol = { handle: (scheme, handler) => this.schemeHandlers.set(scheme, handler) };
   }
 
   get webRequest() {
