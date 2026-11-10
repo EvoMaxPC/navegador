@@ -71,3 +71,25 @@ validacion-correccion/chequeos.txt
 
 Sin cambios de lector/preload/panel, contratos IPC, esquema, persistencia general,
 Engine/guard, EVO, CDP o contadores. Sin funcionalidades nuevas ni Capa 2.
+
+
+AJUSTE POSTERIOR — LECTOR SIEMPRE ACTIVO Y ACK UUE (commit final en Git):
+Base: e3bdcb0; rama arena/4678aef7-navegador; misma versión 0.1.33.
+
+MODIFICADOS (6), SIN ARCHIVOS NUEVOS DE CÓDIGO:
+src/preload/chatgptReader.js
+src/main/main.js
+test/user-understanding-independence.test.js
+docs/NEXO-CAPA1-0.1.33.md
+docs/NEXO-CAPA1-VALIDACION.md
+docs/NEXO-CAPA1-ARCHIVOS.txt
+
+EVIDENCIAS EXTERNAS EN EL ZIP (no agregadas a Git):
+validacion-observacion/prueba-independencia.tap
+validacion-observacion/npm-test.tap
+validacion-observacion/build-inject.log
+validacion-observacion/chequeos.txt
+
+Sólo se modifica el lector solicitado y la confirmación del consumidor IPC.
+No hay segundo lector/canal ni cambios de interfaz, clasificación, persistencia,
+servicio UUE, esquema, cola, preload general, CDP, tokens, contadores u otras capas.

@@ -731,12 +731,19 @@ function registerIpc() {
     if (event.sender?.getType?.() !== 'webview' || !isChatGptMemoryUrl(href) ||
       !sameDocument || !isChatGptMemoryUrl(payload?.href) ||
       (event.senderFrame && event.sender?.mainFrame && event.senderFrame !== event.sender.mainFrame) || !Array.isArray(payload?.turns) || payload.turns.length > 200) {
-      return { ok: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
+      return { ok: false, observed: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
     }
     // UUE no depende ni del interruptor ni del resultado de la captura EVO.
-    if(isUnderstandingSource(event))userUnderstanding?.observeConversation(event.sender,payload.turns);
+    const observation = isUnderstandingSource(event)
+      ? userUnderstanding?.observeConversation(event.sender,payload.turns)
+      : { skipped: 'snapshot-no-autorizado' };
+    const observed = observation?.ok === true || observation?.duplicate === true;
     if(store.settings.memory?.enabled === false) {
-      return { ok: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
+      // La cola confirma entrega a UUE, no una captura EVO que no fue solicitada.
+      return observed
+        ? { ok: true, observed: true, memoryDisabled: true }
+        : { ok: false, observed: false, memoryDisabled: true,
+            skipped: observation?.skipped || 'uue-no-observado', error: observation?.error };
     }
     const url = pageUrl;
     // Nunca confiar en el ID del documento para escribir otra conversación.
@@ -765,7 +772,7 @@ function registerIpc() {
     writeCaptureTrace('conversation-read', { host: url.hostname, source: 'dom', chars: assistantChars,
       memory: { saved: result.ok === true, persisted: result.ok === true, chars: assistantChars } });
     if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());
-    return { ...result, assistantCaptures: undefined };
+    return { ...result, observed, observationSkipped: observed ? undefined : observation?.skipped, assistantCaptures: undefined };
   });
   ipcMain.handle('nexo:memory:conversations', () => memory.memory.listConversations());
   ipcMain.handle('nexo:memory:stats', () => ({ ...engine.memoryStats(), file: memory?.file || null }));

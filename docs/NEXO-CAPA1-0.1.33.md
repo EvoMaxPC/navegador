@@ -118,17 +118,45 @@ Gate manual recomendado: abrir Comprensión en Electron → fijar un objetivo ex
 ## Corrección localizada posterior — independencia de EVO (misma versión 0.1.33)
 
 La implementación inicial condicionaba UUE al interruptor y a `result.ok` de EVO.
-Esta corrección elimina ambos acoplamientos sin modificar esquema, archivo de UUE,
-lector, preload, nombres/cargas/respuestas de canales IPC, panel, Engine, guard,
-CDP ni contadores. Los errores de captura EVO conservan su tratamiento anterior;
-UUE ya observó y persistió antes de esa operación. El resultado de
-`nexo:conversation-snapshot` continúa indicando exclusivamente la captura EVO:
-si EVO está apagada mantiene su respuesta anterior de omisión, aunque UUE haya
-consumido el turno. El lector apagado para persistencia aporta la vista literal
-a través del flujo en vivo que ya existía; no se simula una captura nueva.
+La primera corrección eliminó ese acoplamiento desde main y mantuvo el lector sin
+cambios, usando la vista en vivo como entrada UUE con EVO apagada. El ajuste
+posterior solicitado modifica únicamente el lector existente y el recibo IPC:
+
+- `watchChatGptConversation` usa `isEnabled: () => true`. Conserva `publishLive`,
+  observadores y navegación; **no existe un segundo lector**.
+- Cambiar ajustes a memoria desactivada ya no cancela la cola de snapshots UUE.
+  La cola existente agrupa durante 500 ms; desconectar sigue cancelándola.
+- Main valida el emisor/documento y observa con UUE antes de cualquier condición
+  de captura EVO. Un subframe o fuente no autorizada no confirma observación.
+- Con EVO apagada, un snapshot recibido/procesado o reconocido como duplicado
+  retorna `{ ok: true, observed: true, memoryDisabled: true }` sin capturar EVO.
+  El duplicado confirma entrega pero no agrega revisión ni registro.
+- Sin usuario válido, con recorte, rechazo de fuente u otro fallo UUE se devuelve
+  `ok: false`, `observed: false` y un motivo (`skipped`, y `error` si corresponde).
+  Así el lector conserva su mecanismo de reintento ante entrega no confirmada.
+- Con EVO activa, su resultado/captura conservan el comportamiento anterior;
+  se agrega `observed` y, si aplica, `observationSkipped` para distinguir la
+  recepción UUE de la captura EVO. Una falla EVO no borra el estado UUE.
+
+No cambian nombres ni se duplican canales IPC. Este ajuste de confirmación es
+intencional: sustituye la respuesta negativa que antes se daba con EVO apagada.
+La clasificación de UUE, esquema, persistencia, interfaz, preload general,
+Engine/guard, CDP, tokens y contadores no se modifican. La configuración EVO se
+consulta sólo para sus capturas y antecedentes: nunca se activa internamente.
 
 La persistencia UUE sigue usando su propio archivo y el adaptador ya existente,
 sin migración ni cambios de persistencia general. Se conservan también sus
 salvaguardas: sólo fuentes admitidas, recortes omitidos, aislamiento y exclusión
 tras borrado explícito. Independencia de EVO no implica levantar esos controles.
 Resultados nuevos, archivos y límites en [validación](NEXO-CAPA1-VALIDACION.md#corrección-de-independencia-uueevo--auditoría-local-posterior).
+
+
+### Validación posterior del lector y confirmación IPC
+
+Se ejecutaron en orden la prueba específica de independencia (8/8), `npm test`
+(788 totales: 787 aprobadas, 0 fallidas, 1 omitida) y `npm run build:inject`
+(correcto). La prueba usa el lector real, espera la cola real de 500 ms y los
+sondeos posteriores, verifica estado y archivo UUE, ACK positivo, reintento de un
+ACK negativo, cero capturas/recuperaciones EVO, contador sin cambios y revisión
+sin duplicados. EVO permanece desactivada durante esas comprobaciones.
+No equivale a prueba visual de Electron real: véase el informe de validación.

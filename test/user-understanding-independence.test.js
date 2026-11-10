@@ -85,10 +85,16 @@ test('A: EVO activada, UUE observa/persiste y EVO conserva captura y antecedente
   }
 });
 
-test('B: lector existente → vista en vivo → UUE con EVO y mediación apagadas, sin capturas EVO ni cambios de contadores', async () => {
+test('B: lector existente → cola de 500 ms → confirmación UUE con EVO y mediación apagadas, sin duplicación ni cambios de contadores', async () => {
   await settings({ enabled: false, memory: { enabled: false } });
   const g = attach('b'),
-    calls = [];
+    calls = [],
+    receipts = [];
+  const initial = await read(g);
+  const originalRecall = EvoMemory.prototype.recall;
+  EvoMemory.prototype.recall = function () {
+    throw Error('No debe recuperar antecedentes con EVO apagada');
+  };
   const original = EvoMemory.prototype.captureConversation;
   EvoMemory.prototype.captureConversation = function () {
     throw Error('No debe capturar con EVO apagada');
@@ -117,7 +123,9 @@ test('B: lector existente → vista en vivo → UUE con EVO y mediación apagada
     ipcRenderer: {
       invoke(channel, p) {
         calls.push(channel);
-        return Promise.resolve(invoke(channel, g, p));
+        const result = invoke(channel, g, p);
+        receipts.push({ channel, result });
+        return Promise.resolve(result);
       },
       send() {},
     },
@@ -130,12 +138,31 @@ test('B: lector existente → vista en vivo → UUE con EVO y mediación apagada
     assert.deepEqual(
       calls,
       ['nexo:repetition:snapshot'],
-      'el lector no requiere cambios ni emite captura persistente',
+      'el envío en vivo es inmediato; el snapshot agrupado todavía no salió',
     );
     let snap = await read(g);
     assert.equal(snap.state.user_goal.text, 'comprender sin EVO');
     assert.equal(snap.observationEnabled, true);
+    assert.equal(snap.state.revision, initial.state.revision + 1);
+    const liveRevision = snap.state.revision;
     disk(g, snap);
+    // También actualizar ajustes apagados debe conservar el lote, no cancelarlo.
+    reader.updateSettings({ settings: { memory: { enabled: false } } });
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    assert.deepEqual(
+      calls.filter((c) => c === 'nexo:conversation-snapshot'),
+      ['nexo:conversation-snapshot'],
+    );
+    assert.deepEqual(
+      receipts.find((r) => r.channel === 'nexo:conversation-snapshot').result,
+      { ok: true, observed: true, memoryDisabled: true },
+    );
+    assert.equal(
+      (await read(g)).state.revision,
+      liveRevision,
+      'snapshot y vista en vivo registran un solo turno',
+    );
+    assert.equal(invoke('nexo:settings:get', owner).memory.enabled, false);
     nodes[0].innerText = 'No modifiques la funcionalidad';
     nodes[0].getAttribute = (key) =>
       ({ 'data-message-id': 'u2', 'data-message-author-role': 'user' })[key];
@@ -148,6 +175,19 @@ test('B: lector existente → vista en vivo → UUE con EVO y mediación apagada
     );
     disk(g, snap);
     const duplicateRevision = snap.state.revision;
+    assert.equal(duplicateRevision, liveRevision + 1);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    assert.equal(
+      calls.filter((c) => c === 'nexo:conversation-snapshot').length,
+      2,
+    );
+    assert.ok(
+      receipts
+        .filter((r) => r.channel === 'nexo:conversation-snapshot')
+        .every(
+          (r) => r.result.ok && r.result.observed && r.result.memoryDisabled,
+        ),
+    );
     invoke(
       'nexo:conversation-snapshot',
       g,
@@ -177,9 +217,19 @@ test('B: lector existente → vista en vivo → UUE con EVO y mediación apagada
     });
     assert.equal(refs.ok, false);
     assert.match(refs.error, /desactivada/);
+    // Espera otro sondeo (1200 + 500 ms desde arranque): el ACK evita reenvíos.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(
+      calls.filter((c) => c === 'nexo:conversation-snapshot').length,
+      2,
+    );
+    assert.equal(invoke('nexo:settings:get', owner).memory.enabled, false);
+    assert.equal((await read(g)).state.revision, duplicateRevision);
+    disk(g, await read(g));
   } finally {
     reader.disconnect();
     EvoMemory.prototype.captureConversation = original;
+    EvoMemory.prototype.recall = originalRecall;
     await settings({ enabled: true, memory: { enabled: true } });
   }
 });
@@ -299,3 +349,122 @@ for (const failure of ['result-not-ok', 'throw'])
       EvoMemory.prototype.captureConversation = original;
     }
   });
+
+test('snapshot sin EVO distingue recepción UUE, rechazo de fuente y ausencia de usuario válido', async () => {
+  await settings({ enabled: false, memory: { enabled: false } });
+  const g = attach('receipt-reasons');
+  const handler = journal.ipcHandlers.get('nexo:conversation-snapshot');
+  try {
+    const p = payload(g, 'Mi objetivo: no aceptar fuentes inválidas');
+    for (const e of [
+      { sender: g, senderFrame: {} },
+      { sender: g },
+      event(owner),
+    ]) {
+      const r = handler(e, p);
+      assert.equal(r.ok, false);
+      assert.equal(r.observed, false);
+      assert.equal(r.skipped, 'snapshot-no-autorizado');
+    }
+    const wrong = handler(event(g), {
+      ...p,
+      href: 'https://chatgpt.com/c/otro',
+    });
+    assert.equal(wrong.ok, false);
+    assert.equal(wrong.observed, false);
+    for (const turns of [
+      [],
+      [
+        {
+          id: 'a',
+          role: 'assistant',
+          content: 'No es una instrucción del usuario',
+        },
+      ],
+      [{ id: 'u', role: 'user', content: '  ' }],
+      [{ id: 'u', role: 'user', content: 42 }],
+    ]) {
+      const r = handler(event(g), { ...p, turns });
+      assert.equal(r.ok, false);
+      assert.equal(r.observed, false);
+      assert.equal(r.memoryDisabled, true);
+      assert.equal(r.skipped, 'no-user-turn');
+    }
+    const clipped = handler(event(g), {
+      ...p,
+      turns: [{ ...p.turns[0], clipped: true }],
+    });
+    assert.equal(clipped.ok, false);
+    assert.equal(clipped.skipped, 'clipped-user-turn');
+    assert.equal((await read(g)).state.revision, 0);
+    const accepted = handler(event(g), p);
+    assert.deepEqual(accepted, {
+      ok: true,
+      observed: true,
+      memoryDisabled: true,
+    });
+    const snap = await read(g);
+    assert.equal(snap.state.user_goal.text, 'no aceptar fuentes inválidas');
+    disk(g, snap);
+    assert.deepEqual(handler(event(g), p), accepted);
+    assert.equal((await read(g)).state.revision, snap.state.revision);
+  } finally {
+    await settings({ enabled: true, memory: { enabled: true } });
+  }
+});
+
+test('lector reintenta un ACK negativo y confirma después de la cola real, sin duplicar UUE', async () => {
+  await settings({ enabled: false, memory: { enabled: false } });
+  const g = attach('receipt-retry'),
+    receipts = [];
+  const node = {
+    innerText: 'Mi objetivo: reintentar entrega sin activar EVO',
+    getAttribute: (key) =>
+      ({ 'data-message-id': 'retry-u', 'data-message-author-role': 'user' })[
+        key
+      ],
+    querySelector: () => null,
+  };
+  const reader = startChatGptReader({
+    document: {
+      querySelectorAll: (s) =>
+        s === '[data-message-author-role]' ? [node] : [],
+      addEventListener() {},
+      removeEventListener() {},
+    },
+    window: {
+      location: { href: g.getURL() },
+      addEventListener() {},
+      removeEventListener() {},
+    },
+    config: { settings: { memory: { enabled: false } } },
+    ipcRenderer: {
+      invoke(channel, p) {
+        const r = invoke(channel, g, p);
+        if (channel === 'nexo:conversation-snapshot') {
+          receipts.push(r);
+          return Promise.resolve(receipts.length === 1 ? { ok: false } : r);
+        }
+        return Promise.resolve(r);
+      },
+      send() {},
+    },
+  });
+  try {
+    reader.read();
+    const live = await read(g);
+    assert.equal(live.state.revision, 1);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    assert.equal(receipts.length, 1);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal(receipts.length, 2);
+    assert.ok(receipts.every((r) => r.ok && r.observed && r.memoryDisabled));
+    const final = await read(g);
+    assert.equal(final.state.revision, live.state.revision);
+    disk(g, final);
+    assert.equal(invoke('nexo:settings:get', owner).memory.enabled, false);
+  } finally {
+    reader.disconnect();
+    await settings({ enabled: true, memory: { enabled: true } });
+  }
+});

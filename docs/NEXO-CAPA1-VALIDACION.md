@@ -81,6 +81,10 @@ Aplicar el gate manual de la arquitectura antes de declarar cerrada la validaci�
 
 ## Corrección de independencia UUE/EVO — auditoría local posterior
 
+Registro histórico de la primera corrección, luego publicada como `e3bdcb0`.
+El ajuste de lector/confirmación IPC descrito al final sustituye su comportamiento
+de envío exclusivamente en vivo y de respuesta negativa con EVO apagada.
+
 **Base:** commit `efa6937c2bf3a75088b76535a88322cf9a5a81f9`, rama
 `arena/4678aef7-navegador`. Se conserva **0.1.33**. Esta corrección se entrega
 **sin commit ni push**, por instrucción del usuario. La publicación mencionada al
@@ -165,3 +169,91 @@ persistencia real de archivos, pero usan **Electron stub y DOM de fixture**.
 Windows real**. No se midió rendimiento ni se afirma comprensión semántica general.
 Los límites previos de interpretación, identidad, seguridad y persistencia siguen
 vigentes. La corrección se entrega para auditoría; no autoriza avanzar a otra capa.
+
+
+## Ajuste final — lector siempre activo y confirmación IPC de UUE
+
+**Base:** `e3bdcb0`, rama `arena/4678aef7-navegador`, versión **0.1.33**.
+El usuario solicita ahora modificar el lector existente y confirmar la recepción
+UUE por la cola; no se incorpora ninguna otra funcionalidad. El commit final de
+este ajuste se identifica en Git y en el informe de entrega.
+
+### Verificación previa y cambios
+
+La inspección confirmó `isEnabled: () => settings.memory?.enabled !== false` y
+la cancelación de cola al desactivar memoria en `src/preload/chatgptReader.js`.
+También confirmó que main observaba UUE antes de EVO, pero respondía negativamente
+con EVO apagada, sin tener en cuenta el resultado de esa observación.
+
+Archivos modificados:
+1. `src/preload/chatgptReader.js`: `isEnabled: () => true`; no cancela la cola al
+   apagar EVO. Mantiene publicación en vivo, mismo watcher, cola, observadores y
+   navegación. La desconexión conserva su cancelación.
+2. `src/main/main.js`: guarda el resultado de `observeConversation`; con EVO
+   apagada confirma sólo recepción/procesamiento UUE o duplicado conocido mediante
+   `{ ok: true, observed: true, memoryDisabled: true }`. Los rechazos indican
+   `observed: false` y motivo. La captura EVO queda después de ese retorno.
+   Con EVO activa conserva su resultado y agrega el indicador `observed`.
+3. `test/user-understanding-independence.test.js`: amplía la prueba del lector
+   existente y agrega casos de recibo, fuente inválida, ausencia de usuario válido,
+   recorte y reintento real de la cola ante ACK negativo.
+4. `docs/NEXO-CAPA1-0.1.33.md`: actualiza el funcionamiento del lector y ACK.
+5. `docs/NEXO-CAPA1-ARCHIVOS.txt`: manifiesto de este ajuste.
+6. Este documento: método, resultados y alcance de validación.
+
+No hay cambios de clasificación, interfaz, servicio/persistencia UUE, esquema,
+cola de agrupación, preload general, CDP, tokens ni contadores. No se activa EVO
+internamente ni se crea otro lector/canal. Se conservan las comprobaciones de URL,
+fuente y frame: un subframe no se acepta como documento principal de UUE.
+
+### Ejecuciones reales, en el orden solicitado
+
+| Comando | Total | Aprobadas | Fallidas | Omitidas | Canceladas |
+|---|---:|---:|---:|---:|---:|
+| `node --test --test-reporter=tap test/user-understanding-independence.test.js` | **8** | **8** | **0** | **0** | **0** |
+| `npm test` | **788** | **787** | **0** | **1** | **0** |
+
+- Específica: **4.260,107058 ms**; temporizadores reales, no un avance ficticio de
+  reloj. Se esperan 550 ms por lote de 500 ms, otro sondeo para comprobar que no
+  hay reenvíos tras el ACK y un ciclo real de reintento ante ACK negativo.
+- Suite completa: **104.124,532483 ms**. La única omitida continúa siendo
+  `empaquetar.mjs produce un .exe con su asar`, que requiere
+  `NEXO_ELECTRON_ZIP_DIR`.
+- Después de la suite: `npm run build:inject` **correcto**, 53,7 kB / 19,3 kB gzip,
+  11 módulos. Sin regresiones detectadas en estas ejecuciones.
+
+### Aceptación automatizada
+
+Durante la prueba de independencia se mantienen `enabled: false` y
+`memory.enabled: false`, y se comprueba el ajuste antes y después de esperar los
+lotes/sondeo. No se reactiva EVO hasta la limpieza final de la prueba.
+
+1. El mismo lector DOM publica inmediatamente por el canal en vivo y, tras la
+   espera real, por el canal de snapshots existente.
+2. Main responde positivamente con `observed: true` y `memoryDisabled: true`.
+3. El objetivo y la restricción aparecen en el estado consultado por el panel
+   Comprensión; la revisión aumenta una sola vez por turno y el archivo UUE
+   coincide exactamente con ese estado.
+4. Métodos EVO de captura y recuperación están interceptados para fallar si se
+   llaman durante esa prueba; no se llaman. Tampoco cambian las memorias previas.
+5. No cambian mensajes, respuestas, tokens de entrada/salida ni resultados de
+   turnos por esta observación.
+6. Los dos canales, un envío repetido y el sondeo no duplican revisión/registros.
+7. Un ACK negativo provoca reintento por la cola real; el siguiente recibo positivo
+   confirma entrega sin duplicar UUE. Un usuario ausente/recortado, URL distinta,
+   frame ajeno, frame ausente o shell no reciben una confirmación UUE falsa.
+8. Las pruebas previas con EVO activa, alternancia y fallo de captura EVO siguen
+   aprobadas dentro de la específica y de la suite completa.
+
+Registros en el ZIP: `validacion-observacion/prueba-independencia.tap`,
+`validacion-observacion/npm-test.tap`, `validacion-observacion/build-inject.log`
+y `validacion-observacion/chequeos.txt`.
+
+### Lo que no se probó
+
+No se ejecutó Electron real ni se envió un mensaje desde una cuenta ChatGPT real.
+Se usaron el lector y handlers de producción con DOM de fixture, Electron stub y
+archivos reales. La actualización visual del panel, foco, navegación real y el
+instalador Windows quedan pendientes de prueba manual. No se afirma rendimiento,
+precisión semántica general ni validación de otra capa. No se modificó la UI para
+esta entrega; la prueba verifica el estado y la persistencia que ella consulta.

@@ -6,7 +6,8 @@ export function startChatGptReader({ document, window, ipcRenderer, config = {} 
   let settings = config.settings || {};
   const saves = createConversationSaveQueue(payload => ipcRenderer.invoke('nexo:conversation-snapshot', payload));
   const watcher = watchChatGptConversation({ document, window, memoryLiteral: true,
-    isEnabled: () => settings.memory?.enabled !== false,
+    // La observación actual es de UUE; main decide si además captura en EVO.
+    isEnabled: () => true,
     publishLive: (payload) => ipcRenderer.invoke('nexo:repetition:snapshot', payload),
     publish: (payload) => payload.error
       ? ipcRenderer.send('nexo:event', { type: 'error', payload: { stage: 'conversation-reader', message: 'dom-read-failed' } })
@@ -15,7 +16,7 @@ export function startChatGptReader({ document, window, ipcRenderer, config = {} 
   window.addEventListener?.('pagehide', saves.flush);
   return {
     read: () => watcher.read({ force: true }),
-    updateSettings(payload) { settings = payload?.settings || settings; if (settings.memory?.enabled === false) saves.cancel(); watcher.read({ force: true }); },
+    updateSettings(payload) { settings = payload?.settings || settings; watcher.read({ force: true }); },
     disconnect() { watcher.disconnect(); saves.cancel(); window.removeEventListener?.('pagehide', saves.flush); },
   };
 }
