@@ -108,7 +108,7 @@ export function diagnoseChatGptReader(document) {
 export function readChatGptCode(node) {
   return queryAll(node, 'pre').map((pre) => {
     const code = query(pre, 'code') || pre;
-    const lang = String(code.className || '').match(/language-([\\w+#-]+)/)?.[1] || '';
+    const lang = String(code.className || '').match(/language-([\w+#-]+)/)?.[1] || '';
     return { lang, code: String(code.innerText ?? code.textContent ?? '') };
   });
 }
