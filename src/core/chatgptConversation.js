@@ -29,7 +29,7 @@ export function readChatGptConversation(document, { literal = false, selection =
 /** Un solo observador, agrupado; funciona aunque ChatGPT no use nuestro fetch. */
 export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => isChatGptStreaming(document), publishLive = null }) {
   if (typeof document?.querySelectorAll !== 'function') return { read() {}, disconnect() {} };
-  let timer = null, last = '', lastLive = '', observer = null, stopped = false;
+  let timer = null, pollTimer = null, last = '', lastLive = '', observer = null, stopped = false;
   const session = `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const read = () => {
     timer = null;
@@ -66,6 +66,15 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
     }
   };
   const schedule = () => { if (!stopped && !timer) timer = setTimeout(read, 500); };
+  // Cinco vías complementarias de recuperación: selectores de rol/data-turn/article
+  // del adaptador, MutationObserver, sondeo periódico, eventos de navegación y
+  // lectura inmediata al volver a la pestaña. El sondeo cubre cambios que React
+  // puede aplicar sin mutaciones observables en los nodos seleccionados.
+  const poll = () => {
+    if (stopped) return;
+    schedule();
+    pollTimer = setTimeout(poll, 1200);
+  };
   const start = () => {
     if (stopped) return;
     if (window.MutationObserver && document.body && !observer) {
@@ -77,7 +86,11 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
   document.addEventListener?.('DOMContentLoaded', start, { once: true });
   window.addEventListener?.('popstate', schedule);
   window.addEventListener?.('hashchange', schedule);
-  window.addEventListener?.('pagehide', () => { read(); stopped = true; observer?.disconnect(); clearTimeout(timer); });
+  window.addEventListener?.('pageshow', schedule);
+  window.addEventListener?.('focus', schedule);
+  document.addEventListener?.('visibilitychange', schedule);
+  window.addEventListener?.('pagehide', () => { read(); stopped = true; observer?.disconnect(); clearTimeout(timer); clearTimeout(pollTimer); });
   start();
-  return { read, disconnect() { stopped = true; clearTimeout(timer); observer?.disconnect(); } };
+  poll();
+  return { read, disconnect() { stopped = true; clearTimeout(timer); clearTimeout(pollTimer); observer?.disconnect(); } };
 }
