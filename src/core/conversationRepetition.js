@@ -6,6 +6,13 @@ export const REPETITION_MAX_TURN_CHARS = 200000;
 export const REPETITION_MAX_CHARS = 1000000;
 
 /** Valida texto, nunca HTML. No recorta, resume, normaliza ni interpreta mensajes. */
+function validStrategy(value) {
+  if (typeof value !== 'string' || !value) return 'none';
+  const parts = value.split('+');
+  return parts.length > 0 && parts.every((part) => CHATGPT_STRATEGIES.includes(part)) &&
+    new Set(parts).size === parts.length ? value : 'none';
+}
+
 export function repetitionSnapshot(payload) {
   if (!payload || !Array.isArray(payload.turns) || payload.turns.length > REPETITION_MAX_TURNS) return null;
   let chars = 0;
@@ -17,5 +24,5 @@ export function repetitionSnapshot(payload) {
     if (chars > REPETITION_MAX_CHARS) return null;
     turns.push({ id: turn.id, role: turn.role, content: turn.content, clipped: turn.clipped === true });
   }
-  return { turns, strategy: CHATGPT_STRATEGIES.includes(payload.strategy) ? payload.strategy : 'none', streaming: payload.streaming === true, clipped: payload.clipped === true || turns.some((turn) => turn.clipped) };
+  return { turns, strategy: validStrategy(payload.strategy), streaming: payload.streaming === true, clipped: payload.clipped === true || turns.some((turn) => turn.clipped) };
 }
