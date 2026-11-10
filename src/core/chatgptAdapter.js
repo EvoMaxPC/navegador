@@ -9,7 +9,7 @@ const nestedRole = (node) => {
   if (own) return own;
   const user = query(node, '[data-message-author-role="user"], [data-turn="user"]');
   const assistant = query(node, '[data-message-author-role="assistant"], [data-turn="assistant"]');
-  const markdown = query(node, '.markdown');
+  const markdown = query(node, '.markdown') || query(node, '.prose');
   // No inferir por índice: una rama regenerada o un artículo mixto rompe la alternancia.
   if (user && (assistant || markdown)) return '';
   if (user) return 'user';
@@ -18,7 +18,7 @@ const nestedRole = (node) => {
 };
 const strategies = [
   { name: 'author-role', selector: '[data-message-author-role]', role: explicitRole },
-  { name: 'data-turn', selector: '[data-turn]', role: explicitRole },
+  { name: 'data-turn', selector: '[data-turn]', role: nestedRole },
   { name: 'conversation-turn', selector: '[data-testid^="conversation-turn"]', role: nestedRole },
   { name: 'article', selector: 'article', role: nestedRole },
 ];
