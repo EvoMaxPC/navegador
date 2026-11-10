@@ -7,11 +7,12 @@
  *   · `Network.webSocketFrameReceived` / `…Sent` — frames de WebSocket.
  *   · `Network.responseReceived` + `Network.getResponseBody` — respuestas JSON
  *     completas, sin streaming.
+ *   · `Network.streamResourceContent` + `…dataReceived` — cuerpo de SSE/NDJSON.
  *
  * Reglas de convivencia con la capa HTTP/SSE que ya existe:
  *
- *   1. Los cuerpos `text/event-stream` y los streams se ignoran acá: de esos se
- *      ocupa la página, y procesarlos también duplicaría el turno.
+ *   1. Los streams son respaldo: si la capa ya cerró ese envío con texto,
+ *      no se entregan otra vez. El motor conserva la deduplicación habitual.
  *   2. Sólo se adjunta el depurador a los hosts con perfil conocido.
  *   3. Si el depurador no está disponible (ya hay uno adjunto, Electron sin
  *      soporte, error del protocolo), el observador queda inerte: el navegador
@@ -50,6 +51,12 @@ const ALTERNATIVE_STREAM_TYPES = new Set(['Other', 'EventSource']);
 
 /** Tope del cuerpo que se pide al depurador. */
 const MAX_BODY_BYTES = 2_000_000;
+/** Acota también el overhead de muchos fragmentos diminutos. */
+const MAX_STREAM_CHUNKS = 8192;
+/** Como máximo 16 MB de cuerpos de streaming acumulados por pestaña. */
+const MAX_STREAMS_PER_TAB = 8;
+/** No bloquear un cierre si Chromium nunca responde a la activación experimental. */
+const STREAM_READY_TIMEOUT_MS = 1000;
 
 export class CdpObserver {
   /**
@@ -170,6 +177,7 @@ export class CdpObserver {
       debuggerApi,
       sockets: new Map(),
       pending: new Map(),
+      streamCount: 0,
       requests: new Map(),
       failures: new Set(),
       closed: false,
@@ -183,7 +191,11 @@ export class CdpObserver {
       });
     });
     debuggerApi.on('detach', (_event, reason) => {
-      this.tabs.delete(contents.id);
+      state.closed = true;
+      for (const pending of state.pending.values()) this.#discardStream(pending.streaming);
+      state.pending.clear();
+      state.requests.clear();
+      if (this.tabs.get(contents.id) === state) this.tabs.delete(contents.id);
       this.stats.detached += 1;
       if (reason) this.log(`CDP: depurador separado (${reason})`);
     });
@@ -215,6 +227,10 @@ export class CdpObserver {
     if (!state) return false;
     // Lo pendiente se cierra antes de soltar: si no, el último turno se pierde.
     this.#flushAll(state, 'release');
+    state.closed = true;
+    for (const pending of state.pending.values()) this.#discardStream(pending.streaming);
+    state.pending.clear();
+    state.requests.clear();
     this.tabs.delete(id);
     this.stats.detached += 1;
     try {
@@ -277,6 +293,8 @@ export class CdpObserver {
         return this.#requestStarted(state, params);
       case 'Network.responseReceived':
         return this.#responseReceived(state, params);
+      case 'Network.dataReceived':
+        return this.#dataReceived(state, params);
       case 'Network.loadingFinished':
         return this.#loadingFinished(state, params);
       case 'Network.loadingFailed':
@@ -480,6 +498,9 @@ export class CdpObserver {
         meta: { host: entry.host, path: pathOf(entry.url), site: site.id },
       });
     }
+    // getRequestPostData puede resolver después de responseReceived. Si acaba
+    // de reconocerse la ruta nueva, todavía se puede activar el respaldo.
+    if (state.pending.get(requestId)?.stream && this.contentAllowed(entry.host)) this.#startStreaming(state, requestId);
     const messageId = `cdp-${requestId}`;
     entry.messageId = messageId;
     if (!this.engine || typeof this.engine.onUserMessage !== 'function') return;
@@ -517,6 +538,7 @@ export class CdpObserver {
   #loadingFailed(state, params) {
     const request = state.requests.get(params.requestId);
     state.requests.delete(params.requestId);
+    this.#discardStream(state.pending.get(params.requestId)?.streaming);
     state.pending.delete(params.requestId);
     // canceled no demuestra Stop: también ocurre al navegar o por decisión del sitio.
     if (!request) return;
@@ -645,6 +667,7 @@ export class CdpObserver {
     // haya cerrado ESE stream (se decide al terminar la carga, cuando ya se
     // sabe). Que la capa cuente el envío no garantiza que capture la
     // contestación: si se calla, la respuesta se perdería.
+    this.#discardStream(state.pending.get(requestId)?.streaming);
     state.pending.set(requestId, {
       requestId,
       url,
@@ -656,7 +679,82 @@ export class CdpObserver {
       // Instante en que salió la petición: sólo un cierre de la capa posterior
       // a esto cuenta como «la respuesta ya la contó ella».
       since: Number(origen?.at) || Date.now(),
+      streaming: null,
     });
+    // No activar captura de cuerpos de historial/telemetría ni de sitios apagados.
+    if (stream && origen?.chat && origen?.post && this.contentAllowed(host)) this.#startStreaming(state, requestId);
+  }
+
+  #startStreaming(state, requestId) {
+    const pending = state.pending.get(requestId);
+    if (!pending || pending.streaming || state.closed) return;
+    if (state.streamCount >= MAX_STREAMS_PER_TAB) return; // Queda disponible getResponseBody.
+    // Instalar ANTES del comando: dataReceived puede llegar antes de su respuesta.
+    const stream = { state, chunks: [], bytes: 0, enabled: false, discarded: false, ready: null };
+    state.streamCount += 1;
+    pending.streaming = stream;
+    stream.ready = this.#send(state, 'Network.streamResourceContent', { requestId })
+      .then((result) => {
+        if (state.closed || stream.discarded) return;
+        // bufferedData precede a todos los dataReceived, aunque la promesa llegue tarde.
+        this.#appendStreamData(stream, result?.bufferedData || '', true);
+        stream.enabled = true;
+      })
+      .catch((error) => {
+        this.#discardStream(stream);
+        this.log(`CDP: streamResourceContent no disponible: ${error?.message || error}`);
+      });
+  }
+
+  #discardStream(stream) {
+    if (!stream || stream.discarded) return;
+    stream.discarded = true; stream.chunks = []; stream.bytes = 0;
+    stream.state.streamCount -= 1;
+  }
+
+  #appendStreamData(stream, encoded, prepend = false) {
+    if (stream.discarded || !encoded) return;
+    // Validar tamaño antes de decodificar y descartar TODO, no un prefijo incompleto.
+    const remaining = MAX_BODY_BYTES - stream.bytes;
+    if (typeof encoded !== 'string' || encoded.length > 4 * Math.ceil(remaining / 3) ||
+        (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) ||
+        stream.chunks.length >= MAX_STREAM_CHUNKS) {
+      this.#discardStream(stream);
+      return;
+    }
+    const chunk = Buffer.from(encoded, 'base64');
+    if (chunk.length > remaining) {
+      this.#discardStream(stream);
+      return;
+    }
+    if (chunk.length) {
+      if (prepend) stream.chunks.unshift(chunk); else stream.chunks.push(chunk);
+      stream.bytes += chunk.length;
+    }
+  }
+
+  #dataReceived(state, params) {
+    const pending = state.pending.get(params.requestId);
+    const stream = pending?.streaming;
+    if (!stream) return;
+    if (!this.contentAllowed(pending.host)) { this.#discardStream(stream); return; }
+    if (typeof params.data === 'string') this.#appendStreamData(stream, params.data);
+  }
+
+  async #streamBody(state, stream) {
+    if (!stream) return '';
+    let timer;
+    try {
+      await Promise.race([stream.ready, new Promise((resolve) => {
+        timer = setTimeout(resolve, STREAM_READY_TIMEOUT_MS);
+      })]);
+      if (state.closed || !stream.enabled || stream.discarded || !stream.bytes) return '';
+      // Decodificar juntos: un carácter UTF-8 puede estar partido entre eventos.
+      return Buffer.concat(stream.chunks, stream.bytes).toString('utf8');
+    } finally {
+      clearTimeout(timer);
+      this.#discardStream(stream);
+    }
   }
 
   async #loadingFinished(state, params) {
@@ -670,16 +768,19 @@ export class CdpObserver {
     // conversación) devuelve JSON con todos los mensajes anteriores: contarlo
     // sería sumar el historial como si la IA acabara de contestar.
     if (request && !request.post) {
+      this.#discardStream(pending.streaming);
       this.stats.ignored += 1;
       return;
     }
     // Un POST del proveedor que no es la conversación (telemetría, ajustes) no
     // se lee: su cuerpo no es una respuesta del modelo.
     if (request && !request.chat) {
+      this.#discardStream(pending.streaming);
       this.stats.ignored += 1;
       return;
     }
     if (!this.contentAllowed(pending.host)) {
+      this.#discardStream(pending.streaming);
       this.stats.ignored += 1;
       return;
     }
@@ -692,6 +793,7 @@ export class CdpObserver {
       ? this.engine.layerEndedWithTextAfter(state.id, pending.since)
       : this.engine?.layerEndedAfter?.(state.id, pending.since);
     if (pending.stream && cerroConTexto) {
+      this.#discardStream(pending.streaming);
       this.stats.ignored += 1;
       // No es un fallo, pero sí la explicación de por qué el texto no vino de
       // acá: sin este aviso, «CDP no capturó» y «la capa llegó primero» se
@@ -709,7 +811,10 @@ export class CdpObserver {
 
     let body;
     try {
-      body = await this.#send(state, 'Network.getResponseBody', { requestId: params.requestId });
+      const streamed = await this.#streamBody(state, pending.streaming);
+      if (state.closed) return;
+      body = streamed ? { body: streamed, base64Encoded: false }
+        : await this.#send(state, 'Network.getResponseBody', { requestId: params.requestId });
     } catch (error) {
       // El cuerpo ya no está en el búfer (o era una descarga). No es un error
       // del navegador, pero sí explica una respuesta que no se cuenta.
@@ -726,7 +831,7 @@ export class CdpObserver {
       }
       return;
     }
-    if (!body || typeof body.body !== 'string') return;
+    if (state.closed || !body || typeof body.body !== 'string') return;
     let cuerpo = body.body;
     if (body.base64Encoded) {
       // Chromium entrega en base64 cuando el cuerpo no es texto plano. Un SSE
@@ -763,7 +868,7 @@ export class CdpObserver {
       }
       return;
     }
-    if (cuerpo.length > MAX_BODY_BYTES) return;
+    if (Buffer.byteLength(cuerpo, 'utf8') > MAX_BODY_BYTES) return;
 
     // Respuesta en streaming (SSE): se arma igual que en la página, con los
     // mismos adaptadores, y se cuenta una sola vez al terminar.
@@ -959,7 +1064,7 @@ export class CdpObserver {
     }
   }
 
-  #send(state, method, params) {
+  async #send(state, method, params) {
     const api = state.debuggerApi;
     if (!api || typeof api.sendCommand !== 'function') {
       return Promise.reject(new Error('sin depurador'));

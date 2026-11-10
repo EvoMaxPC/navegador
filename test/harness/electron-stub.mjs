@@ -52,6 +52,8 @@ export class FakeDebugger extends EventEmitter {
     this.failAttach = null;
     this.failCommand = null;
     this.rejectBodyFor = new Set();
+    /** Búfer inicial base64 del comando de streaming de Chromium. */
+    this.streamBuffered = new Map();
   }
 
   attach(version) {
@@ -76,6 +78,9 @@ export class FakeDebugger extends EventEmitter {
     this.commands.push({ method, params });
     if (this.failCommand && this.failCommand.method === method) {
       throw new Error(this.failCommand.message || 'fallo simulado');
+    }
+    if (method === 'Network.streamResourceContent') {
+      return { bufferedData: this.streamBuffered.get(params.requestId) || '' };
     }
     if (method === 'Network.getResponseBody') {
       if (this.rejectBodyFor.has(params.requestId)) {

@@ -24,6 +24,11 @@ Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar e
 parcial al detener la respuesta. Estimación directa en el proceso principal y actualización automática.
 [Auditoría, pruebas y validación en vivo pendiente](docs/OUTPUT-TOKENS-AUDITORIA.md).
 
+**Captura streaming 0.1.23:** respaldo CDP con `Network.streamResourceContent`
+y `Network.dataReceived` para SSE/NDJSON cuando Chromium no conserva el cuerpo.
+Se mantienen el fallback, la deduplicación y los límites de captura.
+[Corrección, pruebas y validación real pendiente](docs/STREAMING-0.1.23.md).
+
 **Interfaz 0.1.22:** nueva pestaña con búsqueda, panel EVO claro con navegación
 por teclado, actualizaciones agrupadas por cuadro y paneles bajo demanda.
 Puente de páginas restringido, favicons sin HTML y shell con sandbox.

@@ -489,3 +489,38 @@ test('una respuesta marcada como dudosa se informa como heurística, no como cor
   assert.equal(entrada.title, 'Respuesta recibida en chatgpt.com', 'no se afirma que la interrumpieron');
   assert.match(entrada.detail, /heurística/i, 'se dice que el cierre es una heurística');
 });
+
+test('CDP recibe SSE sólo por streaming y guarda texto/tokens en EVO MEMORY sin duplicar respuesta', async () => {
+  const view = await abrir('https://chatgpt.com/c/conv-streaming');
+  const antes = await stats();
+  const url = 'https://chatgpt.com/backend-api/f/conversation';
+  const requestId = 'req-streaming-1';
+  await peticion(view, { requestId, url, postData: cuerpoEnvio });
+  const texto = '¡Holaaa! ¿En qué te ayudo hoy? Esta respuesta sólo llegó por Network.dataReceived.';
+  const lines = [
+    'data: {"message":{"id":"r-s1","author":{"role":"assistant"},"content":{"content_type":"text","parts":[""]},"status":"in_progress"}}\n\n',
+    `data: ${JSON.stringify({ message: { id: 'r-s1', author: { role: 'assistant' }, content: { content_type: 'text', parts: [texto] }, status: 'finished_successfully' } })}\n\ndata: [DONE]\n\n`,
+  ];
+  const b64 = (text) => Buffer.from(text, 'utf8').toString('base64');
+  view.debugger.rejectBodyFor.add(requestId);
+  view.debugger.streamBuffered.set(requestId, b64(lines[0]));
+  view.debugger.emitEvent('Network.responseReceived', { requestId, type: 'XHR', response: { url, status: 200, mimeType: 'text/event-stream' } });
+  await settle(30);
+  view.debugger.emitEvent('Network.dataReceived', { requestId, data: b64(lines[1]) });
+  view.debugger.emitEvent('Network.loadingFinished', { requestId });
+  await settle(80);
+  const fin = await stats();
+  assert.equal(fin.messages, antes.messages + 1);
+  assert.equal(fin.responses, antes.responses + 1);
+  assert.equal(fin.outputTokens, antes.outputTokens + estimateOutputTokens(texto));
+  assert.ok(view.debugger.commands.some((c) => c.method === 'Network.streamResourceContent'));
+  assert.equal(view.debugger.commands.some((c) => c.method === 'Network.getResponseBody'), false);
+  const memory = await callIpc('nexo:memory:list');
+  assert.ok(memory.some((entry) => entry.kind === 'artifact' && entry.text.includes(texto)), 'el texto real llega a EVO MEMORY');
+  const sent = journal.windows[0].webContents.sent.filter((entry) => entry.channel === 'nexo:stats-changed').at(-1).payload;
+  assert.equal(sent.outputTokens, fin.outputTokens, 'la UI recibe el total final por push');
+  view.debugger.emitEvent('Network.loadingFinished', { requestId });
+  await settle();
+  assert.equal((await stats()).responses, fin.responses);
+  assert.equal((await stats()).outputTokens, fin.outputTokens);
+});
