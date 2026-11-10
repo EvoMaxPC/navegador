@@ -55,3 +55,9 @@ test('azul oscuro, navegación adaptable y movimiento reducido sin animación pe
   assert.match(css, /color-scheme: dark/);
   assert.ok(!css.includes('color-scheme: light'));
 });
+
+test('el rail mantiene nombres accesibles cuando se ocultan las etiquetas en ancho estrecho', () => {
+  const buttons = [...shell.matchAll(/<button class="rail-item [^>]*>/g)].map((match) => match[0]);
+  assert.equal(buttons.length, 8);
+  for (const button of buttons) assert.match(button, /aria-label="[^"]+"/);
+});
