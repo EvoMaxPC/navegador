@@ -1,5 +1,5 @@
 /** Adaptación de EVO: sólo lectura; selectores de ChatGPT centralizados aquí. */
-export const CHATGPT_STRATEGIES = ['author-role', 'data-turn', 'conversation-turn', 'article'];
+export const CHATGPT_STRATEGIES = ['print-label', 'author-role', 'data-turn', 'conversation-turn', 'article'];
 const validRole = (value) => ['user', 'assistant'].includes(value) ? value : '';
 const query = (root, selector) => { try { return root?.querySelector?.(selector) || null; } catch { return null; } };
 const queryAll = (root, selector) => { try { return Array.from(root?.querySelectorAll?.(selector) || []); } catch { return []; } };
@@ -22,6 +22,22 @@ const strategies = [
   { name: 'conversation-turn', selector: '[data-testid^="conversation-turn"]', role: nestedRole },
   { name: 'article', selector: 'article', role: nestedRole },
 ];
+const PRINT_LABEL_ROLES = new Map([
+  ['Dijiste:', 'user'],
+  ['ChatGPT dijo:', 'assistant'],
+  ['You said:', 'user'],
+  ['ChatGPT said:', 'assistant'],
+]);
+function selectPrintLabelMessages(document) {
+  const messages = queryAll(document, 'main h4').flatMap((header) => {
+    const label = String(header.textContent ?? header.innerText ?? '').trim();
+    const role = PRINT_LABEL_ROLES.get(label) || '';
+    // En el DOM observado, el contenido es el hermano inmediato del encabezado h4.
+    const node = header.nextElementSibling;
+    return role && node ? [{ node, role }] : [];
+  });
+  return { strategy: 'print-label', messages };
+}
 function outer(nodes) {
   const candidates = new Set(nodes);
   return [...candidates].filter((node) => {
@@ -35,6 +51,8 @@ function outer(nodes) {
 }
 
 export function selectChatGptMessages(document) {
+  const labelled = selectPrintLabelMessages(document);
+  if (labelled.messages.length) return labelled;
   for (const strategy of strategies) {
     const messages = outer(queryAll(document, strategy.selector))
       .map((node) => ({ node, role: strategy.role(node) })).filter((entry) => entry.role);
@@ -79,7 +97,10 @@ export function diagnoseChatGptReader(document) {
     usuario: selected.messages.filter((message) => message.role === 'user').length,
     ia: selected.messages.filter((message) => message.role === 'assistant').length,
     transmitiendo: isChatGptStreaming(document),
-    candidatos: Object.fromEntries(strategies.map((strategy) => [strategy.name, queryAll(document, strategy.selector).length])),
+    candidatos: {
+      'print-label': queryAll(document, 'main h4').length,
+      ...Object.fromEntries(strategies.map((strategy) => [strategy.name, queryAll(document, strategy.selector).length])),
+    },
   };
 }
 
@@ -87,7 +108,7 @@ export function diagnoseChatGptReader(document) {
 export function readChatGptCode(node) {
   return queryAll(node, 'pre').map((pre) => {
     const code = query(pre, 'code') || pre;
-    const lang = String(code.className || '').match(/language-([\w+#-]+)/)?.[1] || '';
+    const lang = String(code.className || '').match(/language-([\\w+#-]+)/)?.[1] || '';
     return { lang, code: String(code.innerText ?? code.textContent ?? '') };
   });
 }
