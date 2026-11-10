@@ -142,7 +142,14 @@ window.addEventListener('message', async (event) => {
       return;
     }
     if (type === 'conversation-snapshot') {
-      await ipcRenderer.invoke('nexo:conversation-snapshot', payload).catch((error) => console.warn('[nexo] conversación no guardada:', error.message));
+      const id = String(data.id || '');
+      try {
+        const result = await ipcRenderer.invoke('nexo:conversation-snapshot', payload);
+        window.postMessage({ __nexo: 'event-result', id, type, result }, '*');
+      } catch (error) {
+        console.warn('[nexo] conversación no guardada:', error.message);
+        window.postMessage({ __nexo: 'event-result', id, type, result: { ok: false, error: String(error?.message || error) } }, '*');
+      }
       return;
     }
     if (type === 'turn-result') {
