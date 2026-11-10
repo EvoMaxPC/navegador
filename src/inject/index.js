@@ -47,10 +47,20 @@ const state = {
 const bridge = (() => {
   let seq = 0;
   const pending = new Map();
+  const eventPending = new Map();
 
   window.addEventListener('message', (event) => {
     const data = event.data;
-    if (!data || data.__nexo !== 'reply') return;
+    if (!data || typeof data !== 'object') return;
+    if (data.__nexo === 'event-result') {
+      const entry = eventPending.get(data.id);
+      if (!entry) return;
+      eventPending.delete(data.id);
+      clearTimeout(entry.timer);
+      entry.resolve(data.result || { ok: false, error: 'respuesta-vacía-del-proceso-principal' });
+      return;
+    }
+    if (data.__nexo !== 'reply') return;
     const entry = pending.get(data.id);
     if (!entry) return;
     pending.delete(data.id);
@@ -80,7 +90,22 @@ const bridge = (() => {
       window.postMessage({ __nexo: 'ready', payload }, '*');
     },
     event(type, payload) {
-      window.postMessage({ __nexo: 'event', type, payload }, '*');
+      if (type !== 'conversation-snapshot') {
+        window.postMessage({ __nexo: 'event', type, payload }, '*');
+        return undefined;
+      }
+      const id = `e${Date.now().toString(36)}-${(++seq).toString(36)}`;
+      return new Promise((resolve, reject) => {
+        const entry = {
+          resolve,
+          reject,
+          timer: setTimeout(() => {
+            if (eventPending.delete(id)) reject(new Error('nexo:timeout:conversation-snapshot'));
+          }, 5000),
+        };
+        eventPending.set(id, entry);
+        window.postMessage({ __nexo: 'event', id, type, payload }, '*');
+      });
     },
   };
 })();
