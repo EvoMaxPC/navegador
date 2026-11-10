@@ -35,6 +35,10 @@ test('recibe sólo de ChatGPT y entrega copia literal a la shell, incluso con me
 
 test('una página no puede leer el panel ni fingir la URL o un origen permitido', async () => {
   assert.equal(await invoke('nexo:repetition:get', b, { webContentsId: a.id, href: a.url }), null);
+  const query = { webContentsId: a.id, href: a.url };
+  shell.mainFrame = {};
+  assert.equal(await journal.ipcHandlers.get('nexo:repetition:get')({ sender: shell, senderFrame: {} }, query), null, 'no admite subframes de la shell');
+  assert.equal(await invoke('nexo:repetition:get', { id: shell.id, getURL: () => shell.url }, query), null, 'el ID o URL no sustituyen a la shell conocida');
   assert.equal((await invoke('nexo:repetition:snapshot', b, { href: a.url, turns })).ok, false);
   const alien = journal.windows[0].attachWebview('https://example.com');
   assert.equal((await invoke('nexo:repetition:snapshot', alien, { href: alien.url, turns })).ok, false);
