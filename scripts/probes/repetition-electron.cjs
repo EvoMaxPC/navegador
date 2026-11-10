@@ -38,7 +38,7 @@ ipcMain.handle = (channel, listener) => realHandle(channel, async (event, payloa
 app.whenReady().then(() => {
   session.fromPartition('persist:nexo').protocol.handle('https', request => {
     if (new URL(request.url).hostname !== 'chatgpt.com') return new Response('', { status: 404 });
-    return new Response('<!doctype html><meta charset="utf-8"><title>Fixture ChatGPT</title><main><article data-turn="user" data-turn-id="u"><div data-message-author-role="user"><pre class="whitespace-pre-wrap">  Hola\n</pre></div></article><article data-turn="assistant" data-turn-id="a"><div data-message-author-role="assistant"><pre class="markdown">Respuesta de fixture 😊\n  código\n</pre></div></article></main>', { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    return new Response('<!doctype html><meta charset="utf-8"><title>Fixture ChatGPT</title><main><h4>Dijiste:</h4><div class="group user-message"><div data-message-author-role="user"><pre class="whitespace-pre-wrap">  Hola\n</pre></div></div><h4>ChatGPT dijo:</h4><div class="assistant-message"><div data-message-author-role="assistant"><pre class="markdown">Respuesta de fixture 😊\n  código\n</pre></div></div></main>', { headers: { 'content-type': 'text/html; charset=utf-8' } });
   });
 });
 (async () => {
