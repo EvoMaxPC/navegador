@@ -92,6 +92,18 @@ jobs:
             '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
+      - name: Conservar evidencia de validación
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nexo-validacion
+          path: |
+            ci-repetition.json
+            ci-bench.json
+            ci-humo.txt
+            ci-ui-*.png
+          if-no-files-found: warn
+
       - name: Dejar el ZIP como artefacto
         uses: actions/upload-artifact@v4
         with:

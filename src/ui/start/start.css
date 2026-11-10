@@ -395,3 +395,15 @@ form {
   transition:none!important;
   animation:none!important}
 }
+
+/* Iconos de marca locales; sin peticiones de terceros al renderizar. */
+.app-icon img { display:block;width:35px;height:35px; }
+.app-icon.gpt img { width:27px;height:27px; }
+.resource-readings { margin:0;flex:1;min-width:0;font-size:10px;color:#9eadbf; }
+.resource-readings>div { display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #26384b88; }
+.resource-readings dt { font-weight:500; }.resource-readings dd { margin:0;color:#83d5ff;font-variant-numeric:tabular-nums; }
+.destination:not(:disabled):active { transform:translateY(-1px) scale(.98); }
+form button { transition:transform .1s,background-color .12s; }form button:active{transform:scale(.94);}
+.feature { background:linear-gradient(145deg,#18283aa6,#0b1018e8 65%); }
+@media(min-width:651px) and (max-height:850px){main{padding-top:28px;}.eyebrow{margin-bottom:14px;}h1{font-size:76px;}.tagline{margin-top:12px;}.intro{margin-bottom:22px;}.search-hint{margin-bottom:22px;}.destination-grid{margin-bottom:24px;}.destination{min-height:105px;}footer{margin-top:22px;}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;}}

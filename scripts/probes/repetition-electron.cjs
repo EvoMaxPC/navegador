@@ -47,6 +47,7 @@ app.whenReady().then(() => {
   await app.whenReady();
   await until(() => BrowserWindow.getAllWindows().some(w => w.webContents.getURL().startsWith('nexo://app/')), 'shell creada');
   const shell = BrowserWindow.getAllWindows()[0].webContents;
+  app.getAppMetrics(); // Punto inicial de la muestra CPU; sólo harness de prueba.
   const realSend = shell.send.bind(shell);
   shell.send = (channel, ...args) => { if (channel !== 'nexo:repetition-changed' || !suppressAutomaticSnapshot) realSend(channel, ...args); };
   await until(() => shell.executeJavaScript('Boolean(window.nexo && document.querySelector("webview"))').catch(() => false), 'shell lista');
@@ -98,7 +99,39 @@ app.whenReady().then(() => {
     const displayed = await shell.executeJavaScript(`[...document.querySelectorAll('#memoryLiveConversation .repeat-text')].map(n=>n.textContent)`);
     if (JSON.stringify(displayed) !== JSON.stringify(directText)) throw Error('El respaldo no conserva innerText literal');
     report.checks.push('texto literal del respaldo comparado contra DOM real del webview');
+    const ramNotice = await shell.executeJavaScript(`document.getElementById('memoryPersistence').dataset.state==='ram' && document.getElementById('memoryPersistenceDetail').textContent.includes('no confirma')`);
+    if (!ramNotice) throw Error('La interfaz debe distinguir el respaldo RAM de la persistencia');
     suppressAutomaticSnapshot = false;
+    // Contrato visual sobre Electron real: sin cambiar ningún motor ni datos de producción.
+    const pinned = await shell.executeJavaScript(`(()=>{const viewport=document.getElementById('viewport');const before=viewport.clientWidth;document.getElementById('pinSidebar').click();const floating=viewport.clientWidth;const pressed=document.getElementById('pinSidebar').getAttribute('aria-pressed');document.getElementById('pinSidebar').click();return floating>before && pressed==='false' && viewport.clientWidth===before;})()`);
+    if (!pinned) throw Error('Fijar/desfijar no reserva/libera el ancho de página');
+    report.checks.push('anclaje real de panel conserva el webview y cambia el espacio reservado');
+    writeFileSync(resolve('ci-ui-memory-fixture.png'), (await shell.capturePage()).toPNG());
+    await shell.executeJavaScript(`document.getElementById('bookmarkBtn').click()`);
+    await until(() => shell.executeJavaScript(`nexo.bookmarks.list({}).then(items=>items.some(item=>item.url==='https://chatgpt.com/c/direct-fallback-only'))`), 'estrella guarda marcador real por IPC');
+    await shell.executeJavaScript(`document.querySelector('[data-memory-section="favorites"]').click()`);
+    await until(() => shell.executeJavaScript(`!document.getElementById('memory-pane-favorites').hidden && [...document.querySelectorAll('#memoryFavorites .nav-open')].some(item=>item.dataset.url==='https://chatgpt.com/c/direct-fallback-only')`), 'Favoritos muestra el marcador real sin salir del panel EVO');
+    await shell.executeJavaScript(`document.querySelector('[data-memory-section="saved"]').click()`);
+    await until(() => shell.executeJavaScript(`!document.getElementById('memory-pane-saved').hidden && document.querySelectorAll('#memoryConversations li').length>0`), 'Historial de EVO muestra registro real consultado');
+    await shell.executeJavaScript(`document.querySelector('[data-memory-section="conversation"]').click();document.querySelector('.rail-item[data-open-panel="history"]').click()`);
+    await until(() => shell.executeJavaScript(`document.querySelectorAll('#historyList .nav-open').length>0`), 'historial del navegador conserva navegación real');
+    await until(() => shell.executeJavaScript(`!document.getElementById('back').disabled`), 'atrás disponible después de dos navegaciones');
+    await shell.executeJavaScript(`document.getElementById('back').click()`);
+    await until(() => guest.getURL()==='https://chatgpt.com/c/fixture' && !guest.isLoading(), 'atrás navega al documento anterior');
+    await until(() => shell.executeJavaScript(`!document.getElementById('forward').disabled`), 'adelante disponible');
+    await shell.executeJavaScript(`document.getElementById('forward').click()`);
+    await until(() => guest.getURL()==='https://chatgpt.com/c/direct-fallback-only' && !guest.isLoading(), 'adelante restaura el documento');
+    await shell.executeJavaScript(`document.getElementById('homeButton').click()`);
+    await until(() => guest.getURL()==='nexo://app/src/ui/start/index.html' && !guest.isLoading(), 'Inicio abre la página interna real');
+    await until(() => guest.executeJavaScript(`[...document.querySelectorAll('.app-icon img')].length===3 && [...document.querySelectorAll('.app-icon img')].every(i=>i.complete && i.naturalWidth>0)`), 'tres iconos de marca cargados por protocolo interno');
+    await shell.executeJavaScript(`document.querySelector('.rail-item[data-open-panel="memory"]').click();document.getElementById('newTab').click()`);
+    await until(() => shell.executeJavaScript(`document.querySelectorAll('.tab').length===2`), 'botón nueva pestaña crea segundo webview');
+    await shell.executeJavaScript(`document.querySelector('.tab.active .close').click()`);
+    await until(() => shell.executeJavaScript(`document.querySelectorAll('.tab').length===1`), 'cerrar pestaña conserva la original');
+    writeFileSync(resolve('ci-ui-start.png'), (await shell.capturePage()).toPNG());
+    report.uiEvidence = 'Electron real; conversaciones de fixture HTTPS local, sin cuenta autenticada';
+    report.processMetrics = app.getAppMetrics().map(({ type, cpu, memory }) => ({ type, cpuPercent: cpu.percentCPUUsage, workingSetKB: memory.workingSetSize, privateKB: memory.privateBytes }));
+    report.processMetricsContext = 'Muestra final de integración, aceleración por hardware desactivada; CPU media desde la consulta inicial, no medición de uso cotidiano ni comparación entre versiones';
     finish();
   } catch (error) {
     report.reader = await guest.executeJavaScript('window.__nexo?.conversationReader?.()').catch(() => null);

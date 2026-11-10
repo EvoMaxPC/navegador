@@ -61,3 +61,23 @@ test('el rail mantiene nombres accesibles cuando se ocultan las etiquetas en anc
   assert.equal(buttons.length, 8);
   for (const button of buttons) assert.match(button, /aria-label="[^"]+"/);
 });
+
+test('panel EVO con icono, anclaje funcional y tres vistas con IDs únicos', () => {
+  assert.match(shell, /id="pinSidebar"[^>]*aria-pressed="true"/);
+  for (const name of ['conversation', 'saved', 'favorites']) {
+    assert.match(shell, new RegExp(`id="memory-tab-${name}"[^>]*aria-controls="memory-pane-${name}"`));
+    assert.ok(shell.includes(`id="memory-pane-${name}"`));
+  }
+  const ids = [...shell.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('iconos de servicios locales, sin dependencias de red al renderizar inicio', () => {
+  for (const name of ['openai', 'google', 'youtube']) {
+    const path = `src/ui/assets/services/${name}.svg`;
+    assert.equal(isPublicAssetPath(path), true);
+    assert.ok(start.includes(`../assets/services/${name}.svg`));
+    assert.match(read(path), /<path/);
+    assert.ok(!read(path).includes('<script'));
+  }
+});

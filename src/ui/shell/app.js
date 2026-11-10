@@ -1,3 +1,4 @@
+import { createMemoryPanel, memoryReadout } from './memoryPanel.js';
 import { readMemoryConversation, sameConversationSource } from './chatgptDirect.js';
 import { createRepetitionView } from './repetition.js';
 import { isChatGptMemoryUrl } from '../../core/chatgptConversation.js';
@@ -949,12 +950,13 @@ const MEM_KIND_LABEL = {
   question: 'pregunta',
 };
 
+let memoryRegistryLoaded = false;
 const memState = { items: [], stats: null, lastPacket: null, conversations: [], liveSnapshot: null };
 
 const memoryLiveView = createRepetitionView({
   list: document.getElementById('memoryLiveConversation'),
   status: document.getElementById('memoryLiveStatus'),
-  scroller: document.getElementById('panel-memory'),
+  scroller: document.getElementById('memory-pane-conversation'),
 });
 
 function renderChatCapture() {
@@ -963,6 +965,10 @@ function renderChatCapture() {
   const live = sameConversationSource(memState.liveSnapshot, repetitionSource()) ? memState.liveSnapshot : null;
   document.getElementById('memoryLiveConversation').dataset.strategy = live?.strategy || 'none';
   const liveTurns = live?.turns || [];
+  const readout = memoryReadout({ enabled: state.settings?.memory?.enabled, live, conversations, loaded: memoryRegistryLoaded });
+  document.getElementById('memoryPersistence').dataset.state = readout.state;
+  document.getElementById('memoryPersistenceTitle').textContent = readout.title;
+  document.getElementById('memoryPersistenceDetail').textContent = readout.detail;
   memoryLiveView.render(live, 'Esperando los mensajes renderizados de esta pestaña…');
   const liveStatus = document.getElementById('memoryLiveStatus');
   if (liveTurns.length) liveStatus.textContent += state.settings?.memory?.enabled === false
@@ -1045,6 +1051,7 @@ async function refreshMemory() {
     renderMemoryItems(memState.items.slice(0, 40));
     if (nexo.memory.conversations) {
       memState.conversations = await nexo.memory.conversations();
+      memoryRegistryLoaded = true;
       const live = await readMemoryConversation({ source, tab,
         getSource: () => ticket === memoryRefreshTicket ? repetitionSource() : null,
         getCached: source => nexo.repetition.get(source),
@@ -1237,7 +1244,7 @@ function openFromList(event) {
   const open = event.target.closest('.nav-open');
   if (open?.dataset.url) {
     navigate(open.dataset.url);
-    els.browser.classList.remove('with-sidebar');
+    setSidebar(false);
     return;
   }
 }
@@ -1378,6 +1385,7 @@ nexo.on('nexo:download-done', (payload) => {
 });
 nexo.on('nexo:bookmarks-changed', () => {
   if (isPanelActive('bookmarks')) uiTasks.schedule('bookmarks', renderBookmarks);
+  if (isPanelActive('memory') && memoryPanel.selected === 'favorites') uiTasks.schedule('memory-favorites', renderMemoryFavorites);
   updateStar();
 });
 nexo.on('nexo:profile-changed', () => { if (isPanelActive('sites')) uiTasks.schedule('sites', renderSitePanel); });
@@ -1398,16 +1406,38 @@ document.querySelector('[data-launch-chatgpt]').addEventListener('click', () => 
 document.querySelectorAll('[data-open-panel]').forEach((button) => {
   button.addEventListener('click', () => showPanel(button.dataset.openPanel));
 });
-document.querySelectorAll('[data-memory-section]').forEach((button) => {
-  button.addEventListener('click', () => {
-    if (button.dataset.memorySection === 'favorites') { showPanel('bookmarks'); return; }
-    const saved = button.dataset.memorySection === 'saved';
-    const target = document.getElementById(saved ? 'savedConversations' : 'memoryLiveTitle');
-    if (saved) target.open = true;
-    document.querySelectorAll('[data-memory-section]').forEach((item) => item.classList.toggle('active', item === button));
-    target.scrollIntoView({ block: 'start', behavior: 'auto' });
-  });
+let favoritesTicket = 0;
+async function renderMemoryFavorites() {
+  const list = document.getElementById('memoryFavorites');
+  const ticket = ++favoritesTicket;
+  list.setAttribute('aria-busy', 'true');
+  try {
+    const items = await nexo.bookmarks.list({});
+    if (ticket !== favoritesTicket) return;
+    list.innerHTML = items.length ? items.slice(0, 200).map((item) => `<li class="nav-item">
+      <button class="nav-open" data-url="${escapeHtml(item.url)}" title="${escapeHtml(item.url)}">
+        <span class="nav-title">${escapeHtml(item.title)}</span><span class="nav-url">${escapeHtml(displayUrl(item.url))}</span>
+      </button></li>`).join('') : '<li class="nav-empty">Sin favoritos todavía. Guardá una página con la estrella de la barra.</li>';
+  } catch {
+    if (ticket === favoritesTicket) list.innerHTML = '<li class="nav-empty">No se pudieron consultar los favoritos. Volvé a abrir esta solapa para reintentar.</li>';
+  } finally {
+    if (ticket === favoritesTicket) list.setAttribute('aria-busy', 'false');
+  }
+}
+const memoryPanel = createMemoryPanel({
+  root: document.getElementById('panel-memory'), browser: els.browser,
+  pin: document.getElementById('pinSidebar'),
+  onSelect(name) {
+    if (name === 'saved') {
+      const saved = document.getElementById('savedConversations');
+      if (!saved.open) saved.open = true;
+      else refreshMemory();
+    }
+    if (name === 'favorites') renderMemoryFavorites();
+  },
 });
+document.getElementById('memoryFavorites').addEventListener('click', openFromList);
+document.getElementById('manageMemoryFavorites').addEventListener('click', () => showPanel('bookmarks'));
 // navigator.onLine sólo informa conectividad del sistema, no velocidad ni protección.
 function renderNetworkState() {
   document.getElementById('systemConnection').textContent = navigator.onLine
