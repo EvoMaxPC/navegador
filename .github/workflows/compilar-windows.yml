@@ -56,6 +56,9 @@ jobs:
       - name: Verificación automática
         run: npm run verify
 
+      - name: Conversación en Electron real (fixture HTTPS sin red)
+        run: node node_modules/electron/cli.js scripts/probes/repetition-electron.cjs
+
       - name: Referencia de rendimiento
         run: node scripts/bench.mjs --json-out=ci-bench.json
 
@@ -118,6 +121,9 @@ jobs:
           if ($null -eq $texto) { $texto = 'sin salida' }
           if (Test-Path ci-humo.txt) {
             $texto = "===== prueba de humo =====`n" + (Get-Content ci-humo.txt -Raw) + "`n===== pruebas =====`n" + $texto
+          }
+          if (Test-Path ci-repetition.json) {
+            $texto = "===== conversación Electron =====`n" + (Get-Content ci-repetition.json -Raw) + "`n" + $texto
           }
           if ($texto.Length -gt 60000) { $texto = $texto.Substring($texto.Length - 60000) }
           $cuerpo = @{
