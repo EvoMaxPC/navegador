@@ -1,0 +1,30 @@
+Nexo 0.1.32 · archivos creados o modificados durante Fase 5
+Rama: arena/4678aef7-navegador
+Incluye integración sobre archivos locales de Fase 4; sus cambios previos se conservan.
+Sin cambios en el motor EVO, lector ChatGPT o CDP.
+
+README.md
+dev/preview.js
+docs/NEXO-FASE5-0.1.32.md
+docs/NEXO-FASE5-ARCHIVOS.txt
+docs/NEXO-FASE5-ARQUITECTURA.md
+package-lock.json
+package.json
+scripts/packaging-config.mjs
+src/main/advancedBrowser.js
+src/main/main.js
+src/main/menu.js
+src/main/workDossier.js
+src/nav/shortcuts.js
+src/nav/workDossier.js
+src/preload/shell.cjs
+src/ui/shell/app.js
+src/ui/shell/browserTools.js
+src/ui/shell/index.html
+src/ui/shell/workDossier.css
+src/ui/shell/workDossier.js
+test/advanced-tools.test.js
+test/harness/electron-stub.mjs
+test/main-boot.test.js
+test/shell-contract.test.js
+test/work-dossier.test.js

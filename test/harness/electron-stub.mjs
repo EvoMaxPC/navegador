@@ -111,6 +111,7 @@ export class FakeWebContents extends EventEmitter {
     this.url = url;
     this.title = 'Título de prueba';
     this.zoomFactor = 1;
+    this.mainFrame = {};
     this.sent = [];
     this.destroyed = false;
     this.reloads = 0;
@@ -129,6 +130,10 @@ export class FakeWebContents extends EventEmitter {
     return this.url;
   }
 
+  get session() { return session.fromPartition('persist:nexo'); }
+
+  setIgnoreMenuShortcuts() {}
+
   getTitle() {
     return this.title;
   }
@@ -142,6 +147,8 @@ export class FakeWebContents extends EventEmitter {
   }
 
   openDevTools() {}
+
+  isDevToolsOpened() { return false; }
 
   setZoomFactor(value) {
     this.zoomFactor = value;
@@ -242,6 +249,7 @@ export class FakeBrowserWindow extends EventEmitter {
 
   loadURL(url) {
     this.loadedUrl = url;
+    this.webContents.url = url;
     return Promise.resolve();
   }
 
@@ -359,6 +367,9 @@ export const net = {
 };
 
 export const clipboard = { writeText() {}, readText: () => '' };
+
+export const nativeImage = {createFromBuffer:()=>({isEmpty:()=>true})};
+export class ShareMenu { popup() {} }
 
 export const dialog = {
   async showOpenDialog() {

@@ -1,0 +1,48 @@
+NEXO 0.1.33 — Capa 1: User Understanding Engine
+Rama: arena/4678aef7-navegador
+Comparación exacta de fuente contra el ZIP publicado Nexo-0.1.32-proyecto-completo.zip.
+Incluye también las actualizaciones documentales rectoras posteriores a ese ZIP.
+Se conservan los cambios locales previos de Fase 4/5. No se incluyen node_modules,
+build/, perfiles, credenciales ni .git. La validación inicial fue local y sin CI.
+El commit y push posteriores fueron autorizados por el usuario; SHA registrado en Git.
+Los tres registros externos añadidos a validacion/ del ZIP no son código nuevo.
+
+CREADOS DESDE EL ZIP ANTERIOR (9):
+docs/NEXO-CAPA1-0.1.33.md
+docs/NEXO-CAPA1-ARCHIVOS.txt
+docs/NEXO-CAPA1-VALIDACION.md
+docs/NEXO-CRITERIOS-RECTORES.md
+src/core/userUnderstanding.js
+src/main/userUnderstanding.js
+src/ui/shell/understandingPanel.js
+test/user-understanding-main.test.js
+test/user-understanding.test.js
+
+MODIFICADOS DESDE EL ZIP ANTERIOR (17):
+README.md
+dev/preview.js
+docs/NEXO-FASE5-0.1.32.md
+docs/NEXO-FASE5-ARQUITECTURA.md
+package-lock.json
+package.json
+scripts/packaging-config.mjs
+src/core/index.js
+src/main/main.js
+src/main/menu.js
+src/nav/shortcuts.js
+src/preload/shell.cjs
+src/ui/shell/app.js
+src/ui/shell/browserTools.js
+src/ui/shell/index.html
+src/ui/shell/workDossier.css
+test/shell-contract.test.js
+
+CONSERVADOS SIN CAMBIO: motor EVO (src/memory/*, src/main/memory.js), lector
+ChatGPT/capa inyectada (src/inject/*, src/preload/bridge.cjs), transporte CDP
+(src/main/cdp.js), Engine y guard existentes (src/main/engine.js, src/core/guard.js).
+Se añade un consumidor después de captura en main, no otro mecanismo de lectura.
+
+EVIDENCIAS EN EL ZIP, NO AGREGADAS AL REPOSITORIO:
+validacion/pruebas-completas.tap
+validacion/build-inject.log
+validacion/chequeos.txt

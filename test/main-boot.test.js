@@ -28,6 +28,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
+  if(channel.startsWith('nexo:downloads:') || channel.startsWith('nexo:work:') || channel.startsWith('nexo:advanced:')) {const sender=journal.windows[0].webContents;return handler({sender,senderFrame:sender.mainFrame},payload);}
   return handler({ sender: { id: senderId } }, payload);
 }
 
@@ -91,7 +92,7 @@ test('el menú se construye con atajos y no con roles que recarguen la shell', a
   const template = journal.menus[0].template;
   const flat = JSON.stringify(template);
   assert.match(flat, /Pestaña nueva/);
-  assert.match(flat, /CmdOrCtrl\+Tab/);
+  assert.ok(flat.includes(process.platform === 'darwin' ? 'Command+Tab' : 'Ctrl+Tab'));
   assert.doesNotMatch(flat, /"role":"reload"/, 'recargar debe apuntar a la pestaña, no a la interfaz');
 });
 
@@ -576,4 +577,32 @@ test('la partición de pestañas sirve inicio y sus recursos con la misma lista 
   for (const path of ['src/preload/shell.cjs', 'src/main/main.js', 'package.json']) {
     assert.equal((await handler({ url: `nexo://app/${path}` })).status, 404, path);
   }
+});
+
+
+test('expediente integrado: shell → objetivo → menú nativo → cita → disco', async () => {
+  const owner = journal.windows[0].webContents;
+  const initial = await callIpc('nexo:work:read', {workspaceId:'main'});
+  assert.equal(initial.ok, true);
+  const goal = await callIpc('nexo:work:mutate', {workspaceId:'main',operation:{type:'goal',revision:initial.dossier.revision,text:'Comparar documentación',criteria:['Citar fuente']}});
+  assert.equal(goal.ok, true);
+  const guest = journal.windows[0].attachWebview('https://example.test/docs');
+  guest.emit('context-menu', {}, {selectionText:'El producto requiere versión 2.',inputFieldType:'none',x:8,y:12});
+  const context = owner.sent.filter(m=>m.channel==='nexo:context-menu').at(-1).payload;
+  const action = context.items.find(i=>i.label==='Conservar selección en expediente…');
+  assert.ok(action);
+  const run = await callIpc('nexo:advanced:context',{token:context.token,id:action.id});
+  assert.equal(run.ok,true);
+  const draft = owner.sent.filter(m=>m.channel==='nexo:work-capture').at(-1).payload;
+  const saved = await callIpc('nexo:work:capture',{workspaceId:'main',revision:goal.dossier.revision,token:draft.token,annotation:'Comprobar vigencia'});
+  assert.equal(saved.ok,true);
+  assert.equal(saved.dossier.evidence[0].quote,'El producto requiere versión 2.');
+  assert.equal(saved.dossier.resources[0].url,'https://example.test/docs');
+  const denied = await journal.ipcHandlers.get('nexo:work:read')({sender:guest,senderFrame:guest.mainFrame},{workspaceId:'main'});
+  assert.equal(denied.code,'unauthorized');
+  const {readFile} = await import('node:fs/promises');
+  const {join} = await import('node:path');
+  const persisted = JSON.parse(await readFile(join(journal.userData,'work-dossiers','main.json'),'utf8'));
+  assert.equal(persisted.revision,saved.dossier.revision);
+  assert.equal(persisted.evidence[0].review,'unverified');
 });

@@ -1,3 +1,6 @@
+import { createUnderstandingPanel } from './understandingPanel.js';
+import { createWorkDossier } from './workDossier.js';
+import { createBrowserTools } from './browserTools.js';
 import { createMemoryPanel, memoryReadout } from './memoryPanel.js';
 import { readMemoryConversation, sameConversationSource } from './chatgptDirect.js';
 import { createRepetitionView } from './repetition.js';
@@ -88,6 +91,9 @@ const DEMO_URL = 'nexo://app/demo/index.html';
 const START_URL = 'nexo://app/src/ui/start/index.html';
 const SEARCH = 'https://duckduckgo.com/?q=';
 
+let browserTools = null;
+let workPanel = null;
+let understandingPanel = null;
 const state = {
   tabs: new Map(),
   activeId: null,
@@ -111,7 +117,7 @@ const escapeHtml = (s) =>
 
 // La resolución de lo escrito en la barra vive en `src/nav/url.js`: una sola
 // implementación para la interfaz, el proceso principal y las pruebas.
-const normalizeInput = (text) => resolveInput(text, { searchBase: SEARCH });
+const normalizeInput = (text) => resolveInput(text, { searchBase: browserTools?.searchBase || SEARCH });
 
 const SITE_CHIPS = [
   { label: 'ChatGPT', url: 'https://chatgpt.com', color: '#10a37f' },
@@ -127,7 +133,8 @@ const SITE_CHIPS = [
 /* pestañas                                                            */
 /* ------------------------------------------------------------------ */
 
-function createTab(url = START_URL, { activate = true } = {}) {
+function createTab(url = START_URL, { activate = true, workspaceId = browserTools?.workspace || 'main', pinned = false } = {}) {
+  workspaceId = browserTools?.resolveWorkspace(workspaceId) || workspaceId;
   const id = `tab-${(state.seq += 1)}`;
 
   const view = document.createElement('webview');
@@ -181,7 +188,8 @@ function createTab(url = START_URL, { activate = true } = {}) {
   });
   els.tabs.appendChild(tabEl);
 
-  const tab = { id, view, tabEl, url, title: 'Nueva pestaña', cut: 0 };
+  const tab = { id, view, tabEl, url, title: 'Nueva pestaña', cut: 0, workspaceId, pinned, muted:false };
+  tabEl.addEventListener('contextmenu', event => browserTools?.tabMenu(tab,event));
   state.tabs.set(id, tab);
 
   const titleEl = tabEl.querySelector('.title');
@@ -204,6 +212,7 @@ function createTab(url = START_URL, { activate = true } = {}) {
     tab.url = event.url;
     if (state.activeId === id) {
       els.omnibox.value = event.url; updateNavigation();
+      if (isPanelActive('understanding')) understandingPanel?.changed();
       if (isPanelActive('repetition')) refreshRepetition();
       if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
     }
@@ -212,6 +221,7 @@ function createTab(url = START_URL, { activate = true } = {}) {
     tab.url = event.url;
     if (state.activeId === id) {
       els.omnibox.value = event.url; updateNavigation();
+      if (isPanelActive('understanding')) understandingPanel?.changed();
       if (isPanelActive('repetition')) refreshRepetition();
       if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
     }
@@ -237,6 +247,7 @@ function createTab(url = START_URL, { activate = true } = {}) {
   });
 
   view.addEventListener('did-start-loading', () => {
+    if(state.activeId===id)browserTools?.clearContext();
     tabEl.classList.add('loading');
     tabEl.classList.remove('loaded');
   });
@@ -246,6 +257,7 @@ function createTab(url = START_URL, { activate = true } = {}) {
     if (state.activeId === id) {
       updateStar();
       if (isPanelActive('sites')) renderSitePanel();
+      if (isPanelActive('understanding')) understandingPanel?.changed();
       if (isPanelActive('repetition')) refreshRepetition();
       if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
     }
@@ -256,6 +268,7 @@ function createTab(url = START_URL, { activate = true } = {}) {
   view.addEventListener('page-title-updated', () => scheduleSessionCapture());
 
   if (activate) activateTab(id);
+  browserTools?.refreshLayout();
   updateWelcome();
   return tab;
 }
@@ -283,30 +296,34 @@ function activateTab(id) {
   if (isPanelActive('sites')) renderSitePanel();
   if (isPanelActive('repetition')) refreshRepetition();
   if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
+  browserTools?.activated(tab);
+  workPanel?.workspaceChanged();
+  understandingPanel?.changed();
   scheduleSessionCapture();
 }
 
 function closeTab(id) {
   const tab = state.tabs.get(id);
   if (!tab) return;
-  state.closed.push({ url: tab.url, title: tab.title });
+  state.closed.push({ url: tab.url, title: tab.title, workspaceId:tab.workspaceId, pinned:tab.pinned });
   if (state.closed.length > 25) state.closed.shift();
   tab.view.remove();
   tab.tabEl.remove();
   state.tabs.delete(id);
 
   if (state.activeId === id) {
-    const next = [...state.tabs.keys()].pop();
+    const next = browserTools ? browserTools.visibleTabs().at(-1)?.id : [...state.tabs.keys()].pop();
     if (next) activateTab(next);
     else state.activeId = null;
   }
+  browserTools?.refreshLayout();
   updateWelcome();
   scheduleSessionCapture();
 }
 
 /** Cambia de pestaña en orden circular. */
 function cycleTab(delta) {
-  const ids = [...state.tabs.keys()];
+  const ids = browserTools ? browserTools.visibleTabs().map(t=>t.id) : [...state.tabs.keys()];
   if (ids.length < 2) return;
   const index = ids.indexOf(state.activeId);
   const next = ids[(index + delta + ids.length) % ids.length];
@@ -317,7 +334,7 @@ function cycleTab(delta) {
 function reopenTab() {
   const last = state.closed.pop();
   if (!last) return null;
-  return createTab(last.url);
+  return createTab(last.url,{workspaceId:last.workspaceId,pinned:last.pinned});
 }
 
 function activeTab() {
@@ -383,6 +400,7 @@ function setSidebar(open) {
   els.browser.classList.toggle('with-sidebar', open);
   els.toggleSidebar.setAttribute('aria-expanded', String(open));
   if (open) refreshActivePanel();
+  browserTools?.refreshLayout();
 }
 els.closeSidebar.addEventListener('click', () => { setSidebar(false); els.toggleSidebar.focus(); });
 
@@ -430,7 +448,7 @@ let sessionTimer = null;
 function scheduleSessionCapture() {
   clearTimeout(sessionTimer);
   sessionTimer = setTimeout(() => {
-    const tabs = [...state.tabs.values()].map((tab) => ({ url: tab.url, title: tab.title }));
+    const tabs = [...state.tabs.values()].map((tab) => ({ url: tab.url, title: tab.title, pinned:tab.pinned, workspaceId:tab.workspaceId }));
     if (!tabs.length) return;
     const activeIndex = Math.max(0, [...state.tabs.keys()].indexOf(state.activeId));
     nexo.session.capture([{ tabs, activeIndex }]).catch(() => {});
@@ -609,24 +627,27 @@ function renderDownloads() {
     els.downloadList.innerHTML = items
       .map((item) => {
         const percent = item.totalBytes ? Math.min(100, Math.round((item.receivedBytes / item.totalBytes) * 100)) : null;
-        const label = {
+        const label = item.paused ? 'pausada' : {
           started: 'iniciando',
-          progress: percent === null ? 'descargando' : `${percent} %`,
+          progress: item.paused ? 'pausada' : percent === null ? 'descargando' : `${percent} %`,
           completed: 'completada',
           cancelled: 'cancelada',
           interrupted: 'interrumpida',
         }[item.state];
         const actions = [];
+        if(item.paused||item.canResume)actions.push(`<button class="nav-action" data-dl-operation="resume" data-id="${escapeHtml(item.id)}" title="Reanudar si el servidor lo permite">reanudar</button>`);
+        else if(item.state==='started'||item.state==='progress')actions.push(`<button class="nav-action" data-dl-operation="pause" data-id="${escapeHtml(item.id)}" title="Pausar descarga">pausar</button>`);
+        if(item.endedAt)actions.push(`<button class="nav-action" data-dl-operation="remove" data-id="${escapeHtml(item.id)}" title="Quitar del historial, sin borrar archivo">quitar</button>`);
         if (item.state === 'completed') {
           actions.push(`<button class="nav-action" data-open="${escapeHtml(item.id)}" title="Abrir archivo">abrir</button>`);
           actions.push(`<button class="nav-action" data-show="${escapeHtml(item.id)}" title="Mostrar en carpeta">carpeta</button>`);
-        } else if (item.state === 'started' || item.state === 'progress') {
+        } else if (!item.endedAt) {
           actions.push(`<button class="nav-action" data-cancel="${escapeHtml(item.id)}" title="Cancelar">cancelar</button>`);
         }
         return `<li class="nav-item download ${escapeHtml(item.state)}">
           <div class="download-body">
             <span class="nav-title">${escapeHtml(item.filename)}</span>
-            <span class="nav-url">${escapeHtml(item.host || '')} · ${escapeHtml(label)}</span>
+            <span class="nav-url">${escapeHtml(item.host || '')} · ${escapeHtml(label)} · ${item.totalBytes ? (item.totalBytes/1048576).toFixed(2)+' MB' : 'tamaño desconocido'}</span>
             ${percent !== null && item.state !== 'completed' ? `<span class="bar"><span style="width:${percent}%"></span></span>` : ''}
           </div>
           <div class="download-actions">${actions.join('')}</div>
@@ -1279,6 +1300,8 @@ els.bookmarkSearchForm.addEventListener('submit', (event) => {
 els.bookmarkSearch.addEventListener('input', () => renderBookmarks());
 
 els.downloadList.addEventListener('click', async (event) => {
+  const operation=event.target.closest('[data-dl-operation]');
+  if(operation){const result=await nexo.advanced.action({action:'download-control',id:operation.dataset.id,operation:operation.dataset.dlOperation});if(!result?.ok)pushLocalNotice(result?.error||'Operación no disponible');renderDownloads();return;}
   const open = event.target.closest('[data-open]');
   const show = event.target.closest('[data-show]');
   const cancel = event.target.closest('[data-cancel]');
@@ -1339,7 +1362,7 @@ els.clearBookmarksData.addEventListener('click', async () => {
 });
 
 els.clearEverything.addEventListener('click', async () => {
-  if (!window.confirm('¿Borrar historial, marcadores, descargas, sesión y datos de los sitios? No se puede deshacer.')) return;
+  if (!window.confirm('¿Borrar historial, marcadores, descargas, sesión y datos de los sitios? No se puede deshacer. No elimina EVO MEMORY ni expedientes.')) return;
   await nexo.profile.clear({
     history: true,
     bookmarks: true,
@@ -1355,7 +1378,7 @@ els.clearEverything.addEventListener('click', async () => {
   renderBookmarks();
   renderDownloads();
   renderSitePanel();
-  pushLocalNotice('Todos los datos locales del navegador fueron borrados.');
+  pushLocalNotice('Datos de navegación borrados. EVO MEMORY y los expedientes no se eliminaron.');
 });
 
 /* ---------------- buscar en la página ---------------- */
@@ -1393,7 +1416,7 @@ nexo.on('nexo:profile-changed', () => { if (isPanelActive('sites')) uiTasks.sche
 // Al cerrar la ventana se guarda la sesión con los datos más frescos. Se usa
 // `send` y no `invoke` porque en `beforeunload` no hay tiempo para una respuesta.
 window.addEventListener('beforeunload', () => {
-  const tabs = [...state.tabs.values()].map((tab) => ({ url: tab.url, title: tab.title }));
+  const tabs = [...state.tabs.values()].map((tab) => ({ url: tab.url, title: tab.title, pinned:tab.pinned, workspaceId:tab.workspaceId }));
   if (!tabs.length) return;
   const activeIndex = Math.max(0, [...state.tabs.keys()].indexOf(state.activeId));
   nexo.session.saveNow([{ tabs, activeIndex }]);
@@ -1454,7 +1477,7 @@ new ResizeObserver(([entry]) => {
 function refreshActivePanel() {
   const current = document.querySelector('.stab.active')?.dataset.panel;
   const renders = { activity: () => { renderLog(); refreshStats(); }, memory: refreshMemory,
-    history: renderHistory, bookmarks: renderBookmarks, downloads: renderDownloads, sites: renderSitePanel, repetition: refreshRepetition };
+    understanding:()=>understandingPanel?.refresh(), work: () => workPanel?.load(), history: renderHistory, bookmarks: renderBookmarks, downloads: renderDownloads, sites: renderSitePanel, repetition: refreshRepetition };
   if (els.browser.classList.contains('with-sidebar')) uiTasks.schedule(`panel-${current}`, renders[current] || (() => {}));
 }
 const panelTabs = [...document.querySelectorAll('.stab')];
@@ -1463,6 +1486,7 @@ panelTabs.forEach((tab, index) => {
     panelTabs.forEach((t) => { const active = t === tab; t.classList.toggle('active', active); t.setAttribute('aria-selected', String(active)); t.tabIndex = active ? 0 : -1; });
     document.querySelectorAll('.panel-view').forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === tab.dataset.panel));
     els.panelTitle.textContent = tab.getAttribute('aria-label');
+    browserTools?.refreshLayout();
     document.querySelectorAll('.rail-item[data-open-panel]').forEach((item) => item.classList.toggle('selected', item.dataset.openPanel === tab.dataset.panel));
     document.querySelector('[data-workspace-home]').classList.remove('selected');
     refreshActivePanel();
@@ -1514,8 +1538,13 @@ nexo.on('nexo:open-tab', ({ url }) => {
   if (url) createTab(url);
 });
 
-nexo.on('nexo:command', (command) => {
+function runBrowserCommand(command) {
+  if(command?.webContentsId){const tab=[...state.tabs.values()].find(t=>{try{return t.view.getWebContentsId()===command.webContentsId;}catch{return false;}});if(tab&&tab.id!==state.activeId)activateTab(tab.id);}
+  if(browserTools?.handle(command||{}))return;
   switch (command?.type) {
+    case 'home':
+      navigate(START_URL);
+      break;
     case 'new-tab':
       createTab(START_URL);
       break;
@@ -1530,6 +1559,12 @@ nexo.on('nexo:command', (command) => {
       break;
     case 'toggle-sidebar':
       setSidebar(!els.browser.classList.contains('with-sidebar'));
+      break;
+    case 'user-understanding':
+      showPanel('understanding');
+      break;
+    case 'work-dossier':
+      showPanel('work');
       break;
     case 'settings':
       showPanel('settings');
@@ -1605,13 +1640,14 @@ nexo.on('nexo:command', (command) => {
     default:
       if (String(command?.type || '').startsWith('tab-')) {
         const index = Number(command.type.slice(4)) - 1;
-        const ids = [...state.tabs.keys()];
-        if (ids[index]) activateTab(ids[index]);
-        else if (index === 8) activateTab(ids[ids.length - 1]);
+        const ids = browserTools ? browserTools.visibleTabs().map(t=>t.id) : [...state.tabs.keys()];
+        if (index === 8 && ids.length) activateTab(ids[ids.length - 1]);
+        else if (ids[index]) activateTab(ids[index]);
       }
       break;
   }
-});
+}
+nexo.on('nexo:command', runBrowserCommand);
 
 document.getElementById('openDemo').addEventListener('click', () => createTab(DEMO_URL));
 
@@ -1675,6 +1711,7 @@ async function boot() {
   };
 
   state.config = await nexo.getConfig();
+  await browserTools.load();
   document.getElementById('version').textContent = `v${state.config.version}`;
   document.getElementById('statusVersion').textContent = `v${state.config.version}`;
   paso('config');
@@ -1704,7 +1741,7 @@ async function boot() {
   const abrirPrimera = () => {
     if (restored?.windows?.[0]?.tabs?.length) {
       const win = restored.windows[0];
-      const ids = win.tabs.map((tab) => createTab(tab.url, { activate: false }).id);
+      const ids = win.tabs.map((tab) => createTab(tab.url, { activate: false, pinned:tab.pinned, workspaceId:tab.workspaceId || 'main' }).id);
       activateTab(ids[Math.min(win.activeIndex, ids.length - 1)]);
       pushLocalNotice(`Se restauraron ${ids.length} ${ids.length === 1 ? 'pestaña' : 'pestañas'} de la sesión anterior.`);
     } else {
@@ -1746,4 +1783,17 @@ async function boot() {
   reportarMedidas(marcas);
 }
 
+browserTools = createBrowserTools({nexo,state,activeTab,createTab,activateTab,closeTab,navigate,runCommand:runBrowserCommand,notice:pushLocalNotice,scheduleSessionCapture});
+workPanel = createWorkDossier({nexo,root:document.getElementById('panel-work'),
+  getWorkspaceId:()=>browserTools.workspace,
+  getWorkspaceName:id=>browserTools.workspaceName(id),
+  activeTab,show:()=>showPanel('work'),notice:pushLocalNotice,
+  openResource:(url,workspaceId)=>{
+    const existing=[...state.tabs.values()].find(t=>t.url===url && (t.workspaceId||'main')===workspaceId);
+    if(existing)activateTab(existing.id);else createTab(url,{workspaceId});
+  }});
+understandingPanel=createUnderstandingPanel({nexo,root:document.getElementById('panel-understanding'),activeTab,notice:pushLocalNotice});
+document.getElementById('commandsButton').addEventListener('click',()=>runBrowserCommand({type:'command-center'}));
+document.getElementById('keyboardSettings').addEventListener('click',()=>runBrowserCommand({type:'keyboard-settings'}));
+document.getElementById('toolbarSettings').addEventListener('click',()=>runBrowserCommand({type:'toolbar-settings'}));
 boot();

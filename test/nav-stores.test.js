@@ -353,7 +353,7 @@ test('los atajos principales se traducen a comandos', () => {
 test('en macOS el modificador es Command', () => {
   assert.equal(commandFor({ key: 't', ctrlKey: true }, { platform: 'darwin' }), null);
   assert.equal(commandFor({ key: 't', metaKey: true }, { platform: 'darwin' }), 'new-tab');
-  assert.equal(acceleratorFor('new-tab', 'darwin'), '⌘T');
+  assert.equal(acceleratorFor('new-tab', 'darwin'), 'Command+T');
   assert.equal(acceleratorFor('history', 'win32'), 'Ctrl+H');
 });
 

@@ -15,3 +15,5 @@ export * from './streamSentinel.js';
 export * from './guard.js';
 export * from './settings.js';
 export * from './sites.js';
+
+export * from './userUnderstanding.js';

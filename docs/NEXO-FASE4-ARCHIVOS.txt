@@ -1,0 +1,27 @@
+Nexo 0.1.31 — archivos modificados o nuevos de FASE 4
+Base: e700c0f | rama: arena/4678aef7-navegador
+Sólo inspección estática; sin tests/build/benchmarks/CI.
+
+dev/preview.js
+docs/NEXO-FASE4-0.1.31.md
+docs/NEXO-FASE4-ARCHIVOS.txt
+package-lock.json
+package.json
+src/main/advancedBrowser.js
+src/main/main.js
+src/main/menu.js
+src/main/validate.js
+src/nav/browserPreferences.js
+src/nav/downloads.js
+src/nav/session.js
+src/nav/shortcuts.js
+src/preload/shell.cjs
+src/ui/shell/app.js
+src/ui/shell/browserTools.js
+src/ui/shell/index.html
+src/ui/shell/styles.css
+test/advanced-tools.test.js
+test/harness/electron-stub.mjs
+test/main-boot.test.js
+test/nav-stores.test.js
+test/shell-contract.test.js

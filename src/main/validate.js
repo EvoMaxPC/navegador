@@ -112,6 +112,7 @@ export function sessionPayload(input, options = {}) {
           url: typeof tab?.url === 'string' ? tab.url.slice(0, MAX_URL) : '',
           title: text(tab?.title, 300),
           pinned: tab?.pinned === true,
+          ...(/^[a-z0-9-]{1,48}$/.test(tab?.workspaceId || '') && tab.workspaceId!=='main' ? {workspaceId:tab.workspaceId} : {}),
         }))
         .filter((tab) => tab.url),
     });

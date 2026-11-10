@@ -31,6 +31,7 @@ export function captureSession({ windows = [], now = Date.now } = {}) {
         url,
         title: String(tab?.title || url).slice(0, 300),
         pinned: Boolean(tab?.pinned),
+        ...(/^[a-z0-9-]{1,48}$/.test(tab?.workspaceId || '') && tab.workspaceId!=='main' ? {workspaceId:tab.workspaceId} : {}),
       });
     }
     if (!tabs.length) continue;
@@ -67,7 +68,7 @@ export function restoreSession(data, opts = {}) {
         result.skipped += 1;
         continue;
       }
-      tabs.push({ url, title: String(tab?.title || url).slice(0, 300), pinned: Boolean(tab?.pinned) });
+      tabs.push({ url, title: String(tab?.title || url).slice(0, 300), pinned: Boolean(tab?.pinned), ...(/^[a-z0-9-]{1,48}$/.test(tab?.workspaceId || '') && tab.workspaceId!=='main' ? {workspaceId:tab.workspaceId} : {}) });
       budget -= 1;
     }
     if (!tabs.length) continue;

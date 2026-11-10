@@ -7,6 +7,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const ALLOWED_EVENTS = new Set([
   'nexo:event',
+  'nexo:understanding-changed',
+  'nexo:work-changed',
+  'nexo:work-capture',
+  'nexo:context-menu',
+  'nexo:reading',
+  'nexo:browser-prefs',
   'nexo:settings-changed',
   'nexo:command',
   'nexo:open-tab',
@@ -20,6 +26,29 @@ const ALLOWED_EVENTS = new Set([
 ]);
 
 contextBridge.exposeInMainWorld('nexo', {
+  understanding: {
+    read: p => ipcRenderer.invoke('nexo:understanding:read',p),
+    edit: p => ipcRenderer.invoke('nexo:understanding:edit',p),
+    recall: p => ipcRenderer.invoke('nexo:understanding:recall',p),
+    contexts: p => ipcRenderer.invoke('nexo:understanding:contexts',p),
+    bind: p => ipcRenderer.invoke('nexo:understanding:bind',p),
+    clear: p => ipcRenderer.invoke('nexo:understanding:clear',p),
+  },
+  work: {
+    read: payload => ipcRenderer.invoke('nexo:work:read', payload),
+    mutate: payload => ipcRenderer.invoke('nexo:work:mutate', payload),
+    attach: payload => ipcRenderer.invoke('nexo:work:attach', payload),
+    capture: payload => ipcRenderer.invoke('nexo:work:capture', payload),
+    clear: payload => ipcRenderer.invoke('nexo:work:clear', payload),
+    export: payload => ipcRenderer.invoke('nexo:work:export', payload),
+  },
+  advanced: {
+    preferences: () => ipcRenderer.invoke('nexo:advanced:prefs'),
+    setPreferences: (prefs) => ipcRenderer.invoke('nexo:advanced:set-prefs', prefs),
+    action: (payload) => ipcRenderer.invoke('nexo:advanced:action', payload),
+    context: (payload) => ipcRenderer.invoke('nexo:advanced:context', payload),
+  },
+
   getConfig: () => ipcRenderer.invoke('nexo:shell:config'),
 
   getSettings: () => ipcRenderer.invoke('nexo:settings:get'),

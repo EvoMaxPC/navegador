@@ -1,5 +1,30 @@
 # Nexo
 
+**Criterio rector:** mejorar la mediación, continuidad y calidad de las interacciones
+con IA, no acumular funciones. Sin cambiar silenciosamente el objetivo ni inventar
+información para corregir respuestas.
+[Prioridades y criterios de revisión](docs/NEXO-CRITERIOS-RECTORES.md).
+
+**0.1.33 · Capa 1 — User Understanding Engine:** objetivo literal persistente,
+restricciones separadas de preferencias, tarea/subobjetivos, procedencia, vigencia,
+incertidumbre y aclaraciones revisables. Integrado a preparación de mensajes y
+al consumidor del lector ChatGPT existente, sin cambiar su lectura ni duplicar EVO.
+Interpretación local basada en reglas ES/EN; no es comprensión semántica general
+ni incorpora un modelo, agente o segunda capa.
+Acceso: **Comprensión** en la barra lateral o **Ctrl+K → Comprensión del usuario**.
+[Arquitectura, uso y límites](docs/NEXO-CAPA1-0.1.33.md) ·
+[Validación y pendientes reales](docs/NEXO-CAPA1-VALIDACION.md) ·
+[Archivos de esta entrega](docs/NEXO-CAPA1-ARCHIVOS.txt).
+
+**0.1.32 · Expediente de objetivo (primera capa de Fase 5):** objetivos y criterios
+versionados por workspace, citas explícitas con procedencia, tareas manuales,
+decisiones vinculadas, notas y punto de continuación persistente. Preferencias
+de presentación declaradas por el usuario; sin aprendizaje oculto ni agente autónomo.
+Acceso: **Objetivo** en la barra lateral o **Ctrl+K → Expediente del objetivo**.
+[Uso y validación](docs/NEXO-FASE5-0.1.32.md) ·
+[Arquitectura y siguientes capas](docs/NEXO-FASE5-ARQUITECTURA.md).
+
+
 **Un navegador basado en Chromium que se sienta entre vos y los chatbots.**
 
 Nexo no es un cliente de IA más: es un navegador real (Electron/Chromium) que carga

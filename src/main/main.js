@@ -1,3 +1,7 @@
+import { UserUnderstandingService, installUnderstandingIPC } from './userUnderstanding.js';
+import { createHash } from 'node:crypto';
+import { installWorkDossier } from './workDossier.js';
+import { installAdvancedBrowser } from './advancedBrowser.js';
 import { repetitionSnapshot } from '../core/conversationRepetition.js';
 import { isPublicAssetPath } from './internalAssets.js';
 import { createCaptureDiagnostic } from './captureDiagnostic.js';
@@ -10,7 +14,7 @@ import { isChatGptMemoryUrl } from '../core/chatgptConversation.js';
  * mediación en el sitio de IA.
  */
 
-import { app, BrowserWindow, ipcMain, protocol, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, session, shell, webContents, dialog } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { appendFile, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize, relative, sep } from 'node:path';
@@ -108,6 +112,9 @@ if (isSmoke && smokeOut) {
 }
 
 let win = null;
+let advancedBrowser = null;
+let workDossier = null;
+let userUnderstanding = null;
 let store = null;
 let engine = null;
 /**
@@ -354,6 +361,9 @@ function createWindow() {
     },
   });
 
+  advancedBrowser?.attachShell(win.webContents);
+  workDossier?.attachShell(win.webContents);
+
   // La shell privilegiada no navega a sitios ni abre ventanas remotas.
   win.webContents.on('will-navigate', (event, url) => {
     if (url !== 'nexo://app/src/ui/shell/index.html') event.preventDefault();
@@ -386,7 +396,7 @@ function createWindow() {
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = false;
     webPreferences.webSecurity = true;
-    webPreferences.spellcheck = false;
+    webPreferences.spellcheck = advancedBrowser?.preferences.spellcheck ?? false;
     if (!/^https?:/i.test(params.src || '') && !String(params.src || '').startsWith('nexo:')) {
       event.preventDefault();
     }
@@ -394,6 +404,8 @@ function createWindow() {
 
   // Las pestañas no pueden abrir ventanas: se convierten en pestañas nuevas.
   win.webContents.on('did-attach-webview', (_event, contents) => {
+    advancedBrowser?.attachGuest(contents, win.webContents);
+    contents.once('destroyed',()=>userUnderstanding?.release(contents));
     contents.setWindowOpenHandler(({ url }) => {
       if (isAuthPopup(url, isAiHost(hostOf(contents.getURL())))) {
         return {
@@ -488,14 +500,9 @@ function createWindow() {
 
     // Atajos del navegador aunque la página tenga el foco: los aceleradores del
     // menú no siempre ganan contra una webview, y Ctrl+F se lo come el sitio.
+    const shellOwner = win.webContents;
     contents.on('before-input-event', (event, input) => {
-      if (input.type !== 'keyDown') return;
-      const command = commandFor(input, { platform: process.platform });
-      // Escape y teclas sin modificador siguen siendo de la página.
-      if (!command || command === 'escape') return;
-      if (!input.control && !input.meta && !input.alt) return;
-      event.preventDefault();
-      broadcast('nexo:command', { type: command });
+      advancedBrowser?.handleInput(event, input, contents, shellOwner);
     });
 
     contents.on('destroyed', () => {
@@ -535,6 +542,13 @@ function refreshGuestSettings() {
   }
 }
 
+
+function isShellRequest(event) {
+  return Boolean(event?.sender && event.senderFrame===event.sender.mainFrame &&
+    event.sender.getURL()==='nexo://app/src/ui/shell/index.html' &&
+    BrowserWindow.getAllWindows().some(window=>window.webContents===event.sender));
+}
+
 function registerIpc() {
   ipcMain.handle('nexo:config', (_event, payload = {}) => engine.configFor(payload.host || ''));
 
@@ -555,6 +569,7 @@ function registerIpc() {
   });
   ipcMain.handle('nexo:prepare', (event, payload) => {
     const result = engine.prepare(event.sender.id, payload);
+    if(!result?.skipped && isUnderstandingSource(event))userUnderstanding?.observe(event.sender,payload.prompt,{channel:'prepare',transmittedText:result.text});
     // La capa de la página sólo pide mediación cuando ya reconoció una petición
     // de chat. Si el motor la descarta, es un dato: significa que el sitio no se
     // está mediando. Antes, ese silencio se veía como «0 turnos» y nada más.
@@ -723,6 +738,7 @@ function registerIpc() {
       : `${url.pathname}#tab-${event.sender.id}`;
     const result = memory.memory.captureConversation({ conversationId, url: `${url.origin}${url.pathname}`,
       turns: payload.turns, streaming: payload.streaming === true });
+    if(result.ok && isUnderstandingSource(event))userUnderstanding?.observeConversation(event.sender,payload.turns);
     if (!result.ok) noteDiagnostic({ code: 'conversation-memory-error', severity: 'warn',
       title: 'No se pudo guardar la conversación', detail: result.error });
 
@@ -934,26 +950,30 @@ function registerIpc() {
   });
 
   /* ---------------- descargas ---------------- */
-  ipcMain.handle('nexo:downloads:list', () => profile?.downloads.list({ limit: 100 }) || []);
-  ipcMain.handle('nexo:downloads:open', async (_event, id) => {
+  ipcMain.handle('nexo:downloads:list', (event) => isShellRequest(event) ? (profile?.downloads.list({ limit: 100 }) || []).map(entry=>{const live=downloadItems.get(entry.id)?.item;return {...entry,paused:Boolean(live?.isPaused?.()),canResume:Boolean(live?.canResume?.()||live?.isPaused?.())};}) : []);
+  ipcMain.handle('nexo:downloads:open', async (event, id) => {
+    if(!isShellRequest(event))return {ok:false};
     const item = profile?.downloads.get(id);
-    if (!item?.savePath) return { ok: false };
+    if (!item?.savePath || item.state!=='completed') return { ok: false };
     const error = await shell.openPath(item.savePath);
     return { ok: !error, error: error || null };
   });
-  ipcMain.handle('nexo:downloads:show', (_event, id) => {
+  ipcMain.handle('nexo:downloads:show', (event, id) => {
+    if(!isShellRequest(event))return {ok:false};
     const item = profile?.downloads.get(id);
-    if (!item?.savePath) return { ok: false };
+    if (!item?.savePath || item.state!=='completed') return { ok: false };
     shell.showItemInFolder(item.savePath);
     return { ok: true };
   });
-  ipcMain.handle('nexo:downloads:cancel', (_event, id) => {
+  ipcMain.handle('nexo:downloads:cancel', (event, id) => {
+    if(!isShellRequest(event))return {ok:false};
     const entry = downloadItems.get(id);
     if (!entry) return { ok: false };
     entry.item.cancel();
     return { ok: true };
   });
-  ipcMain.handle('nexo:downloads:clear', () => {
+  ipcMain.handle('nexo:downloads:clear', (event) => {
+    if(!isShellRequest(event))return {removed:0};
     const result = profile?.downloads.clearFinished() || { removed: 0 };
     profile?.downloads.save({ force: true });
     broadcast('nexo:downloads-changed', profile?.downloads.stats() || null);
@@ -1022,6 +1042,13 @@ function registerIpc() {
     profile?.session.clear();
     return { ok: true };
   });
+}
+
+/** La observación UUE nunca acepta autoridad desde una página ajena o un subframe. */
+function isUnderstandingSource(event) {
+  const sender=event.sender;
+  if(sender?.getType?.()!=='webview'||!event.senderFrame||event.senderFrame!==sender.mainFrame)return false;
+  return BrowserWindow.getAllWindows().some(w=>{try{return advancedBrowser?.resolveGuest(w.webContents,sender.id)===sender;}catch{return false;}});
 }
 
 /** Guarda el perfil poco después del último cambio, no en cada navegación. */
@@ -1503,6 +1530,7 @@ function configureSession() {
   // Descargas: se reflejan en el gestor del perfil.
   s.on('will-download', (_event, item) => {
     if (!profile) return;
+    item.setSaveDialogOptions?.({title:'Guardar archivo original',defaultPath:sanitizeFilename(item.getFilename())});
     downloadSeq += 1;
     const id = `dl-${Date.now().toString(36)}-${downloadSeq}`;
     const entry = profile.downloads.start({
@@ -1516,7 +1544,8 @@ function configureSession() {
 
     item.on('updated', (_e, state) => {
       if (state === 'interrupted') {
-        profile.downloads.finish(id, { state: 'interrupted' });
+        // Puede reanudarse mientras DownloadItem siga vivo; no marca fin aún.
+        const entry=profile.downloads.get(id);if(entry){entry.state='interrupted';profile.downloads.dirty=true;}
       } else if (state === 'progressing') {
         profile.downloads.progress(id, { receivedBytes: item.getReceivedBytes(), totalBytes: item.getTotalBytes() });
       }
@@ -1551,6 +1580,9 @@ app.whenReady().then(async () => {
     episodeEvery: store.settings.memory?.episodeEvery,
   });
   memory = created;
+  userUnderstanding = new UserUnderstandingService({memory:created.memory,
+    file:join(app.getPath('userData'),`nexo-understanding-${createHash('sha256').update(created.memory.projectId).digest('hex').slice(0,16)}.json`),
+    enabled:()=>store.settings.memory?.enabled!==false,notify:broadcast});
   captureDiagnosticFile = join(app.getPath('documents'), 'NEXO-CAPTURE-DIAGNOSTIC.jsonl');
   captureDiagnostic = createCaptureDiagnostic(captureDiagnosticFile, {
     onError: (code) => console.warn('[nexo] diagnóstico de captura no escrito:', code),
@@ -1680,7 +1712,15 @@ app.whenReady().then(async () => {
     } · contadores en la sesión.`,
     meta: { version: app.getVersion(), netwatch: process.env.NEXO_NETWATCH !== '0', cdp: process.env.NEXO_CDP !== '0' },
   });
-  buildMenu({ send: (channel, payload) => broadcast(channel, payload) });
+  advancedBrowser = installAdvancedBrowser({getProfile:()=>profile,downloadItems,broadcast,
+    onCaptureEvidence:(owner,contents,params)=>workDossier?.captureSelection(owner,contents,params),
+    onPreferences:(prefs)=>buildMenu({send:(channel,payload)=>broadcast(channel,payload),bindings:prefs.shortcuts})});
+  workDossier = installWorkDossier({app, ipcMain, BrowserWindow, dialog, broadcast,
+    getWorkspaceIds:()=>advancedBrowser.preferences.workspaces.map(w=>w.id),
+    resolveGuest:(owner,id)=>advancedBrowser.resolveGuest(owner,id)});
+  installUnderstandingIPC({service:userUnderstanding,ipcMain,BrowserWindow,dialog,
+    resolveGuest:(owner,id)=>advancedBrowser.resolveGuest(owner,id)});
+  buildMenu({ send: (channel, payload) => broadcast(channel, payload),bindings:advancedBrowser.preferences.shortcuts });
   createWindow();
   mark('ventana');
 

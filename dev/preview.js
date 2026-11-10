@@ -5,7 +5,10 @@ let settings = structuredClone(DEFAULT_SETTINGS);
 const empty = async () => [];
 const result = async () => ({ ok: true, removed: 0 });
 window.nexo = {
-  getConfig: async () => ({ version: '0.1.30 · vista web', pagePreload: null }),
+  understanding: Object.fromEntries(['read','edit','recall','contexts','bind','clear'].map(k=>[k,async()=>({ok:false,error:'La comprensión persistente se ejecuta en Electron; esta vista no la simula.'})])),
+  work: Object.fromEntries(['read','mutate','attach','capture','clear','export'].map(k=>[k,async()=>({ok:false,error:'Los expedientes usan el almacenamiento local de Electron. No se simula persistencia en esta vista web.'})])),
+  advanced: {preferences:async()=>null,setPreferences:async()=>({ok:false,error:'Las preferencias se guardan en Electron, no en esta vista UI.'}),action:async()=>({ok:false,error:'Herramienta disponible sólo en la aplicación Electron.'}),context:async()=>({ok:false,error:'No hay un evento de contexto nativo en la vista UI.'})},
+  getConfig: async () => ({ version: '0.1.33 · vista web', pagePreload: null }),
   getSettings: async () => settings,
   setSettings: async (patch) => (settings = mergeSettings(settings, patch)),
   resetSettings: async () => (settings = structuredClone(DEFAULT_SETTINGS)),

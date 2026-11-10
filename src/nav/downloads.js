@@ -48,6 +48,7 @@ export class DownloadList {
       const list = Array.isArray(parsed?.items) ? parsed.items : [];
       this.items = list.map((item) => ({
         ...item,
+        endedAt: !item.endedAt && ['started','progress','interrupted'].includes(item.state) ? this.now() : item.endedAt,
         // Una descarga que quedó «en curso» cuando se cerró la aplicación ya no
         // lo está: se marca interrumpida en lugar de mentir con una barra quieta.
         state: item.state === 'started' || item.state === 'progress' ? 'interrupted' : item.state,
@@ -145,7 +146,7 @@ export class DownloadList {
 
   clearFinished() {
     const before = this.items.length;
-    this.items = this.items.filter((item) => item.state === 'started' || item.state === 'progress');
+    this.items = this.items.filter((item) => !item.endedAt);
     if (this.items.length !== before) this.dirty = true;
     return { removed: before - this.items.length };
   }
@@ -158,7 +159,7 @@ export class DownloadList {
   }
 
   stats() {
-    const active = this.items.filter((item) => item.state === 'started' || item.state === 'progress');
+    const active = this.items.filter((item) => !item.endedAt);
     return {
       total: this.items.length,
       active: active.length,

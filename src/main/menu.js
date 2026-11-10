@@ -6,9 +6,9 @@ import { acceleratorFor } from '../nav/shortcuts.js';
 /**
  * @param {{send: (channel: string, payload?: any) => void}} bridge
  */
-export function buildMenu({ send }) {
+export function buildMenu({ send, bindings = {} }) {
   const isMac = process.platform === 'darwin';
-  const acc = (command) => acceleratorFor(command, process.platform);
+  const acc = (command) => acceleratorFor(command, process.platform, bindings);
   const run = (command, extra = {}) => () => send('nexo:command', { type: command, ...extra });
 
   const template = [
@@ -32,16 +32,19 @@ export function buildMenu({ send }) {
       submenu: [
         { label: 'Pestaña nueva', accelerator: acc('new-tab'), click: run('new-tab') },
         { label: 'Reabrir pestaña cerrada', accelerator: acc('reopen-tab'), click: run('reopen-tab') },
+        { label:'Centro de comandos',accelerator:acc('command-center'),click:run('command-center') },
+        { label:'Guardar página…',accelerator:acc('save-page'),click:run('save-page') },
+        { label:'Imprimir…',accelerator:acc('print'),click:run('print') },
         { label: 'Cerrar pestaña', accelerator: acc('close-tab'), click: run('close-tab') },
         { type: 'separator' },
         { type: 'separator' },
-        { label: 'Pestaña siguiente', accelerator: 'CmdOrCtrl+Tab', click: run('next-tab') },
-        { label: 'Pestaña anterior', accelerator: 'CmdOrCtrl+Shift+Tab', click: run('prev-tab') },
+        { label: 'Pestaña siguiente', accelerator: acc('next-tab'), click: run('next-tab') },
+        { label: 'Pestaña anterior', accelerator: acc('prev-tab'), click: run('prev-tab') },
         {
           label: 'Ir a la pestaña',
           submenu: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({
             label: n === 9 ? 'Última (9)' : String(n),
-            accelerator: `CmdOrCtrl+${n}`,
+            accelerator: acc(`tab-${n}`),
             click: run(`tab-${n}`),
           })),
         },
@@ -80,14 +83,20 @@ export function buildMenu({ send }) {
         { label: 'Alejar', accelerator: acc('zoom-out'), click: run('zoom-out') },
         { label: 'Tamaño normal', accelerator: acc('zoom-reset'), click: run('zoom-reset') },
         { type: 'separator' },
-        { role: 'togglefullscreen', label: 'Pantalla completa' },
-        { role: 'toggleDevTools', label: 'Herramientas de desarrollo' },
+        { label: 'Pantalla completa', accelerator:acc('fullscreen'),click:run('fullscreen') },
+        { role: 'toggleDevTools', label: 'Herramientas de desarrollo', accelerator:null },
       ],
     },
     {
       label: 'Nexo',
       submenu: [
+        { label: 'Comprensión del usuario', accelerator: acc('user-understanding'), click: run('user-understanding') },
+        { label: 'Expediente del objetivo', accelerator: acc('work-dossier'), click: run('work-dossier') },
         { label: 'Panel EVO', accelerator: acc('toggle-sidebar'), click: run('toggle-sidebar') },
+        { label:'Captura de pantalla',accelerator:acc('screenshot'),click:run('screenshot') },
+        { label:'Espacios de trabajo',accelerator:acc('workspaces'),click:run('workspaces') },
+        { label:'Pantalla de lectura',accelerator:acc('reader'),click:run('reader') },
+        { label:'Personalizar barra y teclado',click:run('keyboard-settings') },
         { label: 'Memoria', accelerator: acc('memory'), click: run('memory') },
         { label: 'Actividad', click: run('activity') },
         { label: 'Sitios y permisos', click: run('sites') },
