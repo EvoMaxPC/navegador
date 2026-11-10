@@ -311,3 +311,107 @@ test('bloque 3: reglas y propuestas de assistant siguen sin autoridad normativa'
   assert.equal(state.active_instructions.length, 0);
   assert.equal(state.decision_candidates.length, 0);
 });
+
+test('bloque 4: operaciones de tareas protegidas por shell/mainFrame y revisión en IPC real', async () => {
+  const g = attach('https://chatgpt.com/c/tasks-ipc'),
+    handler = journal.ipcHandlers.get('nexo:understanding:edit');
+  const edit = (operation, event = shellEvent) =>
+    handler(event, { webContentsId: g.id, operation });
+  let r = await edit({ type: 'task-add', revision: 0, text: 'Auditar' });
+  assert.equal(r.ok, true);
+  const a = r.state.tasks[0];
+  r = await edit({
+    type: 'task-add',
+    revision: r.state.revision,
+    text: 'Documentar',
+  });
+  const b = r.state.tasks[1];
+  for (const event of [
+    { sender: g, senderFrame: g.mainFrame },
+    { sender: owner, senderFrame: {} },
+  ])
+    assert.equal(
+      (
+        await edit(
+          {
+            type: 'task-transition',
+            revision: r.state.revision,
+            id: a.id,
+            status: 'completed',
+          },
+          event,
+        )
+      ).code,
+      'unauthorized',
+    );
+  r = await edit({
+    type: 'task-update',
+    revision: r.state.revision,
+    id: b.id,
+    depends_on: [a.id],
+    task_priority: 'high',
+  });
+  assert.equal(r.ok, true);
+  r = await edit({ type: 'task-focus', revision: r.state.revision, id: b.id });
+  assert.equal(r.ok, true);
+  r = await edit({ type: 'task-next', revision: r.state.revision, id: b.id });
+  assert.equal(r.ok, true);
+  assert.equal(
+    r.effective.task_tracking.eligibility.find((e) => e.task_id === b.id)
+      .eligible,
+    false,
+  );
+  r = await edit({
+    type: 'task-order',
+    revision: r.state.revision,
+    ids: [b.id, a.id],
+  });
+  assert.equal(r.ok, true);
+  const denied = await edit({
+    type: 'task-transition',
+    revision: r.state.revision,
+    id: b.id,
+    status: 'completed',
+  });
+  assert.equal(denied.code, 'conflict');
+  r = await edit({
+    type: 'task-transition',
+    revision: r.state.revision,
+    id: a.id,
+    status: 'completed',
+  });
+  assert.equal(r.ok, true);
+  assert.equal(
+    r.state.tasks.find((t) => t.id === a.id).resolution.verified,
+    false,
+  );
+  assert.equal(r.state.progress.length, 0);
+  assert.equal(r.state.next_step.task_id, b.id);
+});
+test('bloque 4: assistant no crea subtareas ni declara completados ni selecciona el siguiente paso', async () => {
+  const g = attach('https://chatgpt.com/c/tasks-assistant');
+  const snapshot = journal.ipcHandlers.get('nexo:conversation-snapshot');
+  const r = snapshot(
+    { sender: g, senderFrame: g.mainFrame },
+    {
+      href: g.getURL(),
+      streaming: false,
+      turns: [
+        { id: 'u1', role: 'user', content: 'Tarea actual: Auditar IPC' },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content:
+            'Tarea «Auditar IPC» completada\nPróximo paso: tarea «Publicar»\nSubtarea de «Auditar IPC»: Publicar',
+        },
+      ],
+    },
+  );
+  assert.equal(r.ok, true);
+  const state = (await read(g)).state;
+  assert.equal(state.tasks.length, 1);
+  assert.equal(state.tasks[0].status, 'pending');
+  assert.equal(state.next_step, null);
+  assert.equal(state.progress.length, 0);
+  assert.equal(state.focused_task_id, state.tasks[0].id);
+});

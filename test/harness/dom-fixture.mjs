@@ -54,6 +54,9 @@ export class Element {
       ...c.querySelectorAll(selector),
     ]);
   }
+  get selectedOptions() {
+    return this.children.filter((c) => c.selected);
+  }
   async fire(name) {
     await this.listeners.get(name)?.({ preventDefault() {} });
   }

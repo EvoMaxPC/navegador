@@ -618,6 +618,12 @@ export function installUnderstandingIPC({
     if (
       ![
         'goal',
+        'task-add',
+        'task-update',
+        'task-transition',
+        'task-focus',
+        'task-next',
+        'task-order',
         'rule-update',
         'decision-candidate',
         'goal-independent',

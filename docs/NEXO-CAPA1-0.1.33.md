@@ -5,6 +5,8 @@
 > renovación automática del panel. La etapa 2 añade objetivos independientes,
 > inferencias confirmables y cierre/reapertura explícitos sin verificar ejecución;
 > la etapa 3 amplía reglas, propuestas de decisión y corrección/vigencia con historia.
+> La etapa 4 añade seguimiento explícito de tareas, dependencias y próximo paso,
+> sin planificación/ejecución automática ni verificación de resultados.
 > Las descripciones de iteraciones anteriores
 > de este documento deben leerse como evidencia histórica, no como límite actual.
 

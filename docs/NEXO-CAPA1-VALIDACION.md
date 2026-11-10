@@ -307,3 +307,20 @@ mínimo de fixture, contado también por el runner completo. No se probó Electr
 real, Windows real ni una cuenta ChatGPT. La gramática y los alcances son limitados;
 ver el documento de etapas para compatibilidad, límites y gates manuales. Restan
 los bloques 4–7, sin proclamar completados los 72 requisitos.
+
+
+## Comprensión por etapas — cuarto bloque posterior
+
+La [etapa 4 de tareas, relaciones y siguiente paso](NEXO-COMPRENSION-ETAPAS.md#etapa-4-implementada--tareas-relaciones-y-siguiente-paso)
+añade seguimiento explícito dentro del UUE: tareas/subtareas, dependencias sin
+ciclos, prioridad y orden, resultado esperado, estados declarados, foco y próximo
+paso acordado. No inventa planes ni verifica ejecución; una finalización del
+asistente no cambia el estado declarado por el usuario.
+
+Resultados: **146/146 focalizadas**; suite completa **887 totales, 886 aprobadas,
+0 fallidas y 1 omitida** (empaquetado Windows real). Build correcto. 28 pruebas
+nuevas de comportamiento; DOM mínimo/puente de fixture y Electron stub, sin prueba
+visual en Electron/Windows real ni cuenta ChatGPT. Compatibilidad, límites,
+corrupción, fallo de disco, reinicio, EVO apagada, aislamiento y seguridad IPC
+están detallados en el documento de etapas. Restan los bloques 5–7 y los gates
+manuales; no se proclaman completados los 72 requisitos.

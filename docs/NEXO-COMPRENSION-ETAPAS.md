@@ -4,8 +4,8 @@
 
 Los 72 requisitos describen un objetivo amplio, no capacidades ya demostradas.
 Se avanza por etapas sobre el UUE existente, sin reconstruir NEXO ni introducir
-un agente ejecutor. La entrega actual incorpora **las etapas 1, 2 y 3**, sobre
-0.1.33. Las cuatro siguientes siguen planificadas; no se declara el panel completo.
+un agente ejecutor. La entrega actual incorpora **las etapas 1–4**, sobre
+0.1.33. Las tres siguientes siguen planificadas; no se declara el panel completo.
 
 No hay modelo semántico nuevo, envíos externos, nuevos permisos ni dependencia
 nueva. Las reglas actuales siguen siendo locales y conservadoras. Comprender no
@@ -21,7 +21,7 @@ entre bloques. Las funciones parciales existentes de UUE se reutilizarán.
 | 1 | Observación incremental, roles y actualización automática | 1–6, 49, 54, 58, 68 | Base implementada; límites semánticos debajo |
 | 2 | Objetivo principal, múltiples objetivos, cambios y ciclo de vida | 7–12 | Implementada con gramática acotada y revisión explícita; detalle debajo |
 | 3 | Reglas, restricciones, preferencias, decisiones y vigencia | 13–18, 37–41, 43–44, 50–51, 53, 67, 72 | Ampliada con gramática acotada, revisión de conflictos y edición de vigencia; detalle debajo |
-| 4 | Tareas, subtareas, dependencias, prioridades y siguiente paso | 19–24, 34, 36 | Pendiente; no inventar plan ni ejecutar tareas |
+| 4 | Tareas, subtareas, dependencias, prioridades y siguiente paso | 19–24, 34, 36 | Base estructurada implementada; gramática acotada, sin plan ni ejecución automáticos |
 | 5 | Proyectos, referencias, selección de contexto y antecedentes | 25–30, 47, 55–57, 59, 71 | Parcial previo; EVO opcional y referencias revisables |
 | 6 | Progreso, errores, bloqueos, propuestas y evidencia de resultados | 31–33, 35, 45–46, 69–70 | Pendiente de interpretación ampliada; observar no verifica |
 | 7 | Inspector completo, explicación, corrección e inferencias confirmables | 42, 48, 52, 60–66 | Controles parciales previos; consolidar tras las bases |
@@ -442,7 +442,190 @@ selección de categoría/vigencia, literal escapado y tema BLACK & ELECTRIC BLUE
 Nuevos: `src/core/userRules.js`, `test/understanding-rules.test.js`,
 `test/understanding-rules-panel.test.js` y `test/harness/dom-fixture.mjs`.
 Modificados: core/servicio UUE, panel, manifest de empaquetado, tests main y de
-objetivos del panel, README y documentación. Se cierra con commit y push a la
-rama de trabajo. El siguiente bloque es el **4: tareas, subtareas, dependencias,
-prioridades y siguiente paso**. Los bloques restantes y los gates manuales siguen
-pendientes; **no se declaran completados los 72 requisitos**.
+objetivos del panel, README y documentación. La etapa 3 se publicó como `7965b17`.
+Su siguiente bloque se desarrolla debajo. Los gates manuales siguen pendientes;
+**no se declaran completados los 72 requisitos**.
+
+
+## Etapa 4 implementada — tareas, relaciones y siguiente paso
+
+### Alcance del bloque
+
+Los requisitos 19–24, 34 y 36 tienen ahora una base explícita de seguimiento dentro
+del **mismo UUE**, no un segundo expediente, motor ejecutor o transcripción. Las
+solicitudes normales siguen actualizando la última tarea inferida de la base
+(`current_task`); no se convierten automáticamente en una lista de trabajo.
+El panel distingue esa última solicitud interpretada del seguimiento explícito.
+
+- **Tareas pendientes y foco:** las declaraciones reconocidas y los controles del
+  panel añaden tareas con texto literal, origen, certeza, fechas y estado pendiente.
+  «Tarea actual: …» selecciona además un foco explícito. Una nueva tarea no borra
+  las anteriores ni sustituye el objetivo, las reglas o los subobjetivos.
+- **Subtareas:** relación por ID o referencia textual única al padre; no se inventa
+  una descomposición. No son los subobjetivos del UUE. Completar una hija no
+  completa a su padre; para declarar completado al padre deben estar satisfechas
+  todas sus subtareas. Una subtarea cancelada no cuenta como completada.
+- **Dependencias:** enlaces explícitos, con referencias existentes, sin duplicados
+  ni ciclos. Se validan conjuntamente con la jerarquía: una hija que depende de su
+  padre crea un ciclo porque completar al padre requiere a la hija. Un requisito
+  pendiente/cancelado/bloqueado impide declarar iniciada o completada su dependiente.
+- **Prioridad y orden separados:** alta, normal, baja o sin prioridad acordada.
+  `task_priority` no altera la jerarquía de instrucciones y restricciones (`priority`).
+  Se puede subir/bajar en la lista con una permutación completa validada; no se
+  deduce de ello una secuencia de ejecución ni un plan aprobado.
+- **Resultado esperado:** campo opcional, libre y editable, separado de los avances.
+  Un resultado esperado no es evidencia de que se haya obtenido.
+- **Estados declarados:** pendiente, en curso, bloqueada, completada y cancelada.
+  Bloquear exige motivo. Cambiar ese motivo se registra; retirar el bloqueo o
+  reabrir una tarea exige acción explícita, sin reanudarla automáticamente.
+  Los cambios de estado guardan `kind: user-declaration`, `verified: false`, origen
+  y fecha. Nunca añaden progreso probado ni seleccionan una herramienta.
+- **Próximo paso acordado:** puntero elegido por el usuario a una tarea abierta,
+  incluso si está bloqueada, con origen y fecha. Se informa si hay impedimentos.
+  Al completar/cancelar ese paso se conserva el acuerdo con su estado: no se elige
+  automáticamente otro, ni se inventa un «siguiente paso» al decir «continuá».
+- **Historia transaccional:** creación, edición, relaciones, prioridad, estado,
+  foco, próximo paso y orden quedan registrados. Editar conserva ID y origen
+  iniciales, y añade actor/fecha/valores anteriores y nuevos en el evento.
+
+### Elegibilidad estructural, no autorización ni evidencia
+
+`task_tracking` proyecta las tareas, el foco, el próximo paso y los impedimentos
+estructurales declarados. Se comprueban dependencias completadas y sus requisitos
+transitivos; reabrir un requisito puede impedir pasos posteriores sin reescribir
+los estados pasados que declaró el usuario. Los cierres pasados se conservan como
+historia, **no se convierten en hechos verificados**. El panel avisa cuando un padre
+con cierre declarado tiene subtareas que ya no están satisfechas.
+
+Una tarea puede vincularse explícitamente a un objetivo activo. No se inventa esa
+relación a partir de una petición genérica. Cerrar/sustituir el objetivo conserva
+las tareas y sus vínculos, pero bloquea la elegibilidad para iniciarlas/completarlas.
+El mismo control se aplica a los objetivos de sus ancestros y a padres cerrados o
+bloqueados. No se permite mezclar objetivos incompatibles entre hija y ancestros.
+Las dependencias son las declaradas: no se infieren requisitos adicionales de un
+texto, una prioridad, el orden de lista o el progreso observado del asistente.
+
+«Sin impedimentos estructurales declarados» **no significa** permiso de ejecución:
+no evalúa la verdad de un resultado ni garantiza que se cumplieron restricciones,
+permisos o condiciones del mundo real. El asistente observado no crea ni completa
+estas tareas, no bloquea trabajo por su cuenta ni acuerda el próximo paso del usuario.
+
+### Uso desde conversación y panel
+
+Gramática conservadora ES/EN: una directiva completa por mensaje, o una lista de
+uno a diez renglones con guion/asterisco. Ejemplos:
+
+```text
+Tarea: Revisar el lector
+Tarea actual: Auditar IPC
+Tareas:
+- Revisar permisos
+- Documentar cambios
+Subtarea de «Auditar IPC»: Revisar validación de frames
+La tarea «Documentar cambios» depende de «Revisar permisos»
+Prioridad de tarea «Auditar IPC»: alta
+Resultado esperado de tarea «Auditar IPC»: Informe de canales y permisos
+Tarea «Revisar permisos» en curso
+Tarea «Revisar permisos» completada
+Tarea «Auditar IPC» bloqueada: falta autorización
+Tarea «Auditar IPC» pendiente
+Próximo paso: tarea «Documentar cambios»
+Enfocar tarea «Auditar IPC»
+Limpiar próximo paso
+```
+
+Las referencias por texto se normalizan de forma acotada y deben ser únicas. Si no
+hay una referencia clara, un formato válido o una transición consistente, se pide
+aclaración sin modificar parcialmente el grafo. Los límites de capacidad rechazan
+la transacción sin consumir una media lista ni podar pendientes. Una repetición
+literal no duplica la misma tarea con igual padre/objetivo, ni reactiva una cerrada.
+
+En **Comprensión → Tareas, subtareas y próximo paso** se puede agregar, editar
+texto/resultado esperado, elegir padre y objetivo, seleccionar dependencias
+(múltiple), prioridad, foco y próximo paso, declarar estados y mover el orden.
+Las relaciones se eligen por ID; los ciclos y referencias inválidas se rechazan.
+El historial permite revisar los cambios. Los borradores de texto y relaciones
+se conservan al refrescar; al guardar se limpian juntos para que metadatos viejos
+no reviertan una edición posterior. Un cambio de pestaña no aplica una edición
+pendiente al nuevo contexto.
+
+### Persistencia, límites y seguridad
+
+Campos opcionales al leer archivos antiguos, sin cambiar `schema_version: 1`:
+`tasks`, `task_events`, `focused_task_id` y `next_step`. No se migra automáticamente
+la última tarea inferida ni los subobjetivos a tareas confirmadas. Se conserva el
+archivo UUE existente, sus escrituras atómicas, exclusión tras borrado y EVO opcional.
+
+Por contexto: hasta 100 tareas (incluidas cerradas), 10 dependencias por tarea,
+200 eventos y 10 tareas por lista de conversación. Texto, resultado esperado y
+motivo de bloqueo: hasta 200.000 caracteres, sujetos al límite global previo de
+2 millones por contexto y 8 MB por archivo. No hay poda silenciosa; al alcanzar
+capacidad hay que resolver la organización de forma explícita, por ejemplo usando
+otro contexto. No existe borrado individual de tareas que deje referencias rotas.
+
+Se valida esquema, origen, estados/declaraciones, referencias, ciclos y cambios
+históricos. Corrupción bloquea escritura sin sobrescribir. Un fallo de disco no
+confirma tareas o cierres en RAM y permite reintentar con la misma revisión.
+Las tareas persisten al reiniciar; no se reinterpretan como trabajo en ejecución
+real ni heredan instrucciones de otro contexto.
+
+Las seis operaciones (`task-add`, `task-update`, `task-transition`, `task-focus`,
+`task-next`, `task-order`) pasan por la edición IPC existente: shell confiable,
+mainFrame, guest propio y revisión optimista. No hay canal, API privilegiada web,
+permiso, dependencia de producción o llamada a un modelo nuevos. El lector, cola
+de 500 ms, ACK, EVO, CDP, guard, preparación/envío, tokenización y contadores se
+conservan. Versión mantenida: 0.1.33.
+
+### Validación ejecutada
+
+| Ejecución | Total | Aprobadas | Fallidas | Omitidas |
+|---|---:|---:|---:|---:|
+| Focalizadas: UUE, observación, main/IPC, independencia, shell, objetivos, reglas, tareas y paneles | 146 | 146 | 0 | 0 |
+| `npm test` | 887 | 886 | 0 | 1 |
+
+La suite completa duró 102.218,288979 ms. La omitida sigue siendo el empaquetado
+Windows real con `NEXO_ELECTRON_ZIP_DIR`. Build de inyección correcto:
+53,7 kB / 19,3 kB gzip, 11 módulos.
+
+Se añaden **28 pruebas de comportamiento**: 25 en
+`test/understanding-tasks.test.js`, una de callbacks del panel en
+`test/understanding-tasks-panel.test.js` y dos de flujo IPC/main en
+`test/user-understanding-main.test.js`. Cubren literal, aislamiento de objetivo y
+reglas, listas, subtareas, dependencias/ciclos mixtos, estado declarativo,
+reapertura, bloqueos, elegibilidad transitiva, orden/prioridad, resultado esperado,
+foco/paso, citas/negaciones, repetición, capacidades, compatibilidad, reinicio,
+EVO apagada, borrado, corrupción, fallo de disco, revisiones y remitentes no
+privilegiados. La fixture DOM compartida se amplía para selección múltiple.
+
+**Límites de la evidencia:** no se ejecutaron Electron real, Windows real ni una
+cuenta ChatGPT real. Los tests de panel usan DOM mínimo/puente de fixture y main
+usa Electron stub. No prueban renderizado, accesibilidad, scroll/foco ni selectores
+múltiples en Chromium real. No hay mediciones de rendimiento o calidad semántica.
+No existe descomposición semántica universal, planificador automático, estimación
+de esfuerzo, fechas límite, ni verificación externa de resultados. Las frases
+fuera de la gramática se corrigen con el panel; no se declara cumplida cualquier
+redacción posible de los requisitos por tener un grafo de tareas.
+
+Gate manual pendiente: EVO apagada → objetivo/reglas → dos tareas y una subtarea
+→ dependencia → intento de inicio bloqueado → declaración de finalización del
+requisito → inicio explícito → próximo paso → bloqueo con motivo → reapertura
+→ cambio de orden/prioridad → cierre del objetivo → cambio de conversación →
+reinicio → borrado. Revisar borradores, selección múltiple, historial, texto
+escapado y tema BLACK & ELECTRIC BLUE existente.
+
+### Archivos y entrega
+
+Nuevos: `src/core/userTasks.js`, `src/ui/shell/understandingTasks.js`,
+`test/understanding-tasks.test.js` y `test/understanding-tasks-panel.test.js`.
+Modificados: core/servicio UUE, panel, manifest de empaquetado, fixture DOM,
+tests main, README y documentación. La entrega se cierra con commit y push sobre
+la rama de trabajo. El siguiente bloque es el **5: proyectos, referencias,
+selección de contexto y antecedentes**. Los bloques 5–7 y los gates manuales
+siguen pendientes; **no se declaran completados los 72 requisitos**.
+
+El ZIP de esta entrega es de **fuentes**, no un ejecutable Windows ya validado.
+Para probar desde fuentes, ubicarse en la raíz que contiene `package.json` y `src`,
+no en `dist/Nexo-win32-x64`. El ZIP no incluye `.git`: los comandos Git requieren
+un clon del repositorio. En PowerShell pegar sólo los comandos, no el prefijo
+`PS C:\…>` ni los mensajes de salida/error de otra ejecución. Ver el README para
+instalación y arranque; no se ejecutaron esos pasos en el equipo del usuario.

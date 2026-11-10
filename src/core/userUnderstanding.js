@@ -1,4 +1,10 @@
 import {
+  applyTaskOperation,
+  validateTasks,
+  taskProjection,
+  taskDirective,
+} from './userTasks.js';
+import {
   RULE_FIELDS,
   DECISION_CANDIDATE_LIMIT,
   ruleSegment,
@@ -72,6 +78,10 @@ export function newUnderstanding(contextId, now = Date.now()) {
     goal_events: [],
     decision_candidates: [],
     current_task: null,
+    tasks: [],
+    task_events: [],
+    focused_task_id: null,
+    next_step: null,
     subgoals: [],
     active_instructions: [],
     explicit_constraints: [],
@@ -97,6 +107,17 @@ function origin(meta) {
     authority:
       meta.channel === 'shell' ? 'user-confirmed-input' : 'observed-user-text',
   };
+}
+function mutateTask(state, operation, meta, now) {
+  applyTaskOperation(state, operation, {
+    now,
+    origin: origin(meta),
+    makeEntry: (text) =>
+      entry(state, 'inference', text, meta, now, 'explicit', 'project'),
+    fail: (message, code = 'invalid') => {
+      throw new UnderstandingError(message, code);
+    },
+  });
 }
 function entry(
   state,
@@ -561,6 +582,14 @@ export function interpretMessage(state, text) {
       relation: 'independent',
       certainty: 'explicit',
     };
+  const task = taskDirective(text);
+  if (task)
+    return {
+      intent: 'task-directive',
+      relation: 'task',
+      certainty: 'explicit',
+      task,
+    };
   const directive = goalDirective(text);
   if (directive)
     return {
@@ -825,6 +854,14 @@ export function updateUnderstanding(
     case 'goal':
       setGoal(state, userText(operation.text), meta, now);
       break;
+    case 'task-add':
+    case 'task-update':
+    case 'task-transition':
+    case 'task-focus':
+    case 'task-next':
+    case 'task-order':
+      mutateTask(state, operation, meta, now);
+      break;
     case 'rule-update':
       updateRule(state, operation, meta, now);
       break;
@@ -926,7 +963,31 @@ export function updateUnderstanding(
       }
       const previousTask = state.current_task;
       const retiredText = ruleRetirement(text);
-      if (retiredText) {
+      if (report.task) {
+        if (report.task.ambiguous)
+          ask(
+            state,
+            'missing-reference',
+            'Especificá de 1 a 10 tareas, una por línea con guion. No inventaré subtareas ni orden de ejecución.',
+            null,
+            meta,
+            now,
+          );
+        else {
+          try {
+            mutateTask(state, report.task, meta, now);
+          } catch (error) {
+            if (
+              !(error instanceof UnderstandingError) ||
+              !['reference', 'invalid', 'conflict'].includes(error.code)
+            )
+              throw error;
+            ask(state, 'missing-reference', error.message, null, meta, now);
+          }
+        }
+        report.note =
+          'Seguimiento de tareas declarado por el usuario. No ejecuta acciones ni verifica finalización.';
+      } else if (retiredText) {
         const matches = RULE_FIELDS.flatMap((f) => state[f]).filter(
           (e) => active(e) && normalized(e.text) === normalized(retiredText),
         );
@@ -1267,6 +1328,7 @@ export function effectiveUnderstanding(state) {
     confirmed_decisions: state.confirmed_decisions.filter(active),
     preferences: state.preferences.filter(active),
     current_task: state.current_task,
+    task_tracking: taskProjection(state),
     subgoals: state.subgoals.filter(active),
     relevant_context: state.relevant_context.filter(active),
     progress: state.progress.filter(active),
@@ -1541,6 +1603,7 @@ export function validateUnderstanding(s) {
   )
     fail();
   if (!Array.isArray(s.uncertainty) || s.uncertainty.length > 110) fail();
+  validateTasks(s, fail);
   if (JSON.stringify(s).length > 2_000_000)
     throw new UnderstandingError(
       'El contexto supera el límite de 2 millones de caracteres; no se podarán instrucciones activas.',

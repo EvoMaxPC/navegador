@@ -1,3 +1,4 @@
+import { createTaskSection } from './understandingTasks.js';
 import { RULE_FIELDS } from '../../core/userRules.js';
 import { createUnderstandingRefresh } from './understandingRefresh.js';
 
@@ -138,7 +139,10 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         r?.error || 'No se guardó. Recargá antes de reintentar.';
       return;
     }
-    if (draftKey) drafts.delete(draftKey);
+    if (draftKey)
+      for (const key of [...drafts.keys()])
+        if (key === draftKey || key.startsWith(`${draftKey}:`))
+          drafts.delete(key);
     snapshot = r;
     render();
     status.textContent = r.report?.isolated
@@ -524,8 +528,22 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         ),
       );
     body.append(goalEvents);
+    body.append(
+      createTaskSection({
+        state: s,
+        tracking: snapshot.effective.task_tracking,
+        create,
+        button,
+        form,
+        mutate,
+        drafts,
+        showEntry,
+      }),
+    );
     if (s.current_task) {
-      body.append(create('h3', 'Tarea actual / última conocida'));
+      body.append(
+        create('h3', 'Última solicitud interpretada; no acredita ejecución'),
+      );
       body.append(showEntry(s.current_task, false));
     }
     const questions = s.pending_questions.filter((q) => q.status === 'open');
