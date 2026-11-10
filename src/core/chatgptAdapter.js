@@ -51,15 +51,29 @@ function outer(nodes) {
 }
 
 export function selectChatGptMessages(document) {
+  // Las etiquetas visibles pueden detectar sólo una parte de la conversación.
+  // No deben bloquear los selectores estructurales que encuentren la respuesta.
   const labelled = selectPrintLabelMessages(document);
-  if (labelled.messages.length) return labelled;
+  const messages = [...labelled.messages];
+  const seen = new Set(messages.map(({ node }) => node));
+  const usedStrategies = labelled.messages.length ? ['print-label'] : [];
+
   for (const strategy of strategies) {
-    const messages = outer(queryAll(document, strategy.selector))
-      .map((node) => ({ node, role: strategy.role(node) })).filter((entry) => entry.role);
-    // Elementos con atributos desconocidos no bloquean estrategias válidas posteriores.
-    if (messages.length) return { strategy: strategy.name, messages };
+    const found = outer(queryAll(document, strategy.selector))
+      .map((node) => ({ node, role: strategy.role(node) }))
+      .filter((entry) => entry.role && !seen.has(entry.node));
+    if (found.length) {
+      for (const entry of found) {
+        seen.add(entry.node);
+        messages.push(entry);
+      }
+      usedStrategies.push(strategy.name);
+    }
   }
-  return { strategy: 'none', messages: [] };
+  return {
+    strategy: usedStrategies.join('+') || 'none',
+    messages,
+  };
 }
 
 export function chatGptMessageContent(node, role) {
