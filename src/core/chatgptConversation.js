@@ -29,11 +29,12 @@ export function readChatGptConversation(document, { literal = false, selection =
 /** Un solo observador, agrupado; funciona aunque ChatGPT no use nuestro fetch. */
 export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => isChatGptStreaming(document), publishLive = null }) {
   if (typeof document?.querySelectorAll !== 'function') return { read() {}, disconnect() {} };
-  let timer = null, pollTimer = null, last = '', lastLive = '', observer = null, stopped = false;
+  let timer = null, pollTimer = null, last = '', lastLive = '', observer = null, stopped = false, suspended = false;
   const session = `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  const read = () => {
-    timer = null;
-    if (stopped || (!isEnabled() && !publishLive) || !isChatGptMemoryUrl(window.location.href)) return;
+  const read = ({ force = false } = {}) => {
+    clearTimeout(timer); timer = null;
+    if (force) { last = ''; lastLive = ''; }
+    if (stopped || suspended || (!isEnabled() && !publishLive) || !isChatGptMemoryUrl(window.location.href)) return;
     try {
       const url = new URL(window.location.href);
       const selection = selectChatGptMessages(document);
@@ -49,7 +50,14 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
         });
         const live = { href: window.location.href, strategy: selection.strategy, turns: bounded, clipped, streaming: Boolean(isStreaming()) };
         const signature = JSON.stringify(live);
-        if (signature !== lastLive) { lastLive = signature; publishLive(live); }
+        if (signature !== lastLive) {
+          lastLive = signature;
+          // No considerar entregado un snapshot rechazado por IPC (p. ej. URL aún navegando).
+          const delivery = publishLive(live);
+          const rejected = () => { if (lastLive === signature) lastLive = ''; };
+          if (delivery?.then) delivery.then((result) => { if (result?.ok === false) rejected(); }, rejected);
+          else if (delivery?.ok === false) rejected();
+        }
       }
       if (!isEnabled()) return;
       const turns = readChatGptConversation(document, { selection });
@@ -65,32 +73,52 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
       publish({ error: String(error?.message || error) });
     }
   };
-  const schedule = () => { if (!stopped && !timer) timer = setTimeout(read, 500); };
+  const schedule = () => { if (!stopped && !suspended && !timer) { timer = setTimeout(read, 500); timer?.unref?.(); } };
   // Cinco vías complementarias de recuperación: selectores de rol/data-turn/article
   // del adaptador, MutationObserver, sondeo periódico, eventos de navegación y
   // lectura inmediata al volver a la pestaña. El sondeo cubre cambios que React
   // puede aplicar sin mutaciones observables en los nodos seleccionados.
   const poll = () => {
-    if (stopped) return;
-    schedule();
+    if (stopped || suspended) return;
+    if (document.visibilityState !== 'hidden') schedule();
     pollTimer = setTimeout(poll, 1200);
+    pollTimer?.unref?.();
   };
   const start = () => {
-    if (stopped) return;
-    if (window.MutationObserver && document.body && !observer) {
+    if (stopped || suspended) return;
+    if (window.MutationObserver && !observer) {
       observer = new window.MutationObserver(schedule);
-      observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-message-id', 'data-message-author-role', 'data-turn', 'data-turn-id', 'data-testid', 'aria-label', 'disabled'] });
+      observer.observe(document, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-message-id', 'data-message-author-role', 'data-turn', 'data-turn-id', 'data-testid', 'aria-label', 'disabled'] });
     }
     schedule();
   };
-  document.addEventListener?.('DOMContentLoaded', start, { once: true });
-  window.addEventListener?.('popstate', schedule);
-  window.addEventListener?.('hashchange', schedule);
-  window.addEventListener?.('pageshow', schedule);
-  window.addEventListener?.('focus', schedule);
-  document.addEventListener?.('visibilitychange', schedule);
-  window.addEventListener?.('pagehide', () => { read(); stopped = true; observer?.disconnect(); clearTimeout(timer); clearTimeout(pollTimer); });
+  const listeners = [];
+  const listen = (target, type, callback) => {
+    target.addEventListener?.(type, callback);
+    listeners.push(() => target.removeEventListener?.(type, callback));
+  };
+  const hide = () => {
+    read(); suspended = true;
+    observer?.disconnect(); observer = null;
+    clearTimeout(timer); timer = null; clearTimeout(pollTimer); pollTimer = null;
+  };
+  const show = () => {
+    if (stopped) return;
+    suspended = false; start();
+    read({ force: true });
+    if (!pollTimer) poll();
+  };
+  listen(document, 'DOMContentLoaded', start);
+  listen(window, 'popstate', show);
+  listen(window, 'hashchange', show);
+  listen(window, 'pageshow', show);
+  listen(window, 'focus', schedule);
+  listen(document, 'visibilitychange', schedule);
+  listen(window, 'pagehide', hide);
   start();
   poll();
-  return { read, disconnect() { stopped = true; clearTimeout(timer); clearTimeout(pollTimer); observer?.disconnect(); } };
+  return { read, disconnect() {
+    stopped = true; clearTimeout(timer); clearTimeout(pollTimer); observer?.disconnect();
+    for (const remove of listeners) remove();
+  } };
 }

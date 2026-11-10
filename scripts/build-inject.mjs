@@ -44,3 +44,11 @@ const gzip = gzipSync(await readFile(outfile)).length;
 console.log(
   `inject.js listo · ${(size / 1024).toFixed(1)} kB (${(gzip / 1024).toFixed(1)} kB gzip) · ${inputs} módulos${dev ? ' · modo dev' : ''}`,
 );
+
+// El lector DOM se ejecuta desde el preload aislado, nunca como script de la web.
+await build({
+  entryPoints: [resolve(root, 'src/preload/chatgptReader.js')],
+  outfile: resolve(root, 'build/chatgpt-reader.cjs'),
+  bundle: true, format: 'cjs', platform: 'browser', target: ['chrome120'],
+  minify: !dev, charset: 'utf8', legalComments: 'none', logLevel: 'warning',
+});

@@ -10,7 +10,7 @@ import { isChatGptMemoryUrl } from '../core/chatgptConversation.js';
  * mediación en el sitio de IA.
  */
 
-import { app, BrowserWindow, ipcMain, protocol, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, session, shell, webContents } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { appendFile, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize, relative, sep } from 'node:path';
@@ -466,6 +466,13 @@ function createWindow() {
     // WebSocket y respuestas JSON sin streaming). Se adjunta sólo a los sitios
     // con perfil conocido y se suelta si la pestaña navega a otro lado.
     cdp?.sync(contents);
+    // Relectura confirmada después de cargar/navegar: el snapshot inicial puede
+    // llegar antes de que getURL() refleje la URL definitiva del webview.
+    const requestConversationRead = () => {
+      if (!contents.isDestroyed() && isChatGptMemoryUrl(contents.getURL())) contents.send('nexo:conversation-read');
+    };
+    contents.on('dom-ready', requestConversationRead);
+    contents.on('did-navigate-in-page', (_event, _url, isMainFrame) => { if (isMainFrame) requestConversationRead(); });
     contents.on('did-start-navigation', (_e, url, _inPage, isMainFrame) => {
       if (isMainFrame) clearRepetition(contents.id);
       if (!isMainFrame || _inPage) return;
@@ -665,6 +672,12 @@ function registerIpc() {
     if (!BrowserWindow.getAllWindows().some((window) => window.webContents === event.sender &&
       window.webContents.getURL() === 'nexo://app/src/ui/shell/index.html')) return null;
     const snapshot = repetitionSnapshots.get(payload.webContentsId);
+    if (!snapshot) {
+      const contents = webContents.fromId(payload.webContentsId);
+      if (contents?.getType() === 'webview' && contents.getURL() === payload.href && isChatGptMemoryUrl(payload.href)) {
+        contents.send('nexo:conversation-read');
+      }
+    }
     return snapshot && snapshot.href === payload.href ? snapshot : null;
   });
 

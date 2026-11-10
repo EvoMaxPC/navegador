@@ -141,7 +141,7 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     },
     send: (channel, payload) => journal.ipcListeners.get(channel)?.({ sender }, payload),
   };
-  const preload = vm.createContext({ window: page, location: page.location, console,
+  const preload = vm.createContext({ window: page, document, location: page.location, console,
     __dirname: fileURLToPath(new URL('../src/preload/', import.meta.url)),
     require: (name) => name === 'electron' ? { ipcRenderer, webFrame: {
       executeJavaScript: async (code) => vm.runInContext(code, context),

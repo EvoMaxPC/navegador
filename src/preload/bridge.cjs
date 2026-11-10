@@ -15,6 +15,20 @@ const INJECT_PATH = join(__dirname, '..', '..', 'build', 'inject.js');
 
 let injected = false;
 let injectSource = '';
+let conversationReader = null;
+
+function startConversationReader(config) {
+  if (conversationReader || typeof document === 'undefined' ||
+    (typeof process !== 'undefined' && process.isMainFrame === false) ||
+    !['chatgpt.com', 'chat.openai.com'].includes(location.hostname) || location.protocol !== 'https:') return;
+  try {
+    const { startChatGptReader } = require('../../build/chatgpt-reader.cjs');
+    conversationReader = startChatGptReader({ document, window, ipcRenderer, config });
+  } catch {
+    console.warn('[nexo] no se pudo iniciar el lector aislado de ChatGPT');
+  }
+}
+
 
 /**
  * Código de la capa de inyección, leído una vez por proceso de renderizado.
@@ -88,6 +102,7 @@ function boot() {
   const host = location.hostname;
   const config = readConfigSync(host);
   if (config) {
+    startConversationReader(config);
     if (shouldInject(config, host)) inject(config);
     return;
   }
@@ -97,6 +112,7 @@ function boot() {
   ipcRenderer
     .invoke('nexo:config', { host, href: location.href })
     .then((asyncConfig) => {
+      startConversationReader(asyncConfig);
       if (shouldInject(asyncConfig, host)) inject(asyncConfig);
     })
     .catch((error) => console.warn('[nexo] sin configuración:', error.message));
@@ -137,14 +153,8 @@ window.addEventListener('message', async (event) => {
 
   if (data.__nexo === 'event') {
     const { type, payload } = data;
-    if (type === 'conversation-repetition') {
-      await ipcRenderer.invoke('nexo:repetition:snapshot', payload).catch(() => {});
-      return;
-    }
-    if (type === 'conversation-snapshot') {
-      await ipcRenderer.invoke('nexo:conversation-snapshot', payload).catch((error) => console.warn('[nexo] conversación no guardada:', error.message));
-      return;
-    }
+    // Los snapshots privados sólo salen del lector aislado, no de postMessage de la web.
+    if (type === 'conversation-repetition' || type === 'conversation-snapshot') return;
     if (type === 'turn-result') {
       await ipcRenderer.invoke('nexo:turn-result', payload).catch((error) => console.warn('[nexo] resultado no notificado:', error.message));
       return;
@@ -176,7 +186,10 @@ ipcRenderer.on('nexo:action', (_event, action) => {
   window.postMessage({ __nexo: 'action', ...action }, '*');
 });
 
+ipcRenderer.on('nexo:conversation-read', () => conversationReader?.read());
+
 ipcRenderer.on('nexo:settings', (_event, payload) => {
+  conversationReader?.updateSettings(payload);
   window.postMessage({ __nexo: 'action', type: 'settings', payload }, '*');
 });
 

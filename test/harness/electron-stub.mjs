@@ -15,6 +15,7 @@ import { join } from 'node:path';
 /** Registro de todo lo que el código de producción hace contra Electron. */
 export const journal = {
   windows: [],
+  contents: [],
   ipcHandlers: new Map(),
   ipcListeners: new Map(),
   schemes: [],
@@ -104,6 +105,7 @@ export class FakeWebContents extends EventEmitter {
   constructor(type = 'window', url = 'https://claude.ai/') {
     super();
     this.id = (nextId += 1);
+    journal.contents.push(this);
     this.debugger = new FakeDebugger(this);
     this.type = type;
     this.url = url;
@@ -376,3 +378,5 @@ export default {
   clipboard,
   dialog,
 };
+
+export const webContents = { fromId: (id) => journal.contents.find((contents) => contents.id === id && !contents.isDestroyed()) };

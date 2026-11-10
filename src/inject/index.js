@@ -1,4 +1,4 @@
-import { isChatGptStreaming, diagnoseChatGptReader } from '../core/chatgptAdapter.js';
+import { diagnoseChatGptReader } from '../core/chatgptAdapter.js';
 /**
  * Capa de inyección (mundo principal de la página).
  *
@@ -22,7 +22,6 @@ import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isChatRequest, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
 import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
-import { watchChatGptConversation } from '../core/chatgptConversation.js';
 import { estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
@@ -1082,17 +1081,7 @@ if (site.id === 'chatgpt') {
   }
 }
 
-// Lectura de la conversación ya cargada, independiente de los transportes.
-if (site.id === 'chatgpt') {
-  watchChatGptConversation({ document, window,
-    isEnabled: () => state.settings.memory?.enabled !== false,
-    isStreaming: () => isChatGptStreaming(document),
-    publishLive: (payload) => bridge.event('conversation-repetition', payload),
-    publish: (payload) => payload.error
-      ? bridge.event('error', { stage: 'conversation-memory', message: payload.error })
-      : bridge.event('conversation-snapshot', payload),
-  });
-}
+// El único lector de conversación vive en el preload aislado (no en la web).
 
 // Se expone un objeto de depuración para la consola del navegador.
 window.__nexo = {

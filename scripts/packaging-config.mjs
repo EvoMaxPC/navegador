@@ -90,6 +90,7 @@ export const requiredAsarEntries = [
   'src/nav/shortcuts.js',
   'src/core/settings.js',
   'build/inject.js',
+  'build/chatgpt-reader.cjs',
   // La sala de pruebas de mediación se abre desde la barra de la shell.
   'demo/index.html',
   'demo/app.js',
