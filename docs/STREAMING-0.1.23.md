@@ -62,3 +62,40 @@ Se añadieron dos regresiones sin cambiar código de producción:
 Ambos casos fallaron al quitar temporalmente la condición de activación confirmada y pasan con el código publicado, que se restauró sin cambios. Suite ampliada: **622 pruebas, 621 aprobadas, una omitida, cero fallos**; el archivo de transporte tiene ahora 19 casos. Los resultados 620/619 anteriores corresponden a la publicación original de 0.1.23.
 
 Por eso, un contador en cero aún no excluye esta parte del transporte: la activación puede fallar o exceder el plazo y el cuerpo de fallback tampoco estar disponible. Se necesita el diagnóstico de esa captura concreta, no inferir la causa únicamente del contador.
+
+## Prueba de solapamiento con Chromium real (servidor local)
+
+El solapamiento entre `bufferedData` y `dataReceived.data` no se había demostrado como defecto. No se añadió eliminación por prefijos/sufijos similares: podría borrar repeticiones legítimas de la respuesta.
+
+Se agregó `dev/probe-streaming.cjs`, una prueba opt-in de transporte real:
+
+1. Un servidor HTTP local entrega un cuerpo SSE sintético conocido, por fragmentos, con tildes, emoji y una repetición legítima.
+2. Se retrasa la activación hasta observar al menos dos eventos reales sin `data`, forzando un `bufferedData` no vacío.
+3. Se permite tráfico mientras Chromium procesa el comando y se retrasa 60 ms la devolución de su resultado al observador. Así hay eventos con datos antes de que el observador reciba la resolución de la promesa.
+4. Se verifica **byte por byte el cuerpo bruto**, antes de pasar por el parser. Un parser de snapshots acumulados podría ocultar repeticiones del transporte; por eso no basta con comparar el texto final.
+5. También se compara el texto entregado por el observador de producción contra el esperado y se exige una sola captura, sin recurrir a `getResponseBody`.
+
+Resultado en Chromium **153.0.8010.0**: **10/10 casos** (cinco sin compresión y cinco con gzip), bytes y texto exactos, sin huecos ni solapamiento observados. El cuerpo esperado tiene 241 bytes; las capturas tuvieron 128 o 130 bytes de cabecera almacenada y el resto llegó por eventos con datos. Es una observación de esos escenarios, no una prueba universal de todas las versiones o condiciones.
+
+El observador es el de producción, pero el hostname de los eventos se cambia explícitamente de localhost a `chatgpt.com` sólo para activar su clasificación. Los requestId, eventos, respuestas del comando y bytes provienen de Chromium real. **No se contacta ChatGPT ni se ejecuta Electron.** La persistencia y la sesión real del usuario siguen pendientes.
+
+### Repetir la prueba
+
+Con Node y un Chromium instalado, instalar sólo `playwright-core` en un directorio externo al repositorio y ejecutar:
+
+```sh
+npm install --prefix /ruta/de/herramientas --no-audit --no-fund playwright-core
+NODE_PATH=/ruta/de/herramientas/node_modules \
+CHROMIUM_EXECUTABLE=/ruta/al/ejecutable/chromium \
+node dev/probe-streaming.cjs
+```
+
+En el sandbox se usó `@sparticuz/chromium` instalado aisladamente, con sus bibliotecas compartidas disponibles mediante `LD_LIBRARY_PATH`; el script también lo admite si no se indica ejecutable. Estas herramientas no se añadieron al package.json ni al lockfile del navegador. El probe usa `--no-sandbox` únicamente para este Chromium de prueba local; no cambia opciones de seguridad de Nexo. No se ejecuta en `npm run verify` ni se empaqueta: es una comprobación adicional opt-in.
+
+Se agregó además una regresión determinista para eventos `dataReceived` sin `data` antes de la activación. El archivo de transporte contiene ahora **20 casos**. Suite completa tras esta revisión: **623 pruebas, 622 aprobadas, una omitida, cero fallos**.
+
+### Qué no demuestra una comparación de tamaños
+
+Los bytes base64 decodificados del transporte contienen SSE/JSON, no sólo el texto del asistente. El texto extraído, su representación Markdown y el texto visible del DOM pueden tener longitudes diferentes. Además, `encodedDataLength` mide otra etapa del transporte (con compresión y overhead), y bytes UTF-8 no son caracteres JavaScript/UTF-16. En la prueba, el cuerpo de 241 bytes dio `encodedDataLength` de 458 sin compresión y 514 con gzip/flush; no son longitudes comparables directamente.
+
+Por tanto, comparar «caracteres leídos» del panel con el DOM es una señal orientativa, no una validación de integridad ni de ausencia de solapamiento. Tampoco se añadió un aviso automático basado en igualar esos tamaños. Para ChatGPT real se necesita correlacionar la captura concreta, el texto que extrajo el parser y su recibo de memoria, manteniendo fuera del diagnóstico persistido el contenido privado de la conversación.

@@ -171,3 +171,17 @@ test('si vence la activación y también falla getResponseBody, no inventa una r
   assert.equal(h.captures.length, 0);
   assert.ok(h.diagnostics.some((entry) => entry.code === 'response-sin-cuerpo'));
 });
+
+test('dataReceived sin data antes de activar no vuelve a sumar bytes ya presentes en bufferedData', async () => {
+  let activate;
+  const h = harness({ command: (method, params, original) => method === 'Network.streamResourceContent'
+    ? new Promise((resolve) => { activate = resolve; }) : original(method, params) });
+  const bytes = Buffer.from(sse()); const cut = 60;
+  await h.begin();
+  await h.event('dataReceived', { requestId: 'stream', dataLength: cut, encodedDataLength: cut });
+  await h.data(bytes.subarray(cut));
+  const finished = h.finish();
+  activate({ bufferedData: b64(bytes.subarray(0, cut)) }); await finished;
+  assert.equal(h.captures.length, 1); assert.equal(h.captures[0].text, text);
+  assert.equal(h.view.debugger.commands.some((command) => command.method === 'Network.getResponseBody'), false);
+});
