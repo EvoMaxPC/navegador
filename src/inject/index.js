@@ -479,6 +479,51 @@ const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
 const MAX_CAPTURE_CHARS = 200_000;
 const MAX_DPU_RESPONSE_BYTES = 12_000_000;
 
+/*
+ * Espejo temporal de diagnóstico: muestra en la propia pestaña el texto que
+ * Nexo consigue extraer de la respuesta de ChatGPT. No participa del DOM del
+ * sitio: usa Shadow DOM cerrado para no contaminar la lectura de conversación.
+ */
+let gptCaptureMirror = null;
+
+function beginGptCaptureMirror(messageId = '') {
+  try {
+    gptCaptureMirror?.host?.remove?.();
+    const host = document.createElement('div');
+    host.id = '__nexo-gpt-capture-mirror';
+    host.setAttribute('aria-hidden', 'true');
+    host.style.cssText = 'position:fixed;right:14px;bottom:14px;width:min(390px,calc(100vw - 28px));z-index:2147483647;pointer-events:none;';
+    const shadow = host.attachShadow({ mode: 'closed' });
+    const panel = document.createElement('section');
+    panel.style.cssText = 'background:#101820;color:#e8f1f5;border:1px solid #36a3a0;border-radius:9px;box-shadow:0 8px 28px #0008;padding:10px 12px;font:12px/1.45 system-ui,sans-serif;max-height:270px;display:flex;flex-direction:column;gap:7px;';
+    const title = document.createElement('strong');
+    title.textContent = 'NEXO · ESPEJO DE CAPTURA GPT';
+    title.style.cssText = 'font-size:11px;letter-spacing:.04em;color:#71d6c9;';
+    const output = document.createElement('pre');
+    output.textContent = 'Esperando texto de GPT…';
+    output.style.cssText = 'margin:0;min-height:28px;max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.45 ui-monospace,monospace;color:#f4f7f9;';
+    panel.append(title, output);
+    shadow.append(panel);
+    (document.documentElement || document.body).append(host);
+    gptCaptureMirror = { host, output, messageId: String(messageId || ''), text: '' };
+  } catch {
+    gptCaptureMirror = null;
+  }
+}
+
+function mirrorGptCapture(value, { messageId = '', cumulative = false } = {}) {
+  const text = String(value || '');
+  if (!text) return;
+  const id = String(messageId || '');
+  if (!gptCaptureMirror || (id && gptCaptureMirror.messageId && id !== gptCaptureMirror.messageId)) {
+    beginGptCaptureMirror(id);
+  }
+  if (!gptCaptureMirror) return;
+  if (id && !gptCaptureMirror.messageId) gptCaptureMirror.messageId = id;
+  gptCaptureMirror.text = cumulative ? text : gptCaptureMirror.text + text;
+  gptCaptureMirror.output.textContent = gptCaptureMirror.text;
+}
+
 /**
  * ChatGPT anónimo aplica la respuesta como HTML DPU al documento. Se lee una
  * copia del stream (sin alterar el que consume el sitio) y, al llegar EOF, se
@@ -491,6 +536,7 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
   let finished = false;
   const prompt = capture.promptText || '';
   const { promptText: _promptText, ...metadata } = capture;
+  beginGptCaptureMirror(metadata.messageId);
 
   const readVisible = () => {
     if (generation && state.response !== generation) return '';
@@ -511,6 +557,7 @@ async function captureChatGptDpuResponse(response, capture = {}, generation = nu
     const text = String(candidate || '');
     if (!text || text === lastText || finished) return;
     lastText = text;
+    mirrorGptCapture(text, { messageId: metadata.messageId, cumulative: true });
     bridge.event('stream-progress', {
       ...metadata,
       site: 'chatgpt',
@@ -626,6 +673,7 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
     /application[/]json/i.test(mime);
   if (!response || !response.body || (!looksLikeStream(response.headers) && !jsonUpdates)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
+  if (site.id === 'chatgpt') beginGptCaptureMirror(capture.messageId);
 
   const filter = createStreamFilter({
       format: site.id === 'chatgpt' && /ndjson|jsonl|application[/]json/i.test(mime) ? 'ndjson'
@@ -636,6 +684,7 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
       language: state.language,
       host: CONFIG.host,
       onText: (info) => {
+        if (site.id === 'chatgpt') mirrorGptCapture(info.text, { messageId: capture.messageId });
         bridge.event('stream-progress', {
           ...capture,
           site: site.id,
