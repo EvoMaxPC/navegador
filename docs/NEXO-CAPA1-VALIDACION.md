@@ -358,3 +358,25 @@ capacidades sin poda, compatibilidad, corrupción, disco/reintento, reinicio,
 tombstones, aislamiento, EVO apagada, versiones observadas, autoría y permisos.
 Fixtures DOM/Electron stub no prueban Electron/Windows real ni una cuenta real.
 Restan el bloque 7 y los gates manuales: no se declaran completados los 72 requisitos.
+
+
+## Comprensión por etapas — séptimo bloque y revisión final
+
+La [etapa 7 de inspector y revisión](NEXO-COMPRENSION-ETAPAS.md#etapa-7-implementada--inspector-explicación-y-revisión-humana)
+consolida el índice paginado/filtrado, procedencia, certeza, estado y explicaciones
+de alcance. Se puede confirmar/corregir/rechazar la última solicitud inferida,
+anotar una corrección de intención y corregir datos simples conservando originales.
+No ejecuta mensajes ni revierte otras categorías por una anotación de intención.
+
+Resultados finales: **242/242 focalizadas**, suite completa **983 totales,
+982 aprobadas, 0 fallidas y 1 omitida** (empaquetado Windows real). Build correcto.
+32 pruebas nuevas: 26 core/servicio/IPC aislado —una de ellas recorre los siete
+bloques—, 4 de panel y 2 main/IPC con Electron stub.
+
+La [revisión final transversal](NEXO-COMPRENSION-REVISION-FINAL.md) detalla las
+correcciones de callbacks obsoletos/navegación durante peticiones, conservación de
+solicitudes confirmadas y revalidación de identidad/propiedad para recuperación y
+borrado. Se conservan EVO opcional, roles, permisos, aislamiento y cola/ACK.
+Cierra el desarrollo en siete etapas dentro del alcance local probado; **no es
+validación en Electron/Windows/cuenta real ni certificación de los 72 requisitos
+como comprensión semántica universal**. No hay ejecución autónoma.

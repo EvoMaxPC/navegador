@@ -625,3 +625,78 @@ test('bloque 6: assistant observado no produce progreso verificado y captura exi
   assert.equal(r.state.work_records.at(-1).verified, false);
   assert.equal(r.effective.work_tracking.pending_proposals.length, 1);
 });
+
+test('bloque 7: inspector read-only filtrado y revisión humana mantienen fuente inferencia y restricciones', async () => {
+  const g = attach('https://chatgpt.com/c/review-ipc'),
+    handler = journal.ipcHandlers.get('nexo:understanding:edit');
+  const edit = async (operation) =>
+    handler(shellEvent, { webContentsId: g.id, operation });
+  prepare(g, 'Mi objetivo: control humano');
+  prepare(g, 'No ejecutes código');
+  prepare(g, 'Revisar IPC');
+  let snap = await read(g);
+  const prior = snap.state.current_task,
+    op = {
+      type: 'request-review',
+      revision: snap.state.revision,
+      contextId: snap.state.context_id,
+      id: prior.id,
+      action: 'confirm',
+      reason: 'Confirmo interpretación',
+      goal_id: snap.state.user_goal.id,
+    };
+  assert.equal(
+    (
+      await handler(
+        { sender: g, senderFrame: g.mainFrame },
+        { webContentsId: g.id, operation: op },
+      )
+    ).code,
+    'unauthorized',
+  );
+  let r = await edit(op);
+  assert.equal(r.ok, true);
+  assert.equal(r.state.current_task.certainty, 'confirmed');
+  assert.equal(r.state.current_task.origin.channel, 'prepare');
+  assert.equal(r.state.tasks.length, 0);
+  assert.equal(r.state.explicit_constraints.length, 1);
+  const before = r.state.revision;
+  const filtered = await journal.ipcHandlers.get('nexo:understanding:read')(
+    shellEvent,
+    {
+      webContentsId: g.id,
+      contextId: r.state.context_id,
+      revision: before,
+      inspector: { category: 'reviews' },
+    },
+  );
+  assert.equal(filtered.ok, true);
+  assert.equal(filtered.inspector.matched, 1);
+  assert.equal(filtered.state.revision, before);
+  assert.equal((await edit(op)).code, 'conflict');
+});
+test('bloque 7: anotación de intención no convierte aprobación genérica en autorización ni objetivo', async () => {
+  const g = attach('https://chatgpt.com/c/review-annotation-ipc');
+  prepare(g, 'Sí');
+  let snap = await read(g);
+  const r = await journal.ipcHandlers.get('nexo:understanding:edit')(
+    shellEvent,
+    {
+      webContentsId: g.id,
+      operation: {
+        type: 'interaction-review',
+        revision: snap.state.revision,
+        contextId: snap.state.context_id,
+        intent: 'approval',
+        relation: 'current-work',
+        reason: 'Anoto mi intención',
+      },
+    },
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.state.last_interaction.certainty, 'uncertain');
+  assert.equal(r.state.interaction_review.verified, false);
+  assert.equal(r.state.user_goal, null);
+  assert.equal(r.state.confirmed_decisions.length, 0);
+  assert.deepEqual(r.state.pending_questions, snap.state.pending_questions);
+});

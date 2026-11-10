@@ -5,7 +5,7 @@ con IA, no acumular funciones. Sin cambiar silenciosamente el objetivo ni invent
 información para corregir respuestas.
 [Prioridades y criterios de revisión](docs/NEXO-CRITERIOS-RECTORES.md).
 
-**Comprensión por etapas:** [plan de siete bloques y alcance comprobado de las etapas 1–6](docs/NEXO-COMPRENSION-ETAPAS.md).
+**Comprensión por etapas:** [plan de siete bloques y alcance comprobado de las siete etapas](docs/NEXO-COMPRENSION-ETAPAS.md).
 La base observacional incorpora roles, mensajes nuevos en orden, respuestas no
 verificadas del asistente y renovación automática del panel. El bloque 2 añade
 objetivos independientes, inferencias confirmables y estados activo/completado/
@@ -19,7 +19,9 @@ alias actuales, inspección y antecedentes versionados, y selección explícita 
 continuar sin importar el historial visible. El bloque 6 añade registros de
 avances/resultados, problemas y propuestas, evidencia aportada y captura explícita
 de extractos del asistente, siempre sin verificación factual. No completa aún los
-72 requisitos ni añade autonomía.
+72 requisitos ni añade autonomía. El bloque 7 consolida el inspector paginado,
+explicaciones de alcance y correcciones humanas con historia. Desarrollo por
+etapas cerrado con [revisión final y límites pendientes](docs/NEXO-COMPRENSION-REVISION-FINAL.md).
 
 **0.1.33 · Capa 1 — User Understanding Engine:** objetivo literal persistente,
 restricciones separadas de preferencias, tarea/subobjetivos, procedencia, vigencia,

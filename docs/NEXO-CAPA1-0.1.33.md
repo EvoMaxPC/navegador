@@ -11,6 +11,8 @@
 > contexto, sin importar reglas ni convertir antecedentes en hechos confirmados.
 > La etapa 6 añade seguimiento de resultados/problemas, propuestas y evidencia
 > aportada sin verificación factual ni autoridad para ejecutar.
+> La etapa 7 consolida inspector, explicaciones deterministas y revisión humana
+> con historia. [Cierre y revisión transversal](NEXO-COMPRENSION-REVISION-FINAL.md).
 > Las descripciones de iteraciones anteriores
 > de este documento deben leerse como evidencia histórica, no como límite actual.
 

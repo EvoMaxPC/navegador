@@ -1,3 +1,4 @@
+import { createInspectorSection } from './understandingInspector.js';
 import { createProgressSection } from './understandingProgress.js';
 import { createContextSection } from './understandingContexts.js';
 import { createTaskSection } from './understandingTasks.js';
@@ -20,7 +21,7 @@ const create = (tag, text, cls) => {
   if (cls) n.className = cls;
   return n;
 };
-function button(label, fn) {
+function rawButton(label, fn) {
   const b = create('button', label, 'ghost');
   b.type = 'button';
   b.addEventListener('click', fn);
@@ -30,8 +31,25 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
   let snapshot = null,
     targetId = null,
     busy = false,
-    ticket = 0;
+    ticket = 0,
+    navigationEpoch = 0;
   const drafts = new Map();
+  // Un callback de una vista descartada nunca hereda la identidad/revisión de la nueva.
+  function button(label, fn) {
+    const view = snapshot,
+      epoch = navigationEpoch;
+    return rawButton(label, () => {
+      if (busy) return;
+      if (
+        epoch !== navigationEpoch ||
+        view !== snapshot ||
+        target() !== targetId
+      )
+        return refresh();
+      return fn();
+    });
+  }
+
   const status = create(
     'p',
     'Abrí una conversación para consultar su comprensión.',
@@ -77,16 +95,19 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
     if (busy) return;
     const id = target();
     if (!id) {
+      snapshot = null;
+      body.replaceChildren();
       status.textContent = 'Esperá a que haya una pestaña disponible.';
       return;
     }
-    const run = ++ticket;
+    const run = ++ticket,
+      epoch = navigationEpoch;
     targetId = id;
     lock(true);
     const r = await request('read');
     lock(false);
     if (run !== ticket) return;
-    if (id !== target()) return refresh();
+    if (epoch !== navigationEpoch || id !== target()) return refresh();
     if (!r?.ok) {
       snapshot = null;
       body.replaceChildren(button('Reintentar', refresh));
@@ -128,7 +149,8 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
   async function mutate(operation, draftKey) {
     if (busy || !snapshot) return;
     if (target() !== targetId) return refresh();
-    const id = targetId;
+    const id = targetId,
+      epoch = navigationEpoch;
     lock(true);
     status.textContent = 'Guardando comprensión…';
     const r = await request('edit', {
@@ -139,7 +161,7 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
       },
     });
     lock(false);
-    if (id !== target()) return refresh();
+    if (epoch !== navigationEpoch || id !== target()) return refresh();
     if (!r?.ok) {
       status.textContent =
         r?.error || 'No se guardó. Recargá antes de reintentar.';
@@ -162,11 +184,13 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
       return null;
     }
     const id = targetId,
-      contextId = snapshot.state.context_id;
+      contextId = snapshot.state.context_id,
+      epoch = navigationEpoch;
     lock(true);
     const result = await request(method, p);
     lock(false);
     if (
+      epoch !== navigationEpoch ||
       target() !== id ||
       (result?.activeContextId && result.activeContextId !== contextId)
     ) {
@@ -187,6 +211,8 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
     return result;
   }
   function form(name, title, defaultText, submitLabel, onSubmit) {
+    const view = snapshot,
+      epoch = navigationEpoch;
     const key = `${snapshot.state.context_id}:${name}`;
     const f = create('form', undefined, 'work-form');
     f.append(create('h3', title));
@@ -208,7 +234,14 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
     f.append(submit);
     f.addEventListener('submit', (e) => {
       e.preventDefault();
-      onSubmit(input.value, key);
+      if (busy) return;
+      if (
+        epoch !== navigationEpoch ||
+        view !== snapshot ||
+        target() !== targetId
+      )
+        return refresh();
+      return onSubmit(input.value, key);
     });
     return f;
   }
@@ -492,6 +525,17 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         isCurrent: () =>
           snapshot?.state.context_id === s.context_id &&
           snapshot?.state.revision === s.revision,
+      }),
+    );
+    body.append(
+      createInspectorSection({
+        snapshot,
+        create,
+        button,
+        form,
+        mutate,
+        drafts,
+        contextRequest,
       }),
     );
     const policies = create('details');
@@ -792,13 +836,16 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         async (query, key) => {
           if (busy) return;
           if (targetId !== target()) return refresh();
+          const epoch = navigationEpoch;
           lock(true);
           const r = await request('recall', {
             query,
             revision: snapshot.state.revision,
+            contextId: snapshot.state.context_id,
           });
           lock(false);
-          if (targetId !== target()) return refresh();
+          if (epoch !== navigationEpoch || targetId !== target())
+            return refresh();
           if (r?.ok) {
             drafts.delete(key);
             snapshot = r;
@@ -813,10 +860,15 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
       button('Eliminar este contexto…', async () => {
         if (busy) return;
         if (targetId !== target()) return refresh();
+        const epoch = navigationEpoch;
         lock(true);
-        const r = await request('clear', { revision: snapshot.state.revision });
+        const r = await request('clear', {
+          revision: snapshot.state.revision,
+          contextId: snapshot.state.context_id,
+        });
         lock(false);
-        if (targetId !== target()) return refresh();
+        if (epoch !== navigationEpoch || targetId !== target())
+          return refresh();
         if (r?.ok) {
           for (const key of [...drafts.keys()])
             if (key.startsWith(`${s.context_id}:`)) drafts.delete(key);
@@ -849,6 +901,7 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
   return {
     refresh,
     changed() {
+      navigationEpoch++;
       if (root.classList.contains('active')) refresh();
     },
   };

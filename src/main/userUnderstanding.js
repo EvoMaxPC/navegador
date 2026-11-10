@@ -1,3 +1,4 @@
+import { buildUnderstandingInspector } from '../core/understandingInspector.js';
 import { contextItems, contextPreview } from '../core/userProjects.js';
 /** UUE main: usa la persistencia atómica existente de EVO, sin cambiar sus archivos. */
 import {
@@ -17,6 +18,7 @@ import {
   UnderstandingError,
   userText,
   FIELDS,
+  SYSTEM_POLICIES,
 } from '../core/userUnderstanding.js';
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 export class UserUnderstandingService {
@@ -289,7 +291,7 @@ export class UserUnderstandingService {
     });
     return result;
   }
-  snapshot(contents) {
+  snapshot(contents, inspectorQuery) {
     const id = this.contextFor(contents),
       physical = this.documentIdentity(contents),
       state = structuredClone(this.row(id, this.document(contents)).state);
@@ -337,9 +339,23 @@ export class UserUnderstandingService {
       available:
         contextReferences.find((v) => v.id === r.id)?.available === true,
     }));
+    const conversation =
+      this.liveConversations.get(physical.id) ||
+      this.row(physical.id).conversation ||
+      emptyObservation();
+    let inspector;
+    try {
+      inspector = buildUnderstandingInspector(state, inspectorQuery, {
+        conversation,
+        systemPolicies: SYSTEM_POLICIES,
+      });
+    } catch {
+      throw new UnderstandingError('Consulta del inspector inválida.');
+    }
     return {
       state,
       effective,
+      inspector,
       report: this.reports.get(id) || null,
       observationError: this.reports.get(`error-${contents.id}`)?.error || null,
       memoryReferences,
@@ -356,11 +372,7 @@ export class UserUnderstandingService {
         ),
       },
       observationEnabled: true,
-      conversation: structuredClone(
-        this.liveConversations.get(physical.id) ||
-          this.row(physical.id).conversation ||
-          emptyObservation(),
-      ),
+      conversation: structuredClone(conversation),
       erased: Object.hasOwn(this.data.deleted_revisions, id),
     };
   }
@@ -996,7 +1008,23 @@ export function installUnderstandingIPC({
       }
     });
   }
-  handle('read', (_e, _p, c) => ({ ok: true, ...service.snapshot(c) }));
+  handle('read', (_e, p, c) => {
+    const contextId = service.contextFor(c);
+    if (
+      (p.contextId !== undefined && p.contextId !== contextId) ||
+      (p.revision !== undefined &&
+        p.revision !== service.row(contextId).state.revision)
+    )
+      throw new UnderstandingError(
+        'El contexto cambió; recargá el inspector.',
+        'conflict',
+      );
+    return {
+      ok: true,
+      activeContextId: contextId,
+      ...service.snapshot(c, p.inspector),
+    };
+  });
   handle('edit', (_e, p, c) => {
     if (
       ![
@@ -1007,6 +1035,9 @@ export function installUnderstandingIPC({
         'context-reference-resolve',
         'context-reference-refresh',
         'goal',
+        'request-review',
+        'interaction-review',
+        'entry-correct',
         'work-add',
         'work-capture',
         'work-transition',
@@ -1033,11 +1064,15 @@ export function installUnderstandingIPC({
     const { report } = service.edit(c, p.operation);
     return { ok: true, ...service.snapshot(c), report };
   });
-  handle('recall', (_e, p, c) => ({
-    ok: true,
-    ...service.recall(c, p.query, p.revision),
-    ...service.snapshot(c),
-  }));
+  handle('recall', (_e, p, c) => {
+    if (p.contextId !== undefined && p.contextId !== service.contextFor(c))
+      throw new UnderstandingError('El contexto cambió; recargá.', 'conflict');
+    return {
+      ok: true,
+      ...service.recall(c, p.query, p.revision),
+      ...service.snapshot(c),
+    };
+  });
   handle('contexts', () => {});
   handle('bind', (_e, p, c) => {
     if (
@@ -1060,6 +1095,8 @@ export function installUnderstandingIPC({
   });
   handle('clear', async (e, p, c) => {
     const id = service.contextFor(c);
+    if (p.contextId !== undefined && p.contextId !== id)
+      throw new UnderstandingError('El contexto cambió; recargá.', 'conflict');
     const { response } = await dialog.showMessageBox(
       BrowserWindow.fromWebContents(e.sender),
       {
@@ -1073,8 +1110,16 @@ export function installUnderstandingIPC({
       },
     );
     if (response !== 1) return { ok: false, cancelled: true };
-    if (!trusted(e) || service.contextFor(c) !== id)
-      throw new UnderstandingError('La ventana o la conversación cambió');
+    let owned = false;
+    try {
+      owned = trusted(e) && resolveGuest(e.sender, p.webContentsId) === c;
+    } catch {
+      /* guest cerrado/desvinculado durante el diálogo */
+    }
+    if (!owned)
+      throw new UnderstandingError('Pestaña ajena o cerrada', 'unauthorized');
+    if (service.contextFor(c) !== id)
+      throw new UnderstandingError('La conversación cambió', 'conflict');
     service.clear(c, p.revision);
     return { ok: true, ...service.snapshot(c) };
   });

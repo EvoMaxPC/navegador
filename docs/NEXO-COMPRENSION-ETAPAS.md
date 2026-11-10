@@ -4,8 +4,10 @@
 
 Los 72 requisitos describen un objetivo amplio, no capacidades ya demostradas.
 Se avanza por etapas sobre el UUE existente, sin reconstruir NEXO ni introducir
-un agente ejecutor. La entrega actual incorpora **las etapas 1–6**, sobre
-0.1.33. La última sigue planificada; no se declara el panel completo.
+un agente ejecutor. La entrega actual incorpora **las siete etapas**, sobre
+0.1.33, con alcance local acotado. El desarrollo por etapas se cierra; no se
+proclaman los 72 requisitos satisfechos sin límites ni los gates manuales aprobados.
+[Cierre y revisión transversal](NEXO-COMPRENSION-REVISION-FINAL.md).
 
 No hay modelo semántico nuevo, envíos externos, nuevos permisos ni dependencia
 nueva. Las reglas actuales siguen siendo locales y conservadoras. Comprender no
@@ -14,7 +16,7 @@ significa ejecutar, aprobar una propuesta ni verificar que ChatGPT hizo algo.
 ## Siete bloques y trazabilidad completa
 
 Cada número aparece una vez como responsabilidad principal; hay dependencias
-entre bloques. Las funciones parciales existentes de UUE se reutilizarán.
+entre bloques. Las funciones previas de UUE se reutilizan.
 
 | Etapa | Responsabilidad | Requisitos | Estado de esta entrega |
 |---|---|---|---|
@@ -24,7 +26,7 @@ entre bloques. Las funciones parciales existentes de UUE se reutilizarán.
 | 4 | Tareas, subtareas, dependencias, prioridades y siguiente paso | 19–24, 34, 36 | Base estructurada implementada; gramática acotada, sin plan ni ejecución automáticos |
 | 5 | Proyectos, referencias, selección de contexto y antecedentes | 25–30, 47, 55–57, 59, 71 | Base local ampliada: etiquetas, referencias e inspección/selección explícitas; límites debajo |
 | 6 | Progreso, errores, bloqueos, propuestas y evidencia de resultados | 31–33, 35, 45–46, 69–70 | Base explícita de registros, propuestas y evidencia aportada; sin verificación factual |
-| 7 | Inspector completo, explicación, corrección e inferencias confirmables | 42, 48, 52, 60–66 | Controles parciales previos; consolidar tras las bases |
+| 7 | Inspector completo, explicación, corrección e inferencias confirmables | 42, 48, 52, 60–66 | Inspector paginado y revisión explícita con historia; explicación determinista, no semántica universal |
 
 Cada etapa deberá cerrar con casos positivos/negativos, conservación de reglas,
 independencia de EVO, pruebas de regresión y límites explícitos. No usar el número
@@ -1041,7 +1043,199 @@ retorno/reinicio → borrado. Revisar BLACK & ELECTRIC BLUE, foco, borradores y 
 Nuevos: `src/core/userProgress.js`, `src/ui/shell/understandingProgress.js`,
 `test/understanding-progress.test.js`, `test/understanding-progress-panel.test.js`.
 Modificados: core/servicio UUE, selección de entradas inspeccionables, panel, manifest
-de empaquetado, tests main, README y documentación. Se cierra con commit y push
-normal sobre la rama de trabajo. Sigue el **bloque 7: inspector, explicación,
-corrección e inferencias confirmables** y los gates manuales pendientes. **No se
-proclaman completados los 72 requisitos ni se habilita ejecución autónoma**.
+de empaquetado, tests main, README y documentación. La etapa 6 se publicó como
+`804404f`. Su siguiente bloque se desarrolla debajo. Los gates manuales siguen
+pendientes; no se habilita ejecución autónoma.
+
+
+## Etapa 7 implementada — inspector, explicación y revisión humana
+
+### Qué consolida
+
+Los requisitos 42, 48, 52 y 60–66 tienen ahora un inspector transversal y controles
+explícitos de revisión sobre el UUE existente. No se añade un motor semántico, un
+agente, otra memoria ni un historial completo de conversación. Los controles
+previos de objetivos, reglas, tareas, proyectos y evidencia siguen siendo sus
+editores especializados, no se eluden desde un editor JSON universal.
+
+El inspector permite filtrar por **categoría, certeza y estado**, y paginar de
+20 en 20 sin mutar el contexto. Muestra identidad, texto/extracto de hasta 1.000
+caracteres con recorte y longitud declarados, prioridad cuando existe, alcance,
+estado, certeza, procedencia, fechas y orientación sobre cómo corregir cada tipo.
+El original completo sigue en su categoría/editor; el índice no lo reemplaza.
+
+Incluye políticas fijas, objetivos/inferencias, última solicitud e intención,
+restricciones/instrucciones/decisiones/preferencias, subobjetivos/contexto/progreso
+simples, tareas, etiqueta de proyecto, antecedentes, registros/aportes de evidencia,
+aclaraciones, historia/eventos de los bloques previos, revisiones nuevas,
+foco/próximo paso, incertidumbre y metadatos observacionales. Los eventos son
+históricos, no reglas reactivadas. Las respuestas observadas sólo aportan rol/ID,
+estado y tamaño al índice: no se duplica su preview o una transcripción nueva.
+Una captura manual de la etapa 6 sí muestra su extracto con fuente `assistant`
+y el usuario registrador por separado.
+
+Las explicaciones son **deterministas según categoría y campos guardados**:
+por qué una preferencia no es restricción, una inferencia no es objetivo confirmado,
+un antecedente no es instrucción, una tarea completada es declaración y no prueba,
+etc. No se fabrica el razonamiento que produjo una clasificación histórica ni se
+expone una supuesta traza semántica no registrada. No se asignan porcentajes de
+confianza, certeza factual ni métricas de comprensión. Inspeccionar no altera
+reglas, objetivos, preguntas, mensajes vistos o contadores.
+
+### Revisión de última solicitud
+
+La `current_task` previa representa la última solicitud interpretada, no una tarea
+del grafo ni un permiso. Su relación inicial con el objetivo puede ser inferida.
+En «Revisar última solicitud interpretada» el usuario puede:
+
+- **Confirmar la interpretación** pendiente con una relación explícita a un
+  objetivo activo por ID o a ninguno. No se elige automáticamente el objetivo,
+  foco de tarea o próximo paso. Se conserva la fuente original y se añade
+  confirmación humana con `verified: false`.
+- **Corregir texto y relación:** texto libre literal, original archivado como
+  sustituido y versión nueva confirmada con origen del usuario corrector.
+- **Rechazar la interpretación:** original archivado como rechazado, sin adivinar
+  otra solicitud ni cancelar el objetivo, tareas o restricciones.
+
+Se exige ID vigente, contexto/revisión, acción válida y motivo de hasta 10.000
+caracteres. «Sí» genérico no confirma ni crea tareas. No se puede vincular a un
+objetivo cerrado/ausente ni volver a confirmar una solicitud ya confirmada.
+Confirmar no la convierte en objetivo principal, tarea ejecutora o instrucción.
+La incertidumbre de relación de esa solicitud deja de presentarse como pendiente;
+las dudas/preguntas ajenas permanecen.
+
+**Conservación revisada:** una solicitud confirmada ya no se pierde si llega otra
+solicitud interpretada, cambia el objetivo principal o se cierra. Se archiva antes
+de sustituirla/limpiarla. Historia llena rechaza la transacción, sin poda silenciosa.
+Las inferencias transitorias no revisadas conservan el comportamiento previo; no
+se genera una copia histórica de cada mensaje de conversación.
+
+### Anotación de intención, sin reejecutar ni deshacer el pasado
+
+Se conserva la clasificación original en `last_interaction` y se permite anotar
+una intención/relación humana mediante selectores acotados y motivo. La anotación
+vive en `interaction_review`, con fuente/fecha originales y autoría de la revisión.
+El panel y la vista efectiva separan original y revisión; no se escribe encima de
+la interpretación ni se inventa que la original fue una confirmación del usuario.
+
+Una anotación «era una pregunta» **no borra una restricción que el mensaje ya había
+registrado**; su retiro/corrección sigue requiriendo el editor específico. «Era una
+aprobación» no acepta propuestas, objetivos o permisos pendientes. No se reenvía,
+reinterpreta o reejecuta el mensaje. El nuevo mensaje registrado reinicia la
+anotación actual y conserva el evento de revisión con origen/motivo en historia.
+Las solicitudes independientes que no actualizan el estado siguen aisladas.
+
+Intenciones de revisión: solicitud, pregunta, aclaración, corrección, continuación,
+independiente, aprobación, rechazo o desconocida. Relaciones: trabajo actual,
+independiente, referencia sin resolver o desconocida. Son anotaciones del usuario,
+no una nueva gramática para ejecutar cambios de otras categorías.
+
+### Corrección de datos simples y editores especializados
+
+Los datos activos de `subgoals`, `relevant_context` simples y `progress` se pueden
+corregir desde la página del inspector con texto literal y motivo. La operación es
+atómica: archiva el original, crea el corregido confirmado en **la misma categoría
+y alcance**, y registra el vínculo anterior/nuevo. Rechaza IDs obsoletos, texto
+sin cambio, entradas duplicadas y categorías no permitidas. No fusiona historias.
+
+Referencias nombradas/EVO no se reemplazan desde ese control: se retiran y se
+registran otras explícitamente, para no sustituir el origen bajo el mismo alias/ID.
+Restricciones/preferencias/decisiones usan el editor con conflictos de la etapa 3;
+objetivos y tareas, sus editores previos; los registros y evidencias inmutables de
+la etapa 6 se corrigen mediante retiro y entrada nueva. El índice ofrece indicación
+del control correspondiente, no un bypass de sus reglas. Las políticas fijas no
+son editables y las capturas del asistente no se convierten en fuentes del usuario.
+
+### Persistencia y seguridad
+
+Campos nuevos opcionales al leer archivos anteriores: `review_events` e
+`interaction_review`. Se conserva `schema_version: 1`, app **0.1.33**, archivo UUE,
+EVO independiente y sus límites anteriores. Hasta 100 eventos de revisión, con
+motivo, acción, IDs anterior/nuevo, fuente original, autor de revisión, fecha y
+etiquetas de cambio —no una copia del transcript—. Capacidad llena rechaza sin
+podar. Los originales corregidos usan la historia existente, hasta 400 entradas.
+
+Se validan acciones, motivos, identidades, rol de usuario, referencias históricas,
+relación de la anotación con el mensaje original y su evento, y `verified: false`.
+El nuevo control sobre `last_interaction` admite también la certeza histórica
+`uncertain` de aprobaciones/rechazos ambiguos, manteniendo compatibilidad. Corrupción
+bloquea escritura sin sobrescribir; error de disco conserva RAM/archivo previos y
+permite reintentar. Borrar el contexto borra sus revisiones y mantiene tombstone.
+
+El índice se deriva al leer; no se guarda otro archivo ni un índice global que pueda
+quedar obsoleto. Se amplía `read` para filtros y comprobación opcional de contexto/
+revisión. Las mutaciones nuevas reutilizan `edit` con su allowlist. **Sin canal o API
+privilegiada web nueva**. La shell conserva mainFrame y guest propietario; los
+lectores siguen recibiendo datos, no autoridad. No se cambian permisos, mediación,
+envío, CDP, tokenización, contadores, cola de 500 ms, ACK ni almacenamiento EVO.
+
+### Revisión transversal y correcciones adicionales
+
+Durante el cierre se revisaron las interacciones de los siete bloques y se corrigió:
+
+1. **Callbacks de vistas descartadas:** botones/formularios no toman la identidad o
+   revisión de una nueva vista después de un refresh/cambio de contexto. Cada
+   callback queda ligado a la vista que lo creó; si fue descartada, sólo renueva.
+2. **Navegación en la misma pestaña durante una petición:** se usa una generación
+   de navegación para descartar respuestas viejas y leer la nueva. Un evento
+   `changed()` durante una lectura/edición ya no pierde esa renovación. Sin pestaña,
+   se limpia la vista anterior, no se dejan acciones sobre datos de otro trabajo.
+3. **Recuperación y borrado con identidad esperada:** el panel envía contexto además
+   de revisión; main rechaza una identidad anterior incluso si la otra URL tiene la
+   misma revisión. El borrado nativo revalida también la propiedad del guest tras
+   esperar al diálogo, además de shell, conversación y revisión.
+4. **Conservación de solicitudes confirmadas:** archivo antes de sustituir/limpiar,
+   con rechazo transaccional si la historia está llena, como se explica arriba.
+
+Los puntos anteriores son correcciones concretas comprobadas, no una afirmación de
+que no pueda existir ningún otro fallo. La revisión no equivale a una auditoría
+completa de Chromium/Electron o de todos los proveedores. Ver
+[revisión final transversal](NEXO-COMPRENSION-REVISION-FINAL.md).
+
+### Validación final ejecutada
+
+| Ejecución | Total | Aprobadas | Fallidas | Omitidas |
+|---|---:|---:|---:|---:|
+| Focalizadas: UUE, observación, main/IPC, independencia, shell y siete bloques/paneles | 242 | 242 | 0 | 0 |
+| `npm test` | 983 | 982 | 0 | 1 |
+
+Suite completa: 103.793,03331 ms. La omitida es el empaquetado Windows real que
+requiere `NEXO_ELECTRON_ZIP_DIR`. Build de inyección correcto: 53,7 kB / 19,3 kB gzip,
+11 módulos. Los registros de validación se entregan junto a las fuentes.
+
+Se añaden **32 pruebas de comportamiento**: 26 core/servicio/IPC aislado en
+`test/understanding-inspector.test.js`, 4 DOM/puente en
+`test/understanding-inspector-panel.test.js` y 2 main/IPC con Electron stub en
+`test/user-understanding-main.test.js`. Cubren índice puro, jerarquía, filtros,
+paginación/recorte, tipos de los bloques previos, fuentes, revisión de solicitudes,
+relaciones por ID, anotación sin reejecutar, corrección literal con historia,
+no duplicación/sustitución de referencias, capacidades, compatibilidad/corrupción,
+disco/reintento, reinicio, EVO apagada, borrado/tombstone, callbacks descartados,
+navegación diferida, propiedad del guest y remitentes no autorizados.
+
+Una de las pruebas recorre **los siete bloques juntos**: observación de varios
+usuarios/asistente → objetivo y restricción → preferencias/tareas → etiqueta →
+solicitud confirmada → antecedente de otro contexto sin importar reglas → captura
+de propuesta del asistente/aceptación sin permisos → resultado parcial y aporte
+no verificados → revisión de intención → reinicio → selección explícita con línea
+base → mensaje nuevo en el contexto elegido → retorno sin mezcla → borrado sin
+reimportación. No sustituye una sesión real de cuenta/proveedor.
+
+### Cierre de las siete etapas y límites pendientes
+
+Se finaliza el desarrollo por etapas dentro del alcance descrito; no se anuncia un
+octavo bloque ni se activa un job automático. Las siete bases locales están
+integradas y probadas. **Esto no certifica los 72 requisitos como comprensión
+semántica general ni declara aprobados los gates manuales.** Persisten la gramática
+acotada ES/EN, ventana observacional limitada, referencias ambiguas no resueltas,
+contradicciones no universales y ausencia de verificación factual/ejecución.
+
+Pendientes externos: Electron/Windows real, cuenta ChatGPT real, navegación/roles
+reales del proveedor, foco/scroll, accesibilidad, renderizado BLACK & ELECTRIC BLUE
+y empaquetado Windows real. Son límites declarados, no pruebas simuladas como reales.
+El checklist de cierre está en la revisión final; el ZIP es **fuente**, no un .exe
+validado. Se conserva el compromiso de commit/push normal y comprobación del remoto.
+
+Nuevos: `src/core/userReview.js`, `src/core/understandingInspector.js`,
+`src/ui/shell/understandingInspector.js`, tests de inspector/core/panel y documento
+de revisión final. Modificados: core/servicio/panel UUE, manifest, tests main y docs.

@@ -1,4 +1,10 @@
 import {
+  appendReview,
+  validateReview,
+  REVIEW_INTENTS,
+  REVIEW_RELATIONS,
+} from './userReview.js';
+import {
   applyWorkOperation,
   validateWork,
   workProjection,
@@ -99,6 +105,8 @@ export function newUnderstanding(contextId, now = Date.now()) {
     work_records: [],
     work_evidence: [],
     work_events: [],
+    review_events: [],
+    interaction_review: null,
     focused_task_id: null,
     next_step: null,
     subgoals: [],
@@ -126,6 +134,16 @@ function origin(meta) {
     authority:
       meta.channel === 'shell' ? 'user-confirmed-input' : 'observed-user-text',
   };
+}
+function review(state, values, meta, now) {
+  appendReview(state, values, {
+    now,
+    origin: origin(meta),
+    makeEntry: (text) => entry(state, 'inference', text, meta, now),
+    fail: (message, code = 'invalid') => {
+      throw new UnderstandingError(message, code);
+    },
+  });
 }
 function mutateWork(state, operation, meta, now) {
   applyWorkOperation(state, operation, {
@@ -269,6 +287,10 @@ function goalEvent(state, goal, action, meta, now, from = null) {
     GOAL_LIMITS.events,
   );
 }
+function preserveReviewedRequest(state, meta, now) {
+  if (state.current_task?.certainty === 'confirmed')
+    archive(state, state.current_task, now, 'superseded', meta);
+}
 function transitionGoal(
   state,
   id,
@@ -305,7 +327,10 @@ function transitionGoal(
     at: now,
     origin: origin(meta),
   };
-  if (goal.id === state.user_goal?.id) state.current_task = null;
+  if (goal.id === state.user_goal?.id) {
+    preserveReviewedRequest(state, meta, now);
+    state.current_task = null;
+  }
   goalEvent(
     state,
     goal,
@@ -395,6 +420,7 @@ function setGoal(state, text, meta, now, certainty = 'explicit') {
   }
   state.user_goal = entry(state, 'user_goal', text, meta, now, certainty);
   state.user_goal.goal_type = 'primary';
+  preserveReviewedRequest(state, meta, now);
   state.current_task = null;
   goalEvent(state, state.user_goal, 'primary-set', meta, now);
   for (const g of state.goal_candidates || [])
@@ -921,6 +947,199 @@ export function updateUnderstanding(
     case 'context-reference-refresh':
       mutateProject(state, operation, meta, now);
       break;
+    case 'request-review': {
+      const old = state.current_task;
+      if (!old || old.id !== operation.id)
+        throw new UnderstandingError(
+          'La última solicitud cambió; recargá.',
+          'conflict',
+        );
+      if (!['confirm', 'correct', 'reject'].includes(operation.action))
+        throw new UnderstandingError('Revisión inválida');
+      if (operation.action === 'confirm' && old.certainty !== 'inferred')
+        throw new UnderstandingError(
+          'La solicitud ya no es una inferencia pendiente.',
+          'conflict',
+        );
+      const goals = [
+        state.user_goal,
+        ...(state.independent_goals || []),
+      ].filter((g) => g && g.status === 'active');
+      const goalId = operation.goal_id ?? null;
+      if (
+        operation.action !== 'reject' &&
+        goalId !== null &&
+        !goals.some((g) => g.id === goalId)
+      )
+        throw new UnderstandingError(
+          'Elegí un objetivo activo exacto o ninguno.',
+          'reference',
+        );
+      let next = null;
+      if (operation.action === 'confirm')
+        next = {
+          ...old,
+          certainty: 'confirmed',
+          related_goal_id: goalId,
+          updated_at: now,
+          resolution: {
+            kind: 'user-confirmation',
+            verified: false,
+            origin: origin(meta),
+            at: now,
+          },
+        };
+      else {
+        archive(
+          state,
+          old,
+          now,
+          operation.action === 'reject' ? 'rejected' : 'superseded',
+          meta,
+        );
+        if (operation.action === 'correct') {
+          next = entry(
+            state,
+            'inference',
+            userText(operation.text),
+            meta,
+            now,
+            'confirmed',
+            'session',
+          );
+          next.related_goal_id = goalId;
+          next.resolution = {
+            kind: 'user-confirmation',
+            verified: false,
+            origin: origin(meta),
+            at: now,
+          };
+        }
+      }
+      review(
+        state,
+        {
+          action: {
+            confirm: 'request-confirmed',
+            correct: 'request-corrected',
+            reject: 'request-rejected',
+          }[operation.action],
+          target_id: old.id,
+          replacement_id: next?.id ?? null,
+          reason: operation.reason,
+          before_label: `${old.certainty} · objetivo ${old.related_goal_id || 'ninguno'}`,
+          after_label: next
+            ? `confirmed · objetivo ${goalId || 'ninguno'}`
+            : 'rejected',
+          source_origin: old.origin,
+        },
+        meta,
+        now,
+      );
+      state.current_task = next;
+      report.note =
+        'Revisión de la última solicitud guardada; no crea una tarea ejecutora ni modifica objetivos o permisos.';
+      break;
+    }
+    case 'interaction-review': {
+      const old = state.last_interaction;
+      if (!old)
+        throw new UnderstandingError(
+          'No hay intención registrada para revisar.',
+          'reference',
+        );
+      if (
+        !REVIEW_INTENTS.includes(operation.intent) ||
+        !REVIEW_RELATIONS.includes(operation.relation)
+      )
+        throw new UnderstandingError(
+          'Intención o relación de revisión inválida',
+        );
+      review(
+        state,
+        {
+          action: 'interaction-corrected',
+          target_id: `interaction-${old.at}`,
+          replacement_id: null,
+          reason: operation.reason,
+          before_label: JSON.stringify(
+            state.interaction_review
+              ? {
+                  intent: state.interaction_review.intent,
+                  relation: state.interaction_review.relation,
+                }
+              : { intent: old.intent, relation: old.relation },
+          ),
+          after_label: JSON.stringify({
+            intent: operation.intent,
+            relation: operation.relation,
+          }),
+          source_origin: old.origin,
+        },
+        meta,
+        now,
+      );
+      state.interaction_review = {
+        intent: operation.intent,
+        relation: operation.relation,
+        reason: operation.reason,
+        source_message_id: old.origin.message_id,
+        source_at: old.at,
+        origin: origin(meta),
+        at: now,
+        verified: false,
+      };
+      report.note =
+        'Anotación humana de intención guardada; la clasificación original se conserva. No reinterpreta el mensaje ni revierte cambios previos.';
+      break;
+    }
+    case 'entry-correct': {
+      const field = operation.field;
+      if (!['subgoals', 'relevant_context', 'progress'].includes(field))
+        throw new UnderstandingError(
+          'Usá el editor especializado para esa categoría.',
+        );
+      const old = state[field].find((e) => e.id === operation.id && active(e));
+      if (!old)
+        throw new UnderstandingError('La entrada cambió; recargá.', 'conflict');
+      if (old.reference || old.entity)
+        throw new UnderstandingError(
+          'Retirá la referencia y registrá otra explícitamente; no se sustituye su origen.',
+        );
+      const value = userText(operation.text);
+      if (value === old.text)
+        throw new UnderstandingError('El texto no cambió.');
+      if (
+        state[field].some(
+          (e) =>
+            e.id !== old.id &&
+            active(e) &&
+            e.scope === old.scope &&
+            normalized(e.text) === normalized(value),
+        )
+      )
+        throw new UnderstandingError(
+          'Ya existe una entrada equivalente; no se fusionará su historia.',
+          'conflict',
+        );
+      removeActive(state, old.id, now, 'superseded', meta);
+      const next = add(state, field, value, meta, now, 'confirmed', old.scope);
+      review(
+        state,
+        {
+          action: 'entry-corrected',
+          target_id: old.id,
+          replacement_id: next.id,
+          reason: operation.reason,
+          before_label: field,
+          after_label: `${field} · confirmed`,
+          source_origin: old.origin,
+        },
+        meta,
+        now,
+      );
+      break;
+    }
     case 'work-add':
     case 'work-transition':
     case 'work-evidence':
@@ -1312,6 +1531,7 @@ export function updateUnderstanding(
           (!recognized && report.intent !== 'question') ||
           taskRequested
         ) {
+          preserveReviewedRequest(state, meta, now);
           state.current_task = entry(
             state,
             'inference',
@@ -1345,6 +1565,7 @@ export function updateUnderstanding(
             now,
           );
       }
+      state.interaction_review = null;
       state.last_interaction = {
         intent: report.intent,
         relation: report.relation,
@@ -1462,6 +1683,10 @@ export function effectiveUnderstanding(state) {
       (q) => q.status === 'open',
     ),
     uncertainty: state.uncertainty,
+    interaction: {
+      original: state.last_interaction,
+      review: state.interaction_review || null,
+    },
     last_context_update: state.last_context_update,
     readiness: state.pending_questions.some((q) => q.status === 'open')
       ? 'needs-clarification'
@@ -1748,6 +1973,21 @@ export function validateUnderstanding(s) {
     if (q.proposed?.reference !== undefined)
       checkMemoryReference(q.proposed.reference);
   if (!Array.isArray(s.uncertainty) || s.uncertainty.length > 110) fail();
+  if (s.last_interaction !== null && s.last_interaction !== undefined) {
+    const i = s.last_interaction;
+    if (
+      !i ||
+      typeof i.intent !== 'string' ||
+      i.intent.length > 100 ||
+      typeof i.relation !== 'string' ||
+      i.relation.length > 100 ||
+      !['explicit', 'inferred', 'uncertain'].includes(i.certainty) ||
+      !validOrigin(i.origin) ||
+      !Number.isFinite(i.at)
+    )
+      fail();
+  }
+  validateReview(s, fail);
   validateWork(s, fail);
   validateTasks(s, fail);
   validateProjects(s, fail);
