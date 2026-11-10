@@ -113,6 +113,8 @@ function pageFor(view, body, { mime = 'text/event-stream', chunkSize = 37, abort
     addEventListener(name, handler) { domListeners.set(name, handler); } };
   page.document = document;
   page.MutationObserver = MutationObserver;
+  page.requestAnimationFrame = (callback) => setTimeout(callback, 16);
+  page.cancelAnimationFrame = clearTimeout;
   page.mutate = () => { for (const callback of observers) callback(); };
   page.stop = (isTrusted = true, attributes = { 'data-testid': 'stop-button' }) => {
     // DOM mínimo: compara atributos reales del botón, sin copiar los selectores

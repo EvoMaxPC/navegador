@@ -122,6 +122,11 @@
           </div>
           <p class="note" id="chatCaptureDetail">Abrí un chat de ChatGPT en NEXO. Se mostrarán aquí los mensajes que estén cargados en pantalla.</p>
         </section>
+        <section class="memory-live" aria-labelledby="memoryLiveTitle">
+          <p class="eyebrow">MISMO TEXTO · EN VIVO</p><h2 id="memoryLiveTitle">Conversación de esta pestaña</h2>
+          <p class="note" id="memoryLiveStatus">Esperando mensajes renderizados…</p>
+          <ol class="repeat-list" id="memoryLiveConversation" aria-label="Conversación de ChatGPT en vivo"></ol>
+        </section>
         <div class="stats">
           <div class="stat"><b id="memItems">0</b><span>memorias</span></div>
           <div class="stat"><b id="memTokens">0</b><span>tokens guardados</span></div>
@@ -275,7 +280,7 @@
       <section class="panel-view" data-panel="about" id="panel-about" role="tabpanel" aria-labelledby="panel-tab-about" tabindex="0">
         <div class="about">
           <h2>Nexo</h2>
-          <p class="version" id="version">v0.1.26</p>
+          <p class="version" id="version">v0.1.27</p>
           <p>
             Navegador basado en Chromium que se sienta entre vos y los chatbots: reescribe el
             mensaje antes de enviarlo y filtra la respuesta antes de mostrarla.

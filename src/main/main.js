@@ -662,8 +662,11 @@ function registerIpc() {
     const snapshot = repetitionSnapshot(payload);
     if (!snapshot) return { ok: false };
     const next = { ...snapshot, href, webContentsId: sender.id };
+    const previous = repetitionSnapshots.get(sender.id);
     repetitionSnapshots.set(sender.id, next);
+    const progress = engine.onRenderedConversation(sender.id, next, previous);
     publishRepetition(next);
+    if (progress?.updated) broadcast('nexo:stats-changed', statsSnapshot());
     return { ok: true };
   });
   ipcMain.handle('nexo:repetition:get', (event, payload = {}) => {
@@ -722,23 +725,7 @@ function registerIpc() {
         savedAssistantTurns: (result.assistantCaptures || []).length },
     });
 
-    // El snapshot del DOM es una fuente independiente del fetch/CDP. Sólo se
-    // cuentan respuestas finales de la última intervención pendiente: al abrir
-    // un historial se archivan sus respuestas, pero no se simula actividad nueva.
-    const lastTurn = payload.turns[payload.turns.length - 1];
-    const pendingMessageId = engine.currentSendId(event.sender.id);
-    if (!payload.streaming && lastTurn?.role === 'assistant' && pendingMessageId) {
-      const captured = (result.assistantCaptures || []).find((turn) => turn.id === String(lastTurn.id || ''));
-      if (captured?.content) {
-        engine.onCdpCapture(event.sender.id, {
-          site: 'chatgpt', host: url.hostname, url: `${url.origin}${url.pathname}`,
-          messageId: pendingMessageId, conversationId, source: 'dom-conversation',
-          text: captured.content, chars: captured.content.length, finished: true,
-          model: '',
-        });
-        broadcast('nexo:stats-changed', statsSnapshot());
-      }
-    }
+    // Contabilización DOM en vivo: canal de repetición validado, independiente del guardado.
     writeCaptureTrace('conversation-read', { host: url.hostname, source: 'dom', chars: assistantChars,
       memory: { saved: result.ok === true, persisted: result.ok === true, chars: assistantChars } });
     if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());

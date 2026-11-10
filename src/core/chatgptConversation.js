@@ -27,17 +27,19 @@ export function readChatGptConversation(document, { literal = false, selection =
 }
 
 /** Un solo observador, agrupado; funciona aunque ChatGPT no use nuestro fetch. */
-export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => isChatGptStreaming(document), publishLive = null }) {
+export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => isChatGptStreaming(document), publishLive = null, memoryLiteral = false }) {
   if (typeof document?.querySelectorAll !== 'function') return { read() {}, disconnect() {} };
-  let timer = null, pollTimer = null, last = '', pending = '', lastLive = '', observer = null, stopped = false, suspended = false;
+  let timer = null, pollTimer = null, last = '', pending = '', lastLive = '', observer = null, stopped = false, suspended = false, frame = null;
   const session = `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const read = ({ force = false } = {}) => {
     clearTimeout(timer); timer = null;
+    if (frame !== null) { window.cancelAnimationFrame?.(frame); frame = null; }
     if (force) { last = ''; lastLive = ''; }
     if (stopped || suspended || (!isEnabled() && !publishLive) || !isChatGptMemoryUrl(window.location.href)) return;
     try {
       const url = new URL(window.location.href);
       const selection = selectChatGptMessages(document);
+      let literalTurns = null;
       if (publishLive) {
         const turns = readChatGptConversation(document, { literal: true, selection });
         let remaining = REPETITION_MAX_CHARS;
@@ -48,6 +50,7 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
           remaining -= content.length;
           return [{ ...turn, content, clipped: turn.clipped || content.length < turn.content.length }];
         });
+        literalTurns = bounded;
         const live = { href: window.location.href, strategy: selection.strategy, turns: bounded, clipped, streaming: Boolean(isStreaming()) };
         const signature = JSON.stringify(live);
         if (signature !== lastLive) {
@@ -60,7 +63,7 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
         }
       }
       if (!isEnabled()) return;
-      const turns = readChatGptConversation(document, { selection });
+      const turns = memoryLiteral && literalTurns ? literalTurns : readChatGptConversation(document, { literal: memoryLiteral, selection });
       if (!turns.length) return;
       const conversationId = url.pathname.includes('/c/') ? url.pathname : `${url.pathname}#${session}`;
       const payload = { conversationId, href: window.location.href, turns, streaming: Boolean(isStreaming()) };
@@ -89,6 +92,13 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
     }
   };
   const schedule = () => { if (!stopped && !suspended && !timer) { timer = setTimeout(read, 500); timer?.unref?.(); } };
+  // Un snapshot como máximo por cuadro. El fallback temporizado sólo se usa
+  // cuando no hay rAF o el documento está oculto (no hay cuadros visibles).
+  const scheduleFrame = () => {
+    if (stopped || suspended || frame !== null) return;
+    if (typeof window.requestAnimationFrame !== 'function' || document.visibilityState === 'hidden') { schedule(); return; }
+    frame = window.requestAnimationFrame(() => { frame = null; read(); });
+  };
   // Cinco vías complementarias de recuperación: selectores de rol/data-turn/article
   // del adaptador, MutationObserver, sondeo periódico, eventos de navegación y
   // lectura inmediata al volver a la pestaña. El sondeo cubre cambios que React
@@ -102,10 +112,10 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
   const start = () => {
     if (stopped || suspended) return;
     if (window.MutationObserver && !observer) {
-      observer = new window.MutationObserver(schedule);
+      observer = new window.MutationObserver(scheduleFrame);
       observer.observe(document, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-message-id', 'data-message-author-role', 'data-turn', 'data-turn-id', 'data-testid', 'aria-label', 'disabled'] });
     }
-    schedule();
+    scheduleFrame();
   };
   const listeners = [];
   const listen = (target, type, callback) => {
@@ -116,6 +126,7 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
     read(); suspended = true;
     observer?.disconnect(); observer = null;
     clearTimeout(timer); timer = null; clearTimeout(pollTimer); pollTimer = null;
+    if (frame !== null) { window.cancelAnimationFrame?.(frame); frame = null; }
   };
   const show = () => {
     if (stopped) return;
@@ -134,6 +145,7 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
   poll();
   return { read, disconnect() {
     stopped = true; clearTimeout(timer); clearTimeout(pollTimer); observer?.disconnect();
+    if (frame !== null) window.cancelAnimationFrame?.(frame);
     for (const remove of listeners) remove();
   } };
 }

@@ -565,3 +565,7 @@ button, input, textarea, select { font-family: inherit; }
 
 .repeat-diagnostic { font-size: 11px; color: var(--muted); line-height: 1.7; }
 .repeat-diagnostic p { white-space: pre-line; }
+
+.memory-live { border-block: 1px solid var(--line); padding-block: 16px; margin-block: 14px; }
+.memory-live h2 { font-size: 15px; margin: 4px 0 8px; }
+.memory-live .repeat-message { padding: 12px; }

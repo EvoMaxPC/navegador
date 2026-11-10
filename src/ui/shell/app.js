@@ -937,11 +937,22 @@ const MEM_KIND_LABEL = {
 
 const memState = { items: [], stats: null, lastPacket: null, conversations: [], liveSnapshot: null };
 
+const memoryLiveView = createRepetitionView({
+  list: document.getElementById('memoryLiveConversation'),
+  status: document.getElementById('memoryLiveStatus'),
+  scroller: document.getElementById('panel-memory'),
+});
+
 function renderChatCapture() {
   const conversations = memState.conversations || [];
   const savedTurns = conversations.reduce((sum, entry) => sum + (entry.turns?.length || 0), 0);
   const live = memState.liveSnapshot;
   const liveTurns = live?.turns || [];
+  memoryLiveView.render(live, 'Esperando los mensajes renderizados de esta pestaña…');
+  const liveStatus = document.getElementById('memoryLiveStatus');
+  if (liveTurns.length) liveStatus.textContent += state.settings?.memory?.enabled === false
+    ? ' · Guardado local desactivado: esta copia sólo está en RAM.'
+    : ' · Vista en RAM inmediata; guardado local agrupado cada 500 ms.';
   const users = liveTurns.filter((turn) => turn.role === 'user').length;
   const assistants = liveTurns.filter((turn) => turn.role === 'assistant').length;
   MEM.captureCurrent.textContent = num(liveTurns.length);

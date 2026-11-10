@@ -67,7 +67,7 @@ test('snapshot rechazado por IPC se puede reenviar aunque el DOM no haya cambiad
   } finally { watcher.disconnect(); }
 });
 
-test('el preload aislado entrega directamente al IPC con memoria y mediación apagadas', t => {
+test('el preload aislado entrega directamente al IPC con memoria y mediación apagadas', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = fixture(), calls = [];
   // No postMessage, fetch, __nexo ni código de la página.
@@ -79,17 +79,21 @@ test('el preload aislado entrega directamente al IPC con memoria y mediación ap
     assert.equal(calls[0].channel, 'nexo:repetition:snapshot');
     assert.equal(calls[0].payload.turns[0].content, '  Respuesta GPT 😊\n  código\n');
     reader.updateSettings({ settings: { memory: { enabled: true } } });
+    t.mock.timers.tick(500); await Promise.resolve();
     assert.equal(calls.at(-1).channel, 'nexo:conversation-snapshot');
   } finally { reader.disconnect(); }
 });
 
-test('la confirmación de memoria se conserva: un rechazo permite reintentar, no confirma persistencia', async () => {
+test('la confirmación de memoria se conserva: un rechazo permite reintentar, no confirma persistencia', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = fixture(), memory = [];
   const reader = startChatGptReader({ ...f, ipcRenderer: {
     invoke(channel, payload) { if (channel === 'nexo:conversation-snapshot') { memory.push(payload); return Promise.resolve({ ok: memory.length > 1 }); } return Promise.resolve({ ok: true }); }, send() {},
   } });
   try {
-    reader.read(); await Promise.resolve(); await Promise.resolve(); reader.read();
+    reader.read(); t.mock.timers.tick(500);
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    reader.read(); t.mock.timers.tick(500); await Promise.resolve();
     assert.equal(memory.length, 2);
   } finally { reader.disconnect(); }
 });

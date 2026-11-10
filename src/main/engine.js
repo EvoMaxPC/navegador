@@ -406,6 +406,44 @@ export class Engine {
     return this.onTurnResult(webContentsId, { ...pending, outcome: 'unknown' });
   }
 
+  /** Texto realmente renderizado. El primer snapshot sólo establece una base:
+   * abrir un historial no simula palabras ni turnos nuevos. Reutiliza la identidad
+   * del envío, el ledger provisional y la deduplicación de SSE/CDP existentes. */
+  onRenderedConversation(webContentsId, snapshot, previous) {
+    if (!previous || previous.href !== snapshot.href) return { skipped: 'baseline' };
+    const turn = snapshot.turns.at(-1);
+    if (turn?.role !== 'assistant' || !turn.content.trim() || turn.clipped || snapshot.clipped) return { skipped: 'sin-texto-completo' };
+    const before = previous.turns.find(item => item.id === turn.id && item.role === 'assistant');
+    if (before?.content === turn.content && previous.streaming === snapshot.streaming) return { skipped: 'sin-cambios' };
+    const pendingId = this.currentSendId(webContentsId);
+    const send = this.lastSend.get(webContentsId);
+    const recent = (this.recentTexts.get(webContentsId) || []).findLast(item =>
+      item.domId === turn.id && item.documentUrl === snapshot.href);
+    const live = this.streamProgress.get(webContentsId);
+    const liveId = live?.domId === turn.id && live.documentUrl === snapshot.href ? live.messageId : null;
+    if (pendingId && before?.content === turn.content && liveId !== pendingId && recent?.messageId !== pendingId) {
+      return { skipped: 'respuesta-anterior' };
+    }
+    // Sin un envío observado no atribuir historial cargado tarde a la sesión.
+    const messageId = pendingId || liveId || recent?.messageId ||
+      (send && Date.now() - send.at < VENTANA_RESPUESTA_MS ? send.messageId : null);
+    if (!messageId) return { skipped: 'sin-envío' };
+    const canonical = this.resolveMessageId(webContentsId, messageId);
+    const settled = (this.recentTexts.get(webContentsId) || []).findLast(item => item.messageId === canonical);
+    const payload = { text: turn.content, cumulative: true, source: 'dom-render', messageId: canonical,
+      domId: turn.id, documentUrl: snapshot.href, host: safeHost(snapshot.href), site: 'chatgpt' };
+    if (settled) {
+      this.#mergeResponse(webContentsId, turn.content, { messageId: canonical, source: 'dom-render', domId: turn.id, documentUrl: snapshot.href });
+    } else {
+      this.onStreamProgress(webContentsId, payload);
+      if (!snapshot.streaming) this.#countResponse(webContentsId, payload);
+    }
+    // También marca la identidad cuando el cierre recuperó tokens sin texto.
+    const counted = (this.recentTexts.get(webContentsId) || []).findLast(item => item.messageId === canonical);
+    if (counted) Object.assign(counted, { rendered: true, domId: turn.id, documentUrl: snapshot.href });
+    return { updated: true };
+  }
+
   /** Fragmento nuevo de una respuesta: actualiza tokens sin esperar al cierre. */
   onStreamProgress(webContentsId, payload = {}) {
     const fragment = String(payload.text || '');
@@ -413,13 +451,20 @@ export class Engine {
     const now = Date.now();
     const pending = this.#pendingTurn(webContentsId, now);
     const messageId = String(payload.messageId || pending?.entry?.messageId || '');
+    const rendered = (this.recentTexts.get(webContentsId) || []).findLast(item =>
+      item.rendered && item.messageId === this.resolveMessageId(webContentsId, messageId));
+    if (rendered && payload.source !== 'dom-render') return { ok: true, skipped: 'rendered-authoritative' };
     const previous = this.streamProgress.get(webContentsId);
+    if (previous?.source === 'dom-render' && previous.messageId === messageId && payload.source !== 'dom-render') {
+      return { ok: true, skipped: 'rendered-authoritative' };
+    }
     if (previous && messageId && previous.messageId && previous.messageId !== messageId) {
       this.streamProgress.delete(webContentsId);
     }
     const current = this.streamProgress.get(webContentsId) || {
       messageId, text: '', tokens: 0, model: payload.model || '', host: payload.host || '',
     };
+    if (payload.source === 'dom-render') Object.assign(current, { source: 'dom-render', domId: payload.domId, documentUrl: payload.documentUrl });
     current.text = payload.cumulative === true ? fragment : current.text + fragment;
     current.messageId ||= messageId;
     current.model ||= payload.model || '';
@@ -434,13 +479,9 @@ export class Engine {
     return { ok: true, chars: current.text.length, tokens: current.tokens, added: increment };
   }
 
-  /**
-   * Respuesta cerrada. Cuenta una sola vez, asocia el turno y distingue una
-   * respuesta completa de una cortada.
-   */
-  #countResponse(webContentsId, payload = {}) {
+  #reconcileLiveProgress(webContentsId, payload) {
     const live = this.streamProgress.get(webContentsId);
-    if (live && (!payload.messageId || !live.messageId || payload.messageId === live.messageId)) {
+    if (live && (!payload.messageId || !live.messageId || this.resolveMessageId(webContentsId, payload.messageId) === live.messageId)) {
       // Retirar el aporte provisional y dejar que la deduplicación existente
       // reconcilie el texto completo contra CDP/red. Un cierre recortado no
       // puede perder los caracteres reales ya entregados en vivo.
@@ -448,16 +489,26 @@ export class Engine {
       this.streamProgress.delete(webContentsId);
       const finalText = String(payload.text || '');
       payload = { ...payload,
-        text: live.text.startsWith(finalText) ? live.text : finalText,
+        text: live.source === 'dom-render' || live.text.startsWith(finalText) ? live.text : finalText,
+        ...(live.source === 'dom-render' ? { source: 'dom-render', domId: live.domId, documentUrl: live.documentUrl } : {}),
         model: payload.model || live.model, host: payload.host || live.host };
     }
+    return payload;
+  }
+
+  /**
+   * Respuesta cerrada. Cuenta una sola vez, asocia el turno y distingue una
+   * respuesta completa de una cortada.
+   */
+  #countResponse(webContentsId, payload = {}) {
+    payload = this.#reconcileLiveProgress(webContentsId, payload);
     const messageId = String(payload.messageId || '');
     const now = Date.now();
     const textoPayload = String(payload.text || '');
     // El texto de una respuesta ya contada por la red: se suman los tokens y la
     // respuesta no se cuenta dos veces.
     if (!this.streamProgress.has(webContentsId) && textoPayload.trim() &&
-      this.#absorbTokens(webContentsId, textoPayload, messageId || null, payload.model, payload.host)) {
+      this.#absorbTokens(webContentsId, textoPayload, messageId || null, payload.model, payload.host, payload)) {
       return { ok: true, duplicate: true, tokens: true };
     }
     // La clave es el identificador del envío; si el sitio no lo diera (camino
@@ -476,7 +527,7 @@ export class Engine {
     this.noteLayer(webContentsId);
     const pendiente = this.#pendingTurn(webContentsId, now);
     const awaitId = this.resolveMessageId(pendiente?.id ?? webContentsId, messageId);
-    const merge = this.#mergeResponse(webContentsId, texto, { messageId: awaitId, pendiente, model: payload.model || pendiente?.entry?.model || '', provider: payload.host || pendiente?.entry?.host || '' });
+    const merge = this.#mergeResponse(webContentsId, texto, { messageId: awaitId, pendiente, model: payload.model || pendiente?.entry?.model || '', provider: payload.host || pendiente?.entry?.host || '', source: payload.source, domId: payload.domId, documentUrl: payload.documentUrl });
     if (merge.duplicate) {
       this.seenResponses.set(key, now);
       return { ok: true, duplicate: true, merged: true };
@@ -579,7 +630,7 @@ export class Engine {
    * de respuestas: la red ya sumó la respuesta cuando cerró la petición; cuando
    * CDP consigue el texto un segundo después, lo que faltaba eran los tokens.
    */
-  #absorbTokens(webContentsId, text, messageId = null, model = '', provider = '') {
+  #absorbTokens(webContentsId, text, messageId = null, model = '', provider = '', renderedMeta = {}) {
     const anotada = this.sinTexto.get(webContentsId);
     if (!anotada) return false;
     const now = Date.now();
@@ -618,6 +669,7 @@ export class Engine {
     // de nuevo, y un fragmento posterior sólo aporta la diferencia.
     const vistos = (this.recentTexts.get(webContentsId) || []).filter((v) => now - v.at < VENTANA_RESPUESTA_MS);
     vistos.push({ at: now, text, tokens, messageId: messageId || anotada.messageId || null,
+      ...(renderedMeta.source === 'dom-render' ? { rendered: true, domId: renderedMeta.domId, documentUrl: renderedMeta.documentUrl } : {}),
       model: model || anotada.model, provider: provider || anotada.host });
     this.recentTexts.set(webContentsId, vistos.slice(-6));
     return true;
@@ -637,10 +689,19 @@ export class Engine {
    * Devuelve `{duplicate, tokens, sameText}`; `tokens` es lo que hay que sumar
    * al contador de salida cuando la respuesta es nueva.
    */
-  #mergeResponse(webContentsId, text, { messageId = null, pendiente = undefined, model = '', provider = '' } = {}) {
+  #mergeResponse(webContentsId, text, { messageId = null, pendiente = undefined, model = '', provider = '', source = '', domId = '', documentUrl = '' } = {}) {
     const now = Date.now();
     const esperando = pendiente === undefined ? this.#pendingTurn(webContentsId, now) : pendiente;
     const vistos = (this.recentTexts.get(webContentsId) || []).filter((v) => now - v.at < VENTANA_RESPUESTA_MS);
+    const identity = messageId && vistos.findLast(item => item.messageId === messageId);
+    if (identity && (identity.rendered || source === 'dom-render')) {
+      if (source === 'dom-render') {
+        const tokens = this.#outputTokens(text);
+        this.counters.outputTokens += tokens - identity.tokens;
+        Object.assign(identity, { text, tokens, at: now, rendered: true, domId, documentUrl });
+      }
+      return { duplicate: true, tokens: 0, sameText: identity.text === text };
+    }
     for (const visto of vistos) {
       const crece = text.length > visto.text.length && text.startsWith(visto.text);
       const esPrefijo = visto.text.length > text.length && visto.text.startsWith(text);
@@ -688,7 +749,7 @@ export class Engine {
     }
 
     const tokens = this.#outputTokens(text, model || esperando?.entry?.model || '', provider || esperando?.entry?.host || '');
-    vistos.push({ at: now, text, tokens, messageId: messageId || null,
+    vistos.push({ at: now, text, tokens, messageId: messageId || null, rendered: source === 'dom-render', domId, documentUrl,
       model: model || esperando?.entry?.model || '', provider: provider || esperando?.entry?.host || '' });
     this.recentTexts.set(webContentsId, vistos.slice(-6));
     return { duplicate: false, sameText: false, tokens };
@@ -892,7 +953,7 @@ export class Engine {
   }
 
   #onCdpCapture(webContentsId, capture = {}) {
-    const text = String(capture.text || '');
+    let text = String(capture.text || '');
     if (!text.trim()) {
       this.onTurnResult(webContentsId, capture);
       return { ok: false, skipped: 'empty' };
@@ -910,6 +971,8 @@ export class Engine {
       return { ok: false, skipped: 'disabled' };
     }
 
+    capture = this.#reconcileLiveProgress(webContentsId, capture);
+    text = String(capture.text || '');
     this.onTurnResult(webContentsId, capture);
 
     // Un mismo turno puede aparecer dos veces (frame repetido, cuerpo pedido de
@@ -928,7 +991,7 @@ export class Engine {
 
     // ¿Es el texto de una respuesta que la red ya contó sin texto? Entonces lo
     // que falta son los tokens, no otra respuesta.
-    if (this.#absorbTokens(webContentsId, text, awaitId, capture.model, capture.host)) {
+    if (this.#absorbTokens(webContentsId, text, awaitId, capture.model, capture.host, capture)) {
       this.#markSeen(webContentsId, keys, awaitId);
       this.cdp.duplicates += 1;
       return { ok: true, duplicate: true, tokens: true };
@@ -944,7 +1007,7 @@ export class Engine {
     // Si ya la había contado el camino SSE, la huella de arriba la descartó. Y si
     // es la misma respuesta llegando en pedazos, se corrige el conteo de tokens
     // en vez de sumar otra respuesta.
-    const merge = this.#mergeResponse(webContentsId, text, { messageId: awaitId, pendiente, model: capture.model || pendiente?.entry?.model || '', provider: capture.host || pendiente?.entry?.host || '' });
+    const merge = this.#mergeResponse(webContentsId, text, { messageId: awaitId, pendiente, model: capture.model || pendiente?.entry?.model || '', provider: capture.host || pendiente?.entry?.host || '', source: capture.source, domId: capture.domId, documentUrl: capture.documentUrl });
     if (merge.duplicate) {
       this.cdp.duplicates += 1;
       return { ok: true, duplicate: true, merged: true };
@@ -1124,6 +1187,7 @@ export class Engine {
     this.awaiting.delete(webContentsId);
     this.lastSend.delete(webContentsId);
     this.recentTexts.delete(webContentsId);
+    this.streamProgress.delete(webContentsId);
     this.layerSeen.delete(webContentsId);
     this.layerEnded.delete(webContentsId);
     this.layerEndedText.delete(webContentsId);
