@@ -107,7 +107,6 @@ function locateMessageNodes(document) {
 export function readChatGptConversation(document, { literal = false } = {}) {
   const located = locateMessageNodes(document);
   const occurrences = new Map();
-  const offset = Math.max(0, located.totalNodes - MAX_CONVERSATION_TURNS);
   return located.messages.slice(-MAX_CONVERSATION_TURNS).flatMap(({ node, role, index }) => {
     const contentNode = contentNodeFor(node, role, literal);
     const value = String(contentNode?.innerText ?? contentNode?.textContent ?? '');
