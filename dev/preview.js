@@ -5,7 +5,7 @@ let settings = structuredClone(DEFAULT_SETTINGS);
 const empty = async () => [];
 const result = async () => ({ ok: true, removed: 0 });
 window.nexo = {
-  getConfig: async () => ({ version: '0.1.28 · vista web', pagePreload: null }),
+  getConfig: async () => ({ version: '0.1.29 · vista web', pagePreload: null }),
   getSettings: async () => settings,
   setSettings: async (patch) => (settings = mergeSettings(settings, patch)),
   resetSettings: async () => (settings = structuredClone(DEFAULT_SETTINGS)),
@@ -47,7 +47,7 @@ document.createElement = function (tag, ...args) {
 };
 const badge = create('div');
 badge.textContent = 'VISTA UI · sin motor Electron · sin conversaciones reales';
-badge.style.cssText = 'position:fixed;bottom:8px;left:12px;z-index:90;font:9px system-ui;color:#526b60;background:#f8faf4;border:1px solid #d8e1dc;border-radius:5px;padding:5px 8px;pointer-events:none';
+badge.style.cssText = 'position:fixed;bottom:43px;left:12px;z-index:90;font:9px system-ui;color:#9eadbf;background:#101722;border:1px solid #26384b;border-radius:5px;padding:5px 8px;pointer-events:none';
 document.body.append(badge);
 const style = create('style');
 style.textContent = '.viewport iframe{position:absolute;inset:0;width:100%;height:100%;border:0}.viewport iframe.hidden{display:none}';

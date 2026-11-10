@@ -4,36 +4,41 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; object-src 'none'; form-action https://duckduckgo.com;" />
-  <title>Pestaña nueva · Nexo</title>
+  <title>Inicio · Nexo</title>
   <link rel="stylesheet" href="./start.css" />
 </head>
 <body>
-  <header class="page-header"><a class="wordmark" href="./index.html" aria-label="Nexo, inicio"><span class="symbol">n</span>NEXO</a><span class="header-divider"></span><span>Tu espacio personal</span><span class="local-label"><i></i>Análisis local</span></header>
   <main>
     <section class="welcome" aria-labelledby="welcomeTitle">
-      <p class="eyebrow"><span></span>UN NUEVO PUNTO DE PARTIDA</p>
-      <h1 id="welcomeTitle">Menos ruido.<br><em>Más posibilidades.</em></h1>
-      <p class="intro">Un espacio para explorar, conversar y conectar ideas.<br>Vos elegís el rumbo.</p>
+      <p class="eyebrow"><span></span>BLACK & ELECTRIC BLUE</p>
+      <h1 id="welcomeTitle"><img src="../assets/nexo-mark.svg" alt="" />NEXO</h1>
+      <p class="tagline">NAVEGADOR DE NUEVA GENERACIÓN</p>
+      <p class="intro">Tu mundo. Más cerca que nunca.</p>
       <form id="startSearch" action="https://duckduckgo.com/" method="get" role="search">
-        <svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
-        <input id="searchInput" type="search" name="q" placeholder="Buscá algo o escribí una dirección" aria-label="Buscar en la web o abrir una dirección" autocomplete="off" spellcheck="false" />
-        <button type="submit" aria-label="Buscar o navegar">Ir <span aria-hidden="true">↗</span></button>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+        <input id="searchInput" type="search" name="q" placeholder="Buscar en la web o escribir una dirección…" aria-label="Buscar en la web o abrir una dirección" autocomplete="off" spellcheck="false" />
+        <button type="submit" aria-label="Buscar o navegar">→</button>
       </form>
-      <p class="search-hint">Búsquedas con DuckDuckGo <span>·</span> <kbd>Ctrl</kbd> + <kbd>L</kbd> para ir a la barra</p>
+      <p class="search-hint">Búsqueda privada con DuckDuckGo <span>·</span> <kbd>Ctrl L</kbd> barra de direcciones</p>
     </section>
-    <section class="destinations" aria-labelledby="destinationsTitle">
-      <div class="section-heading"><h2 id="destinationsTitle">Una idea. Muchas formas de empezar.</h2><span>CONVERSAR CON IA</span></div>
-      <div class="destination-grid">
-        <a class="destination" href="https://chatgpt.com"><span class="app-icon gpt" aria-hidden="true">◎</span><span class="arrow" aria-hidden="true">↗</span><h3>ChatGPT</h3><p>Explorá una idea.</p></a>
-        <a class="destination" href="https://claude.ai"><span class="app-icon claude" aria-hidden="true">✳</span><span class="arrow" aria-hidden="true">↗</span><h3>Claude</h3><p>Dale forma a tus palabras.</p></a>
-        <a class="destination" href="https://gemini.google.com"><span class="app-icon gemini" aria-hidden="true">✦</span><span class="arrow" aria-hidden="true">↗</span><h3>Gemini</h3><p>Conectá posibilidades.</p></a>
-        <a class="destination" href="https://www.perplexity.ai"><span class="app-icon perplexity" aria-hidden="true">⌘</span><span class="arrow" aria-hidden="true">↗</span><h3>Perplexity</h3><p>Seguí tu curiosidad.</p></a>
-      </div>
-      <div class="more-destinations"><span>También a mano</span><a href="https://chat.deepseek.com">DeepSeek ↗</a><a href="https://copilot.microsoft.com">Copilot ↗</a><a href="https://chat.mistral.ai">Le Chat ↗</a><a href="http://localhost:11434">Ollama local ↗</a></div>
+    <nav class="destination-grid" aria-label="Accesos rápidos">
+      <a class="destination" href="https://chatgpt.com"><span class="app-icon gpt">◎</span><span>ChatGPT</span></a>
+      <a class="destination" href="https://www.google.com"><span class="app-icon google">G</span><span>Google</span></a>
+      <a class="destination" href="https://www.youtube.com"><span class="app-icon youtube"><svg viewBox="0 0 32 24" aria-hidden="true"><rect width="32" height="24" rx="7" fill="currentColor"/><path d="m13 6 10 6-10 6" fill="#fff"/></svg></span><span>YouTube</span></a>
+      <button class="destination" disabled title="No hay un destino configurado para EVO LABS"><span class="app-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="m3 11 13-7 13 7-13 7zm5 7v7l8 4 8-4v-7M29 12v11"/></svg></span><span>EVO LABS</span><small>Sin configurar</small></button>
+      <button class="destination" disabled title="No hay un destino configurado para PIXELVERSE"><span class="app-icon pixel"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 6h4v4h10V6h4v8h4v14h-5v-6H8v6H3V14h4z"/><path d="M10 15h3m6 0h3"/></svg></span><span>PIXELVERSE</span><small>Sin configurar</small></button>
+      <button class="destination" id="moreApps" aria-expanded="false" aria-controls="appsList"><span class="app-icon apps"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h4v4H3zM10 3h4v4h-4zM17 3h4v4h-4zM3 10h4v4H3zM10 10h4v4h-4zM17 10h4v4h-4zM3 17h4v4H3zM10 17h4v4h-4zM17 17h4v4h-4z"/></svg></span><span>Más aplicaciones</span></button>
+    </nav>
+    <section id="appsList" class="apps-list" hidden aria-label="Más aplicaciones">
+      <a href="https://claude.ai">Claude ↗</a><a href="https://gemini.google.com">Gemini ↗</a><a href="https://www.perplexity.ai">Perplexity ↗</a><a href="https://chat.deepseek.com">DeepSeek ↗</a><a href="https://copilot.microsoft.com">Copilot ↗</a><a href="https://chat.mistral.ai">Le Chat ↗</a><a href="http://localhost:11434">Ollama local ↗</a><a href="https://github.com">GitHub ↗</a><a href="https://developer.mozilla.org">MDN ↗</a><a href="https://news.ycombinator.com">Hacker News ↗</a><a href="https://stackoverflow.com">Stack Overflow ↗</a>
     </section>
-    <section class="workspace" aria-labelledby="workspaceTitle"><div><p class="eyebrow">PARA TU PRÓXIMO PROYECTO</p><h2 id="workspaceTitle">De la idea a la acción.</h2></div><nav aria-label="Herramientas de trabajo"><a href="https://github.com"><b aria-hidden="true">↳</b>GitHub<span>Crear</span></a><a href="https://developer.mozilla.org"><b aria-hidden="true">{ }</b>MDN<span>Aprender</span></a><a href="https://news.ycombinator.com"><b aria-hidden="true">Y</b>Hacker News<span>Descubrir</span></a><a href="https://stackoverflow.com"><b aria-hidden="true">≋</b>Stack Overflow<span>Resolver</span></a></nav></section>
+    <section class="feature-grid" aria-label="Tu navegador, bajo control">
+      <article class="feature"><header><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-9 12h7l-2 8 9-12h-7z"/></svg><h2>Rendimiento extremo</h2></header><div class="feature-body"><div class="performance-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 15-4 1 3-6 4-1m-1 6 1 4 4-6-1-4M9 15c0-7 4-10 10-10 0 6-3 10-10 10ZM6 18l-2 2"/></svg><span>Menos ruido.</span></div><p>Un espacio ligero.<br>Sin efectos continuos.<br><span>Sin modo Turbo simulado.</span></p></div><p class="feature-foot">Actividad real en el panel Rendimiento <span>↗</span></p></article>
+      <article class="feature memory-feature"><header><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H6L3 7v4l3 2-3 2v3l4 3h3V3m5 0h3l3 4v4l-3 2 3 2v3l-4 3h-3V3M7 8h3m4 0h3M7 16h3m4 0h3"/></svg><h2>EVO MEMORY</h2><span class="feature-label">LOCAL</span></header><p class="memory-copy">Tus conversaciones.<br><strong>Tu contexto. Tu control.</strong></p><p>Consultá la conversación y la memoria guardada en el panel lateral.</p><p class="feature-foot"><kbd>Ctrl Shift I</kbd> Abrir panel EVO <span>→</span></p></article>
+      <article class="feature"><header><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6zM8 12l3 3 5-6"/></svg><h2>Seguridad</h2></header><div class="feature-body"><svg class="shield-art" viewBox="0 0 72 80" aria-hidden="true"><path d="m36 4 29 11v25c0 18-29 34-29 34S7 58 7 40V15zM22 38l10 10 19-23"/></svg><p>Permisos por sitio.<br>Control de datos locales.<br><span>Vos decidís qué conservar.</span></p></div><p class="feature-foot">Permisos y privacidad en Seguridad <span>↗</span></p></article>
+    </section>
+    <footer><span class="footer-line"></span>EXPLORÁ. CONECTÁ. CREÁ.<span class="footer-line"></span></footer>
   </main>
-  <footer><span><i class="tiny-symbol">n</i> Más espacio para lo que importa.</span><span><kbd>Ctrl T</kbd> Nueva pestaña <span class="footer-gap"><kbd>Ctrl Shift I</kbd> Panel EVO</span></span></footer>
   <script type="module" src="./start.js"></script>
 </body>
 </html>

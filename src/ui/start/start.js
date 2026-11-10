@@ -10,3 +10,10 @@ document.getElementById('startSearch').addEventListener('submit', (event) => {
     location.assign(target);
   } catch { /* Entrada no navegable. */ }
 });
+
+const moreApps = document.getElementById('moreApps');
+moreApps.addEventListener('click', () => {
+  const open = moreApps.getAttribute('aria-expanded') !== 'true';
+  moreApps.setAttribute('aria-expanded', String(open));
+  document.getElementById('appsList').hidden = !open;
+});

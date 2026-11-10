@@ -389,6 +389,7 @@ function updateNavigation() {
   const tab = activeTab();
   els.back.disabled = !tab?.view.canGoBack?.();
   els.forward.disabled = !tab?.view.canGoForward?.();
+  document.querySelector('[data-workspace-home]').classList.toggle('selected', tab?.url === START_URL);
   const status = navigationStatus(tab?.url);
   els.connection.dataset.kind = status.kind;
   els.connection.title = status.label;
@@ -1390,6 +1391,36 @@ window.addEventListener('beforeunload', () => {
   nexo.session.saveNow([{ tabs, activeIndex }]);
 });
 
+// Accesos del nuevo espacio: delegan en las acciones existentes, sin otro IPC.
+document.getElementById('homeButton').addEventListener('click', () => navigate(START_URL));
+document.querySelector('[data-workspace-home]').addEventListener('click', () => navigate(START_URL));
+document.querySelector('[data-launch-chatgpt]').addEventListener('click', () => navigate('https://chatgpt.com'));
+document.querySelectorAll('[data-open-panel]').forEach((button) => {
+  button.addEventListener('click', () => showPanel(button.dataset.openPanel));
+});
+document.querySelectorAll('[data-memory-section]').forEach((button) => {
+  button.addEventListener('click', () => {
+    if (button.dataset.memorySection === 'favorites') { showPanel('bookmarks'); return; }
+    const saved = button.dataset.memorySection === 'saved';
+    const target = document.getElementById(saved ? 'savedConversations' : 'memoryLiveTitle');
+    if (saved) target.open = true;
+    document.querySelectorAll('[data-memory-section]').forEach((item) => item.classList.toggle('active', item === button));
+    target.scrollIntoView({ block: 'start', behavior: 'auto' });
+  });
+});
+// navigator.onLine sólo informa conectividad del sistema, no velocidad ni protección.
+function renderNetworkState() {
+  document.getElementById('systemConnection').textContent = navigator.onLine
+    ? 'Red disponible · sin medir velocidad' : 'Sin conexión de red';
+}
+window.addEventListener('online', renderNetworkState);
+window.addEventListener('offline', renderNetworkState);
+renderNetworkState();
+// La altura sólo se actualiza cuando cambia el chrome; no hay bucle de medición.
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty('--chrome-height', `${entry.target.getBoundingClientRect().height}px`);
+}).observe(document.querySelector('.chrome'));
+
 function refreshActivePanel() {
   const current = document.querySelector('.stab.active')?.dataset.panel;
   const renders = { activity: () => { renderLog(); refreshStats(); }, memory: refreshMemory,
@@ -1402,6 +1433,8 @@ panelTabs.forEach((tab, index) => {
     panelTabs.forEach((t) => { const active = t === tab; t.classList.toggle('active', active); t.setAttribute('aria-selected', String(active)); t.tabIndex = active ? 0 : -1; });
     document.querySelectorAll('.panel-view').forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === tab.dataset.panel));
     els.panelTitle.textContent = tab.getAttribute('aria-label');
+    document.querySelectorAll('.rail-item[data-open-panel]').forEach((item) => item.classList.toggle('selected', item.dataset.openPanel === tab.dataset.panel));
+    document.querySelector('[data-workspace-home]').classList.remove('selected');
     refreshActivePanel();
   });
   tab.addEventListener('keydown', (event) => {
@@ -1613,6 +1646,7 @@ async function boot() {
 
   state.config = await nexo.getConfig();
   document.getElementById('version').textContent = `v${state.config.version}`;
+  document.getElementById('statusVersion').textContent = `v${state.config.version}`;
   paso('config');
 
   // Continuidad: si había pestañas guardadas, se reabren tal cual estaban.
