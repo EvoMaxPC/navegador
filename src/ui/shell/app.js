@@ -953,6 +953,44 @@ const memoryLiveView = createRepetitionView({
   scroller: document.getElementById('panel-memory'),
 });
 
+/**
+ * Captura directa del DOM de ChatGPT desde el webview.
+ * Es el equivalente a ejecutar el lector en la consola del sitio: devuelve
+ * los mensajes visibles ya renderizados sin depender del watcher del preload.
+ */
+async function readChatGptDirect(tab) {
+  if (!tab?.view || typeof tab.view.executeJavaScript !== 'function') return null;
+  const script = `(() => {
+    const main = document.querySelector('main');
+    if (!main) return [];
+    return [...main.querySelectorAll('h4')].map((heading) => {
+      const label = (heading.innerText || heading.textContent || '').trim();
+      const content = heading.nextElementSibling;
+      if (!content) return null;
+      const role = /Dijiste:|You said:/i.test(label) ? 'user'
+        : /ChatGPT dijo:|ChatGPT said:/i.test(label) ? 'assistant' : null;
+      if (!role) return null;
+      const text = (content.innerText || content.textContent || '').trim();
+      return text ? { role, content: text } : null;
+    }).filter(Boolean);
+  })()`;
+  try {
+    const turns = await tab.view.executeJavaScript(script, true);
+    if (!Array.isArray(turns) || !turns.length) return null;
+    return {
+      webContentsId: tab.view.getWebContentsId(),
+      href: tab.view.getURL(),
+      turns: turns.map((turn, index) => ({ ...turn, id: `direct-${index}` })),
+      strategy: 'direct-console-injection',
+      streaming: false,
+      clipped: false,
+    };
+  } catch (error) {
+    console.warn('[nexo] captura directa de ChatGPT falló:', error?.message || error);
+    return null;
+  }
+}
+
 function renderChatCapture() {
   const conversations = memState.conversations || [];
   const savedTurns = conversations.reduce((sum, entry) => sum + (entry.turns?.length || 0), 0);
@@ -1039,10 +1077,17 @@ async function refreshMemory() {
       // No depender de que el renderer haya recibido el evento en vivo:
       // consultar también el último snapshot almacenado al abrir/actualizar Memoria.
       const source = repetitionSource();
-      // Una consulta inicial puede devolver null mientras el preload termina
-      // de leer el DOM. No borrar un snapshot en vivo que llegó durante el await.
+      // Primero usamos el snapshot automático. Si el lector aislado no entregó
+      // mensajes, ejecutamos una lectura directa en el webview (como en consola).
       const fetchedLive = source ? await nexo.repetition.get(source) : null;
-      if (fetchedLive?.turns?.length || !memState.liveSnapshot) memState.liveSnapshot = fetchedLive;
+      if (fetchedLive?.turns?.length) {
+        memState.liveSnapshot = fetchedLive;
+      } else if (source && !memState.liveSnapshot?.turns?.length) {
+        const direct = await readChatGptDirect(activeTab());
+        if (direct?.turns?.length && direct.webContentsId === source.webContentsId) {
+          memState.liveSnapshot = direct;
+        }
+      }
       renderChatCapture();
       if (MEM.conversations?.closest('details')?.open) {
         MEM.conversations.innerHTML = memState.conversations.length ? memState.conversations.map((entry) =>
