@@ -2,7 +2,9 @@
 
 > Desarrollo posterior: [Comprensión en siete etapas](NEXO-COMPRENSION-ETAPAS.md).
 > La etapa 1 amplía la recepción incremental y observación del asistente, con
-> renovación automática del panel; las descripciones de iteraciones anteriores
+> renovación automática del panel. La etapa 2 añade objetivos independientes,
+> inferencias confirmables y cierre/reapertura explícitos sin verificar ejecución;
+> las descripciones de iteraciones anteriores
 > de este documento deben leerse como evidencia histórica, no como límite actual.
 
 ## Alcance y estado real

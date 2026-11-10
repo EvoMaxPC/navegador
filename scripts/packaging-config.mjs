@@ -80,6 +80,7 @@ export const requiredAsarEntries = [
   'src/main/profile.js',
   'src/main/workDossier.js',
   'src/core/userUnderstanding.js',
+  'src/core/userGoals.js',
   'src/core/conversationObservation.js',
   'src/main/userUnderstanding.js',
   'src/ui/shell/understandingPanel.js',

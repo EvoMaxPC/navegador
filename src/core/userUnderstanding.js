@@ -1,3 +1,10 @@
+import {
+  goalDirective,
+  possibleGoal,
+  goalKey,
+  GOAL_LIMITS,
+} from './userGoals.js';
+
 /** NEXO UUE · Capa 1. Comprensión estructurada local y conservadora, no un LLM. */
 export const UNDERSTANDING_VERSION = 1;
 export const MAX_USER_TEXT = 200_000;
@@ -53,6 +60,9 @@ export function newUnderstanding(contextId, now = Date.now()) {
     context_id: contextId,
     revision: 0,
     user_goal: null,
+    independent_goals: [],
+    goal_candidates: [],
+    goal_events: [],
     current_task: null,
     subgoals: [],
     active_instructions: [],
@@ -133,8 +143,118 @@ function add(
   boundedPush(state[field], e);
   return e;
 }
-function setGoal(state, text, meta, now) {
-  if (state.user_goal?.text === text) return;
+function goalEvent(state, goal, action, meta, now, from = null) {
+  state.goal_events ||= [];
+  boundedPush(
+    state.goal_events,
+    {
+      id: `ge-${state.revision + 1}-${++meta.counter}`,
+      goal_id: goal.id,
+      action,
+      from,
+      to: goal.status,
+      at: now,
+      origin: origin(meta),
+      certainty: 'user-declared',
+    },
+    GOAL_LIMITS.events,
+  );
+}
+function transitionGoal(
+  state,
+  id,
+  status,
+  meta,
+  now,
+  statement = 'Control explícito del usuario en el panel',
+) {
+  if (!['active', 'completed', 'cancelled'].includes(status))
+    throw new UnderstandingError('Estado de objetivo inválido');
+  const goal = [state.user_goal, ...(state.independent_goals || [])]
+    .filter(Boolean)
+    .find((g) => g.id === id);
+  if (!goal)
+    throw new UnderstandingError(
+      'El objetivo ya no está disponible',
+      'conflict',
+    );
+  if (goal.status === status) return false;
+  if (status === 'active' && !['completed', 'cancelled'].includes(goal.status))
+    throw new UnderstandingError('Sólo se puede reabrir un objetivo cerrado');
+  if (status !== 'active' && goal.status !== 'active')
+    throw new UnderstandingError(
+      'Reabrí el objetivo antes de cambiar su cierre',
+      'conflict',
+    );
+  const from = goal.status;
+  goal.status = status;
+  goal.updated_at = now;
+  goal.resolution = {
+    kind: 'user-declaration',
+    verified: false,
+    statement,
+    at: now,
+    origin: origin(meta),
+  };
+  if (goal.id === state.user_goal?.id) state.current_task = null;
+  goalEvent(
+    state,
+    goal,
+    status === 'active' ? 'reopened' : status,
+    meta,
+    now,
+    from,
+  );
+  if (goal.id === state.user_goal?.id)
+    for (const q of state.pending_questions)
+      if (q.status === 'open' && q.kind === 'goal-change') {
+        q.status = 'rejected';
+        q.resolved_at = now;
+      }
+  return true;
+}
+function independentGoal(state, text, meta, now, certainty = 'explicit') {
+  state.independent_goals ||= [];
+  const same = [state.user_goal, ...state.independent_goals]
+    .filter(Boolean)
+    .find((g) => goalKey(g.text) === goalKey(text) && g.status === 'active');
+  if (same) return same;
+  const closed = state.independent_goals.find(
+    (g) => goalKey(g.text) === goalKey(text),
+  );
+  if (closed)
+    throw new UnderstandingError(
+      'Ese objetivo ya existe cerrado. Reabrilo explícitamente en lugar de duplicarlo.',
+      'conflict',
+    );
+  const g = entry(state, 'user_goal', text, meta, now, certainty);
+  g.goal_type = 'independent';
+  boundedPush(state.independent_goals, g, GOAL_LIMITS.independent);
+  goalEvent(state, g, 'independent-added', meta, now);
+  return g;
+}
+function candidateGoal(state, text, reason, meta, now) {
+  state.goal_candidates ||= [];
+  if (state.goal_candidates.some((g) => goalKey(g.text) === goalKey(text)))
+    return;
+  const g = entry(state, 'inference', text, meta, now, 'inferred');
+  g.status = 'pending';
+  g.reason = reason;
+  boundedPush(state.goal_candidates, g, GOAL_LIMITS.candidates);
+}
+function setGoal(state, text, meta, now, certainty = 'explicit') {
+  if (state.user_goal?.text === text) {
+    if (state.user_goal.status !== 'active')
+      transitionGoal(
+        state,
+        state.user_goal.id,
+        'active',
+        meta,
+        now,
+        'Objetivo vuelto a declarar explícitamente',
+      );
+    return;
+  }
   for (const q of state.pending_questions)
     if (
       q.status === 'open' &&
@@ -146,12 +266,35 @@ function setGoal(state, text, meta, now) {
   if (state.user_goal)
     boundedPush(
       state.goal_history,
-      { ...state.user_goal, status: 'superseded', updated_at: now },
+      {
+        ...state.user_goal,
+        status:
+          state.user_goal.status === 'active'
+            ? 'superseded'
+            : state.user_goal.status,
+        updated_at: now,
+      },
       50,
     );
-  state.user_goal = entry(state, 'user_goal', text, meta, now);
+  const linked = (state.independent_goals || []).find(
+    (g) => g.status === 'active' && goalKey(g.text) === goalKey(text),
+  );
+  if (linked) {
+    linked.status = 'superseded';
+    linked.updated_at = now;
+    goalEvent(state, linked, 'promoted-to-primary', meta, now, 'active');
+  }
+  state.user_goal = entry(state, 'user_goal', text, meta, now, certainty);
+  state.user_goal.goal_type = 'primary';
   state.current_task = null;
+  goalEvent(state, state.user_goal, 'primary-set', meta, now);
+  for (const g of state.goal_candidates || [])
+    if (g.status === 'pending') {
+      g.status = 'superseded';
+      g.updated_at = now;
+    }
 }
+
 function ask(state, kind, text, proposed, meta, now, conflictIds = []) {
   const same = state.pending_questions.find(
     (q) =>
@@ -307,6 +450,14 @@ export function interpretMessage(state, text) {
       relation: 'independent',
       certainty: 'explicit',
     };
+  const directive = goalDirective(text);
+  if (directive)
+    return {
+      intent: 'goal-directive',
+      relation: 'goal',
+      certainty: 'explicit',
+      directive,
+    };
   if (g)
     return {
       intent: g.change ? 'goal-change' : 'goal-declaration',
@@ -346,7 +497,7 @@ export function interpretMessage(state, text) {
     return {
       intent: 'continuation',
       relation:
-        state.user_goal || state.current_task
+        active(state.user_goal) || state.current_task
           ? 'current-work'
           : 'unresolved-reference',
       certainty: 'inferred',
@@ -370,12 +521,12 @@ export function interpretMessage(state, text) {
   if (/[?¿]/.test(text))
     return {
       intent: 'question',
-      relation: state.user_goal ? 'possibly-related' : 'unknown',
+      relation: active(state.user_goal) ? 'possibly-related' : 'unknown',
       certainty: 'inferred',
     };
   return {
     intent: 'request',
-    relation: state.user_goal ? 'possibly-related' : 'unknown',
+    relation: active(state.user_goal) ? 'possibly-related' : 'unknown',
     certainty: 'inferred',
   };
 }
@@ -468,6 +619,56 @@ export function updateUnderstanding(
         state.seen_messages.push(operation.messageKey);
       if (state.seen_messages.length > 2048) state.seen_messages.shift();
       break;
+    case 'goal-independent':
+      independentGoal(state, userText(operation.text), meta, now);
+      break;
+    case 'goal-transition':
+      transitionGoal(state, operation.id, operation.status, meta, now);
+      break;
+    case 'goal-candidate': {
+      if (!['primary', 'independent', 'reject'].includes(operation.action))
+        throw new UnderstandingError('Confirmación de inferencia inválida');
+      const g = (state.goal_candidates || []).find(
+        (g) => g.id === operation.id && g.status === 'pending',
+      );
+      if (!g)
+        throw new UnderstandingError(
+          'La inferencia ya no está pendiente',
+          'conflict',
+        );
+      if (operation.action === 'primary' && active(state.user_goal))
+        throw new UnderstandingError(
+          'Ya hay un objetivo principal activo. No se reemplaza desde una inferencia. Usá el editor de objetivo explícito.',
+          'conflict',
+        );
+      let target = null;
+      if (operation.action === 'primary') {
+        setGoal(state, g.text, meta, now, 'confirmed');
+        target = state.user_goal;
+      }
+      if (operation.action === 'independent')
+        target = independentGoal(state, g.text, meta, now, 'confirmed');
+      g.status = operation.action === 'reject' ? 'rejected' : 'accepted';
+      g.updated_at = now;
+      g.resolution = {
+        kind: 'user-confirmation',
+        verified: false,
+        at: now,
+        origin: origin(meta),
+        target_goal_id: target?.id || null,
+      };
+      goalEvent(
+        state,
+        g,
+        operation.action === 'reject'
+          ? 'candidate-rejected'
+          : 'candidate-confirmed',
+        meta,
+        now,
+        'pending',
+      );
+      break;
+    }
     case 'goal':
       setGoal(state, userText(operation.text), meta, now);
       break;
@@ -529,8 +730,35 @@ export function updateUnderstanding(
         if (state.seen_messages.length > 2048) state.seen_messages.shift();
       }
       const previousTask = state.current_task;
-      if (report.goal) {
-        if (!state.user_goal || report.goal.change)
+      if (report.directive) {
+        const d = report.directive;
+        if (d.type === 'independent')
+          for (const text of d.texts)
+            independentGoal(state, userText(text), meta, now);
+        else if (d.type === 'ambiguous')
+          ask(state, 'missing-reference', d.question, null, meta, now);
+        else {
+          const candidates = d.target
+            ? [state.user_goal, ...(state.independent_goals || [])].filter(
+                (g) => g && goalKey(g.text) === goalKey(d.target),
+              )
+            : [state.user_goal].filter(Boolean);
+          if (candidates.length !== 1)
+            ask(
+              state,
+              'missing-reference',
+              'No identifico un único objetivo. Indicá su texto exacto entre comillas o elegilo en el panel.',
+              null,
+              meta,
+              now,
+            );
+          else
+            transitionGoal(state, candidates[0].id, d.status, meta, now, text);
+        }
+        report.note =
+          'Actualización de objetivo declarada por el usuario. No verifica ejecución ni pruebas.';
+      } else if (report.goal) {
+        if (!active(state.user_goal) || report.goal.change)
           setGoal(state, report.goal.text, meta, now);
         else if (
           normalized(state.user_goal.text) !== normalized(report.goal.text)
@@ -593,7 +821,7 @@ export function updateUnderstanding(
         report.note =
           'Aprobación/rechazo observado. No cambia reglas ni autoriza acciones sin referencia inequívoca.';
       } else if (report.intent === 'continuation') {
-        if (!previousTask && !state.user_goal)
+        if (!previousTask && !active(state.user_goal))
           ask(
             state,
             'missing-reference',
@@ -711,9 +939,21 @@ export function updateUnderstanding(
             'inferred',
             'session',
           );
-          state.current_task.related_goal_id = state.user_goal?.id || null;
+          state.current_task.related_goal_id = active(state.user_goal)
+            ? state.user_goal.id
+            : null;
         }
-        if (!state.user_goal && report.intent === 'request')
+        const possible =
+          !active(state.user_goal) && report.intent === 'request'
+            ? possibleGoal(text)
+            : null;
+        if (possible)
+          candidateGoal(state, possible.text, possible.reason, meta, now);
+        if (
+          !active(state.user_goal) &&
+          report.intent === 'request' &&
+          !possible
+        )
           ask(
             state,
             'missing-goal',
@@ -742,6 +982,13 @@ export function updateUnderstanding(
       text: 'La relación de la tarea con el objetivo es una inferencia local, no confirmación del usuario.',
       reference_id: state.current_task.id,
     });
+  if ((state.goal_candidates || []).some((g) => g.status === 'pending'))
+    state.uncertainty.push({
+      kind: 'goal-candidate',
+      text: 'Hay una interpretación de objetivo pendiente de confirmación; no es un objetivo declarado.',
+      reference_id: state.goal_candidates.find((g) => g.status === 'pending')
+        .id,
+    });
   state.uncertainty.push(
     ...state.pending_questions
       .filter((q) => q.status === 'open')
@@ -766,7 +1013,11 @@ export function effectiveUnderstanding(state) {
     context_id: state.context_id,
     revision: state.revision,
     system_policies: [...SYSTEM_POLICIES],
-    user_goal: state.user_goal,
+    user_goal: active(state.user_goal) ? state.user_goal : null,
+    independent_goals: (state.independent_goals || []).filter(active),
+    goal_candidates: (state.goal_candidates || []).filter(
+      (g) => g.status === 'pending',
+    ),
     explicit_constraints: state.explicit_constraints.filter(active),
     active_instructions: state.active_instructions.filter(active),
     confirmed_decisions: state.confirmed_decisions.filter(active),
@@ -782,7 +1033,11 @@ export function effectiveUnderstanding(state) {
     last_context_update: state.last_context_update,
     readiness: state.pending_questions.some((q) => q.status === 'open')
       ? 'needs-clarification'
-      : 'structured-context-available',
+      : !active(state.user_goal)
+        ? (state.goal_candidates || []).some((g) => g.status === 'pending')
+          ? 'needs-goal-confirmation'
+          : 'no-active-goal'
+        : 'structured-context-available',
   };
 }
 export function validateUnderstanding(s) {
@@ -802,12 +1057,27 @@ export function validateUnderstanding(s) {
     !Number.isFinite(s.last_context_update)
   )
     fail();
-  function check(e) {
+  function validOrigin(o) {
+    return (
+      o &&
+      o.role === 'user' &&
+      typeof o.channel === 'string' &&
+      o.channel.length <= 100 &&
+      typeof o.message_id === 'string' &&
+      o.message_id.length <= 200 &&
+      typeof o.url === 'string' &&
+      o.url.length <= 2048
+    );
+  }
+  function check(
+    e,
+    statuses = ['active', 'superseded', 'obsolete', 'rejected'],
+  ) {
     if (
       !e ||
       typeof e.id !== 'string' ||
       e.id.length > 150 ||
-      !['active', 'superseded', 'obsolete', 'rejected'].includes(e.status) ||
+      !statuses.includes(e.status) ||
       !['explicit', 'inferred', 'confirmed'].includes(e.certainty) ||
       !['project', 'session'].includes(e.scope) ||
       !e.origin ||
@@ -825,20 +1095,121 @@ export function validateUnderstanding(s) {
       !Number.isFinite(e.updated_at)
     )
       fail();
+    if (e.resolution !== undefined) {
+      const r = e.resolution;
+      if (
+        !r ||
+        !['user-declaration', 'user-confirmation'].includes(r.kind) ||
+        r.verified !== false ||
+        !Number.isFinite(r.at) ||
+        !validOrigin(r.origin) ||
+        (r.target_goal_id !== undefined &&
+          r.target_goal_id !== null &&
+          (typeof r.target_goal_id !== 'string' ||
+            r.target_goal_id.length > 150)) ||
+        (r.statement !== undefined &&
+          (typeof r.statement !== 'string' ||
+            r.statement.length > MAX_USER_TEXT))
+      )
+        fail();
+    }
+    if (['completed', 'cancelled'].includes(e.status) && !e.resolution) fail();
     userText(e.text);
   }
-  if (s.user_goal) check(s.user_goal);
+  const goalStatuses = [
+    'active',
+    'superseded',
+    'obsolete',
+    'rejected',
+    'completed',
+    'cancelled',
+  ];
+  if (s.user_goal) {
+    check(s.user_goal, goalStatuses);
+    if (
+      s.user_goal.goal_type !== undefined &&
+      s.user_goal.goal_type !== 'primary'
+    )
+      fail();
+  }
+  for (const [field, max, statuses] of [
+    ['independent_goals', GOAL_LIMITS.independent, goalStatuses],
+    [
+      'goal_candidates',
+      GOAL_LIMITS.candidates,
+      ['pending', 'accepted', 'rejected', 'superseded'],
+    ],
+  ]) {
+    if (s[field] !== undefined) {
+      if (!Array.isArray(s[field]) || s[field].length > max) fail();
+      s[field].forEach((e) => {
+        check(e, statuses);
+        if (field === 'independent_goals' && e.goal_type !== 'independent')
+          fail();
+        if (
+          field === 'goal_candidates' &&
+          (e.certainty !== 'inferred' ||
+            typeof e.reason !== 'string' ||
+            e.reason.length > 2000 ||
+            (['accepted', 'rejected'].includes(e.status) &&
+              e.resolution?.kind !== 'user-confirmation'))
+        )
+          fail();
+      });
+    }
+  }
+  if (s.goal_events !== undefined) {
+    if (
+      !Array.isArray(s.goal_events) ||
+      s.goal_events.length > GOAL_LIMITS.events ||
+      s.goal_events.some(
+        (e) =>
+          !e ||
+          typeof e.id !== 'string' ||
+          e.id.length > 150 ||
+          typeof e.goal_id !== 'string' ||
+          e.goal_id.length > 150 ||
+          e.certainty !== 'user-declared' ||
+          ![null, 'active', 'completed', 'cancelled', 'pending'].includes(
+            e.from,
+          ) ||
+          ![
+            'active',
+            'completed',
+            'cancelled',
+            'superseded',
+            'accepted',
+            'rejected',
+          ].includes(e.to) ||
+          ![
+            'primary-set',
+            'independent-added',
+            'promoted-to-primary',
+            'reopened',
+            'completed',
+            'cancelled',
+            'candidate-rejected',
+            'candidate-confirmed',
+          ].includes(e.action) ||
+          !Number.isFinite(e.at) ||
+          !validOrigin(e.origin),
+      )
+    )
+      fail();
+  }
   if (s.current_task) check(s.current_task);
   for (const field of FIELDS) {
     if (!Array.isArray(s[field]) || s[field].length > 200) fail();
-    s[field].forEach(check);
+    s[field].forEach((e) => check(e));
   }
   for (const [field, max] of [
     ['goal_history', 50],
     ['instruction_history', 400],
   ]) {
     if (!Array.isArray(s[field]) || s[field].length > max) fail();
-    s[field].forEach(check);
+    s[field].forEach((e) =>
+      check(e, field === 'goal_history' ? goalStatuses : undefined),
+    );
   }
   if (
     !Array.isArray(s.pending_questions) ||

@@ -200,6 +200,48 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
       );
     return c;
   }
+  function goalCard(goal) {
+    const card = showEntry(goal, false);
+    card.append(
+      create(
+        'p',
+        goal.status === 'active'
+          ? 'Objetivo activo'
+          : goal.status === 'completed'
+            ? 'Completado según declaración del usuario; ejecución no verificada por NEXO'
+            : goal.status === 'cancelled'
+              ? 'Cancelado explícitamente; no significa completado'
+              : 'Sustituido; conservado para trazabilidad',
+        'note',
+      ),
+    );
+    if (goal.resolution)
+      card.append(
+        create(
+          'p',
+          `Origen del cambio: ${goal.resolution.kind} · ${new Date(goal.resolution.at).toLocaleString()} · no verificado externamente`,
+          'note',
+        ),
+      );
+    if (goal.status === 'active') {
+      card.append(
+        button('Declarar completado', () =>
+          mutate({ type: 'goal-transition', id: goal.id, status: 'completed' }),
+        ),
+      );
+      card.append(
+        button('Cancelar objetivo', () =>
+          mutate({ type: 'goal-transition', id: goal.id, status: 'cancelled' }),
+        ),
+      );
+    } else if (['completed', 'cancelled'].includes(goal.status))
+      card.append(
+        button('Reabrir explícitamente', () =>
+          mutate({ type: 'goal-transition', id: goal.id, status: 'active' }),
+        ),
+      );
+    return card;
+  }
   function render() {
     const s = snapshot.state;
     body.replaceChildren();
@@ -292,7 +334,7 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
       policies.append(create('p', text, 'note'));
     body.append(policies);
     body.append(create('h3', 'Objetivo principal'));
-    if (s.user_goal) body.append(showEntry(s.user_goal, false));
+    if (s.user_goal) body.append(goalCard(s.user_goal));
     else
       body.append(
         create(
@@ -310,6 +352,82 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         (text, key) => mutate({ type: 'goal', text }, key),
       ),
     );
+    const goals = create('details');
+    goals.open = true;
+    goals.append(
+      create(
+        'summary',
+        `Objetivos independientes (${(s.independent_goals || []).length})`,
+      ),
+    );
+    goals.append(
+      create(
+        'p',
+        'Se conservan separados y no sustituyen el principal ni reciben sus instrucciones. Para trabajar en otro proyecto, usá otra conversación/contexto. No hay activación ni ejecución automática.',
+        'note',
+      ),
+    );
+    for (const g of s.independent_goals || []) goals.append(goalCard(g));
+    goals.append(
+      form(
+        'independent-goal',
+        'Agregar objetivo independiente',
+        '',
+        'Conservar separado',
+        (text, key) => mutate({ type: 'goal-independent', text }, key),
+      ),
+    );
+    body.append(goals);
+    const inferred = create('details');
+    inferred.open = (s.goal_candidates || []).some(
+      (g) => g.status === 'pending',
+    );
+    inferred.append(
+      create(
+        'summary',
+        `Interpretaciones de objetivo (${(s.goal_candidates || []).length})`,
+      ),
+    );
+    for (const g of s.goal_candidates || []) {
+      const card = showEntry(g, false);
+      card.append(create('p', g.reason, 'note'));
+      if (g.status === 'pending') {
+        if (s.user_goal?.status !== 'active')
+          card.append(
+            button('Confirmar como principal', () =>
+              mutate({ type: 'goal-candidate', id: g.id, action: 'primary' }),
+            ),
+          );
+        card.append(
+          button('Confirmar como independiente', () =>
+            mutate({ type: 'goal-candidate', id: g.id, action: 'independent' }),
+          ),
+        );
+        card.append(
+          button('Rechazar interpretación', () =>
+            mutate({ type: 'goal-candidate', id: g.id, action: 'reject' }),
+          ),
+        );
+      }
+      inferred.append(card);
+    }
+    body.append(inferred);
+    const goalEvents = create('details');
+    goalEvents.append(
+      create(
+        'summary',
+        `Historial de objetivos (${(s.goal_events || []).length})`,
+      ),
+    );
+    for (const e of s.goal_events || [])
+      goalEvents.append(
+        create(
+          'p',
+          `${e.action} · ${e.goal_id} · ${e.from || '—'} → ${e.to} · ${e.origin.channel} · ${new Date(e.at).toLocaleString()}`,
+          'note',
+        ),
+      );
+    body.append(goalEvents);
     if (s.current_task) {
       body.append(create('h3', 'Tarea actual / última conocida'));
       body.append(showEntry(s.current_task, false));

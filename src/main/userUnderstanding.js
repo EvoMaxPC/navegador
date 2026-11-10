@@ -596,9 +596,16 @@ export function installUnderstandingIPC({
   handle('read', (_e, _p, c) => ({ ok: true, ...service.snapshot(c) }));
   handle('edit', (_e, p, c) => {
     if (
-      !['goal', 'add', 'retire', 'resolve', 'message'].includes(
-        p.operation?.type,
-      )
+      ![
+        'goal',
+        'goal-independent',
+        'goal-transition',
+        'goal-candidate',
+        'add',
+        'retire',
+        'resolve',
+        'message',
+      ].includes(p.operation?.type)
     )
       throw new UnderstandingError('Operación no permitida');
     const { report } = service.edit(c, p.operation);

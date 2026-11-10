@@ -139,3 +139,85 @@ test('main correlaciona snapshot mediado con original; el lector y los prompts s
   assert.equal(state.explicit_constraints.length, 0);
   assert.equal(state.goal_history.length, 0);
 });
+
+test('operaciones de objetivos del panel pasan por IPC autorizado y nunca por página o subframe', async () => {
+  const g = attach('https://chatgpt.com/c/goals-ipc');
+  const handler = journal.ipcHandlers.get('nexo:understanding:edit');
+  const edit = (operation, event = shellEvent) =>
+    handler(event, { webContentsId: g.id, operation });
+  let r = await edit({
+    type: 'goal-independent',
+    revision: 0,
+    text: 'Proyecto separado',
+  });
+  assert.equal(r.ok, true);
+  const separate = r.state.independent_goals[0];
+  r = await edit({
+    type: 'goal-transition',
+    revision: r.state.revision,
+    id: separate.id,
+    status: 'completed',
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.state.independent_goals[0].resolution.verified, false);
+  let denied = await edit(
+    {
+      type: 'goal-transition',
+      revision: r.state.revision,
+      id: separate.id,
+      status: 'active',
+    },
+    { sender: g, senderFrame: g.mainFrame },
+  );
+  assert.equal(denied.code, 'unauthorized');
+  denied = await edit(
+    {
+      type: 'goal-transition',
+      revision: r.state.revision,
+      id: separate.id,
+      status: 'active',
+    },
+    { sender: owner, senderFrame: {} },
+  );
+  assert.equal(denied.code, 'unauthorized');
+  r = await edit({
+    type: 'message',
+    revision: r.state.revision,
+    text: 'Quiero construir un navegador',
+  });
+  assert.equal(r.ok, true);
+  const candidate = r.state.goal_candidates[0];
+  r = await edit({
+    type: 'goal-candidate',
+    revision: r.state.revision,
+    id: candidate.id,
+    action: 'primary',
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.state.user_goal.certainty, 'confirmed');
+  assert.equal((await read(g)).state.independent_goals[0].status, 'completed');
+});
+test('asistente no cierra ni reabre objetivos aunque lo afirme en respuesta estable', async () => {
+  const g = attach('https://chatgpt.com/c/goals-assistant');
+  const snapshot = journal.ipcHandlers.get('nexo:conversation-snapshot');
+  const r = snapshot(
+    { sender: g, senderFrame: g.mainFrame },
+    {
+      href: g.getURL(),
+      streaming: false,
+      turns: [
+        { id: 'u1', role: 'user', content: 'Mi objetivo: control explícito' },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: 'Objetivo principal completado',
+        },
+      ],
+    },
+  );
+  assert.equal(r.ok, true);
+  const state = (await read(g)).state;
+  assert.equal(state.user_goal.status, 'active');
+  assert.equal(state.progress.length, 0);
+  assert.equal(state.goal_events.length, 1);
+});

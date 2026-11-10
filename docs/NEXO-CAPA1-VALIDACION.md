@@ -274,3 +274,19 @@ correcto. Las 14 pruebas nuevas se enumeran en el documento de etapas. No hubo
 validación visual en Electron real ni prueba con cuenta ChatGPT real. No se
 declaran satisfechos los 72 requisitos: sólo la primera base observacional, con
 las limitaciones semánticas y de ventana allí detalladas.
+
+
+## Comprensión por etapas — segundo bloque posterior
+
+La [etapa 2 de objetivos y ciclo de vida](NEXO-COMPRENSION-ETAPAS.md#etapa-2-implementada--objetivos-y-ciclo-de-vida)
+añade independientes, candidatos inferidos revisables, cierres/reapertura,
+historia y controles del panel sin ejecución ni dependencia de EVO. El registro
+aditivo es compatible con archivos previos. No borra ni reemplaza la evidencia
+histórica de arriba.
+
+Resultados de esta iteración: **90/90 focalizadas**; suite completa **830 totales,
+829 aprobadas, 0 fallidas y 1 omitida** (empaquetado Windows real). Build de
+inyección correcto. 28 pruebas nuevas; el test del panel usa DOM mínimo de fixture
+y el flujo main usa Electron stub. No se probó Electron real ni una cuenta real.
+Restan los bloques 3–7 y los gates manuales documentados; no son 72 requisitos
+completados.

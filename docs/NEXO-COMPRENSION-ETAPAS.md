@@ -4,8 +4,8 @@
 
 Los 72 requisitos describen un objetivo amplio, no capacidades ya demostradas.
 Se avanza por etapas sobre el UUE existente, sin reconstruir NEXO ni introducir
-un agente ejecutor. Esta entrega implementa **sólo la etapa 1**, sobre 0.1.33.
-Las seis siguientes quedan planificadas; no se declara el panel completo.
+un agente ejecutor. La entrega actual incorpora **las etapas 1 y 2**, sobre
+0.1.33. Las cinco siguientes siguen planificadas; no se declara el panel completo.
 
 No hay modelo semántico nuevo, envíos externos, nuevos permisos ni dependencia
 nueva. Las reglas actuales siguen siendo locales y conservadoras. Comprender no
@@ -19,7 +19,7 @@ entre bloques. Las funciones parciales existentes de UUE se reutilizarán.
 | Etapa | Responsabilidad | Requisitos | Estado de esta entrega |
 |---|---|---|---|
 | 1 | Observación incremental, roles y actualización automática | 1–6, 49, 54, 58, 68 | Base implementada; límites semánticos debajo |
-| 2 | Objetivo principal, múltiples objetivos, cambios y ciclo de vida | 7–12 | Siguiente etapa; reutilizar objetivo/historia actuales |
+| 2 | Objetivo principal, múltiples objetivos, cambios y ciclo de vida | 7–12 | Implementada con gramática acotada y revisión explícita; detalle debajo |
 | 3 | Reglas, restricciones, preferencias, decisiones y vigencia | 13–18, 37–41, 43–44, 50–51, 53, 67, 72 | Parcial previo; falta ampliar y validar sistemáticamente |
 | 4 | Tareas, subtareas, dependencias, prioridades y siguiente paso | 19–24, 34, 36 | Pendiente; no inventar plan ni ejecutar tareas |
 | 5 | Proyectos, referencias, selección de contexto y antecedentes | 25–30, 47, 55–57, 59, 71 | Parcial previo; EVO opcional y referencias revisables |
@@ -30,7 +30,7 @@ Cada etapa deberá cerrar con casos positivos/negativos, conservación de reglas
 independencia de EVO, pruebas de regresión y límites explícitos. No usar el número
 de campos o tests como medida de comprensión semántica ni de utilidad real.
 
-## Etapa 1 implementada
+## Etapa 1 implementada — entrega anterior
 
 ### Qué cambió
 
@@ -141,7 +141,7 @@ con usuarios. Antes de ampliar el siguiente bloque conviene verificar manualment
 EVO apagada → varios mensajes → respuestas en generación/estables → panel abierto
 que se renueva → borrador en edición → cambio de conversación → reinicio → borrado.
 
-## Archivos de esta etapa
+## Archivos de la etapa 1
 
 Nuevos:
 - `src/core/conversationObservation.js`
@@ -157,5 +157,140 @@ Modificados:
 - `README.md`, `docs/NEXO-CAPA1-0.1.33.md`, `docs/NEXO-CAPA1-VALIDACION.md`:
   enlaces y registro del alcance posterior, sin invalidar evidencia histórica.
 
-La entrega incluye un commit y push a la rama de trabajo; no se avanza a las
-etapas 2–7 ni a ejecución autónoma en este cambio.
+La entrega de etapa 1 se publicó como `64b8432`. Su alcance y resultados anteriores
+se conservan como evidencia histórica; el bloque siguiente amplía únicamente los
+objetivos, no la ejecución autónoma.
+
+
+## Etapa 2 implementada — objetivos y ciclo de vida
+
+### Alcance de los requisitos 7–12
+
+- **Principal explícito, libre y literal:** permanece el editor de hasta 200.000
+  caracteres y las declaraciones reconocidas ES/EN. Una tarea, aclaración,
+  preferencia o pregunta secundaria no reemplaza ese objetivo. Una declaración
+  distinta sin señal inequívoca abre una propuesta de cambio; un «sí» genérico no
+  la acepta. El editor y «Cambio de objetivo: …» son cambios explícitos.
+- **Historia y cambios legítimos:** se conservan el objetivo anterior, su origen,
+  estado y fechas; el registro de eventos añade los cierres, reaperturas,
+  incorporación de independientes y confirmación/rechazo de inferencias.
+- **Varios objetivos separados:** catálogo de objetivos independientes. No cambian
+  el principal, no heredan sus instrucciones y no activan otro proyecto ni
+  ejecutan un plan. No se pretende haber implementado ámbitos de reglas por
+  objetivo: las reglas existentes siguen perteneciendo a la conversación/contexto.
+  Para trabajar realmente en otro proyecto hay que usar otro contexto/conversación;
+  selección y continuidad ampliadas corresponden al bloque de proyectos.
+- **Implícitos revisables:** ciertos deseos de crear/construir/desarrollar, etc.,
+  sin principal activo, se guardan como candidatos inferidos, no como objetivos.
+  El panel permite rechazarlos o confirmar uno como principal/independiente.
+  La inferencia original conserva su certeza; el objetivo resultante registra la
+  confirmación. No se puede sustituir un principal activo desde un candidato.
+- **Ciclo de vida:** estados activos, completados y cancelados separados. Cerrar
+  el principal retira su proyección activa y la tarea asociada; las restricciones
+  y demás reglas se conservan. Reabrir exige declaración/control explícito y
+  conserva identidad. Una continuación genérica no reactiva un objetivo cerrado.
+- **Declaración no es prueba:** completar guarda `kind: user-declaration`,
+  `verified: false`, origen y fecha. No añade progreso probado, no analiza archivos
+  ni valida resultados. El asistente observado nunca cierra objetivos ni confirma
+  interpretaciones. `complete` del DOM continúa significando sólo texto estable.
+
+### Uso desde conversación y panel
+
+Ejemplos de la gramática conservadora (no son instrucciones de ejecución):
+
+```text
+Mi objetivo: mejorar la accesibilidad de NEXO
+Cambio de objetivo: documentar su arquitectura
+Objetivo independiente: preparar una aplicación educativa
+Objetivos independientes:
+- Diseñar un editor
+- Documentar una API
+Objetivo principal completado
+Cancelo el objetivo principal
+Retomar el objetivo principal
+Objetivo «Documentar una API» completado
+Retomar objetivo «Documentar una API»
+Quiero construir una aplicación educativa
+```
+
+El último ejemplo crea una interpretación pendiente sólo si no hay principal
+activo; no confirma un objetivo. Una lista exige de uno a diez renglones con guion
+(o asterisco). Un formato dudoso pide aclaración en vez de unir varios objetivos.
+Las referencias entre comillas se resuelven por texto normalizado exacto; si son
+ambiguas o desconocidas no se elige un objetivo por intuición.
+
+En **Comprensión**: editor del principal → declarar completado/cancelar/reabrir;
+sección de independientes → conservar uno separado y controlar su estado;
+interpretaciones → confirmar concretamente o rechazar; historial → revisar eventos.
+Las tarjetas muestran literal, certeza, estado, procedencia y fecha. El estado
+cancelado no equivale a completado y ambos muestran su naturaleza declarativa.
+
+### Persistencia, seguridad y límites
+
+Se amplía el estado UUE `schema_version: 1` con tres arrays **opcionales al leer**:
+`independent_goals`, `goal_candidates` y `goal_events`. Los archivos anteriores
+sin esos campos siguen cargando; se inicializan cuando se necesitan. No hay otro
+archivo/transcripción ni cambio en EVO. Las estructuras nuevas, cierres,
+confirmaciones, estados, origen y eventos se validan al leer/escribir; corrupción
+bloquea escritura sin sobrescribir el archivo.
+
+Límites por contexto: 20 independientes (incluidos cerrados/sustituidos), 30
+candidatos (incluidos resueltos), 200 eventos y 50 objetivos principales históricos.
+Se conservan los límites previos de texto/contexto/archivo. Al llenarse un catálogo
+se rechaza la transacción con error visible: no se podan silenciosamente objetivos
+activos, candidatos ni historia para admitir otro cambio. Tampoco se guarda media
+lista si rebasa un límite. Un fallo de escritura no confirma el cierre en RAM;
+puede reintentarse con la misma revisión.
+
+Las tres operaciones nuevas (`goal-independent`, `goal-transition`,
+`goal-candidate`) pasan por el mismo IPC de edición, revisión optimista y
+validaciones shell/mainFrame/guest. No se exponen APIs privilegiadas al sitio.
+No se cambian el lector, los canales, la cola de 500 ms, el ACK, los prompts,
+Engine, guard, CDP, tokenización, contadores ni la dependencia opcional de EVO.
+
+### Validación ejecutada
+
+| Ejecución | Total | Aprobadas | Fallidas | Omitidas |
+|---|---:|---:|---:|---:|
+| Focalizadas: UUE, observación, IPC, independencia, shell, objetivos y panel | 90 | 90 | 0 | 0 |
+| `npm test` | 830 | 829 | 0 | 1 |
+
+La suite completa duró 104.306,10077 ms. La omitida sigue siendo el empaquetado
+Windows real que requiere `NEXO_ELECTRON_ZIP_DIR`. Build de inyección correcto:
+53,7 kB / 19,3 kB gzip, 11 módulos. La versión se conserva en 0.1.33.
+
+Se añaden **28 pruebas**:
+- 25 en `test/understanding-goals.test.js`: literal extenso, cambios, historia,
+  independientes, cierres/reapertura, referencias ambiguas, negaciones/citas,
+  inferencias, confirmación y rechazo, límites atómicos, compatibilidad,
+  corrupción, reinicio, aislamiento, borrado y fallo de persistencia/reintento.
+- 2 en `test/user-understanding-main.test.js`: operaciones nuevas en el flujo IPC
+  real con Electron stub, rechazo de página/subframe y asistente sin autoridad
+  para cerrar objetivos.
+- 1 en `test/understanding-goals-panel.test.js`: controles de UI conectados al core
+  mediante el puente de fixture; confirmación, guardado, cierre/cancelación,
+  reapertura, borrador conservado y cambio de pestaña sin edición accidental.
+
+**Límites de la evidencia:** DOM de fixture y Electron stub no equivalen a una
+sesión real. No se ejecutaron Electron/Windows ni una cuenta ChatGPT real, ni se
+validaron visualmente foco, scroll, estilos o accesibilidad. No hay mediciones de
+calidad semántica o rendimiento. La gramática ES/EN no comprende todos los deseos,
+negaciones, citas o referencias posibles; ante lenguaje no reconocido hay que
+corregir/editar en el panel. No hay descomposición automática general ni selección
+semántica entre proyectos ni evidencia externa de finalización.
+
+Gate manual pendiente: EVO apagada → objetivo extenso → tarea y pregunta secundaria
+→ objetivo independiente → declaración de cierre → reapertura → deseo inferido
+sin principal activo y revisión de candidato → cambio de conversación → reinicio
+→ borrar contexto y comprobar exclusión. Revisar también texto literal escapado,
+foco/borrador, scroll y controles dentro del tema BLACK & ELECTRIC BLUE existente.
+
+### Archivos de la etapa 2
+
+Nuevos: `src/core/userGoals.js`, `test/understanding-goals.test.js` y
+`test/understanding-goals-panel.test.js`.
+Modificados: core y servicio UUE, panel Comprensión, manifest de empaquetado,
+tests IPC y documentación. No se añade dependencia de producción ni de pruebas.
+La entrega se cierra con commit y push sobre la rama de trabajo. **El próximo
+bloque es el 3: reglas, restricciones, preferencias, decisiones y vigencia.**
+No se declaran completados los 72 requisitos.
