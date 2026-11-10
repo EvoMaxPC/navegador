@@ -50,6 +50,23 @@ function outer(nodes) {
   });
 }
 
+function containsNode(parent, child) {
+  if (parent === child) return true;
+  for (let node = child?.parentElement; node; node = node.parentElement) if (node === parent) return true;
+  try { return Boolean(parent?.contains?.(child)); } catch { return false; }
+}
+function isAlreadySelected(messages, candidate) {
+  return messages.some((entry) => entry.role === candidate.role &&
+    (containsNode(entry.node, candidate.node) || containsNode(candidate.node, entry.node)));
+}
+function compareDocumentOrder(a, b) {
+  try {
+    const position = a.node.compareDocumentPosition?.(b.node) || 0;
+    if (position & 4) return -1;
+    if (position & 2) return 1;
+  } catch { /* nodos de prueba o DOM transitorio */ }
+  return 0;
+}
 export function selectChatGptMessages(document) {
   // Las etiquetas visibles pueden detectar sólo una parte de la conversación.
   // No deben bloquear los selectores estructurales que encuentren la respuesta.
@@ -61,7 +78,7 @@ export function selectChatGptMessages(document) {
   for (const strategy of strategies) {
     const found = outer(queryAll(document, strategy.selector))
       .map((node) => ({ node, role: strategy.role(node) }))
-      .filter((entry) => entry.role && !seen.has(entry.node));
+      .filter((entry) => entry.role && !seen.has(entry.node) && !isAlreadySelected(messages, entry));
     if (found.length) {
       for (const entry of found) {
         seen.add(entry.node);
@@ -70,6 +87,7 @@ export function selectChatGptMessages(document) {
       usedStrategies.push(strategy.name);
     }
   }
+  messages.sort(compareDocumentOrder);
   return {
     strategy: usedStrategies.join('+') || 'none',
     messages,
