@@ -123,7 +123,7 @@ jobs:
             $texto = "===== prueba de humo =====`n" + (Get-Content ci-humo.txt -Raw) + "`n===== pruebas =====`n" + $texto
           }
           if (Test-Path ci-repetition.json) {
-            $texto = "===== conversación Electron =====`n" + (Get-Content ci-repetition.json -Raw) + "`n" + $texto
+            $texto = $texto + "`n===== conversación Electron =====`n" + (Get-Content ci-repetition.json -Raw)
           }
           if ($texto.Length -gt 60000) { $texto = $texto.Substring($texto.Length - 60000) }
           $cuerpo = @{
