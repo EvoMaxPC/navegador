@@ -126,7 +126,8 @@ test('B: lector existente → vista en vivo → UUE con EVO y mediación apagada
     const before = invoke('nexo:stats', owner),
       memoryBefore = invoke('nexo:memory:list', owner);
     reader.read();
-    await Promise.resolve();
+    // El canal de snapshot existente agrupa escrituras durante 500 ms.
+    await new Promise((resolve) => setTimeout(resolve, 550));
     assert.deepEqual(
       calls,
       ['nexo:repetition:snapshot', 'nexo:conversation-snapshot'],
