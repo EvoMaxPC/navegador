@@ -1,3 +1,4 @@
+import { contextItems, contextPreview } from '../core/userProjects.js';
 /** UUE main: usa la persistencia atómica existente de EVO, sin cambiar sus archivos. */
 import {
   planObservation,
@@ -93,6 +94,16 @@ export class UserUnderstandingService {
               (c) => c.status === 'pending',
             ),
         );
+        if (
+          row.state.selected_reference_id &&
+          !row.state.relevant_context.some(
+            (e) =>
+              e.status === 'active' &&
+              e.id === row.state.selected_reference_id &&
+              e.entity,
+          )
+        )
+          row.state.selected_reference_id = null;
         if (row.state.current_task)
           row.state.current_task.validity = 'last-known';
       }
@@ -154,19 +165,41 @@ export class UserUnderstandingService {
       );
     return `${u.origin}${u.pathname}`;
   }
+  documentIdentity(contents) {
+    const url = this.document(contents),
+      path = new URL(url).pathname;
+    const temporary =
+      /^\/(?:app\/?)?$/.test(path) ||
+      /^\/g\/[^/]+(?:\/project)?\/?$/.test(path);
+    return {
+      url,
+      temporary,
+      id: `c-${hash(`${this.projectId}|${temporary ? `${this.session}|${contents.id}|` : ''}${url}`).slice(0, 32)}`,
+    };
+  }
   contextFor(contents) {
     this.ready();
     const url = this.document(contents),
       previous = this.bindings.get(contents.id);
     if (previous?.url === url) return previous.id;
-    const root = /^\/(?:app\/?)?$/.test(new URL(url).pathname);
-    const id = `c-${hash(`${this.projectId}|${root ? `${this.session}|${contents.id}|` : ''}${url}`).slice(0, 32)}`;
+    const identity = this.documentIdentity(contents),
+      root = identity.temporary,
+      id = identity.id;
+    const previousPath = previous ? new URL(previous.url).pathname : '';
+    const migrationPath = previousPath.startsWith('/g/')
+      ? `${previousPath.replace(/\/project\/?$|\/$/, '')}/c/`
+      : null;
+    const sameRoute = migrationPath
+      ? new URL(url).pathname.startsWith(migrationPath)
+      : /^\/(?:c|chat|app)\/[^/]+/.test(new URL(url).pathname);
+    this.recent.delete(contents.id);
+    this.reports.delete(`error-${contents.id}`);
     // Migra únicamente una conversación nueva de raíz a su primera URL identificable.
     if (
       previous?.temporary &&
       !root &&
       new URL(previous.url).origin === new URL(url).origin &&
-      /\/(?:c|chat|app)\/[^/]+/.test(new URL(url).pathname) &&
+      sameRoute &&
       !Object.hasOwn(this.data.deleted_revisions, id) &&
       !this.data.contexts.some((r) => r.state.context_id === id)
     ) {
@@ -258,34 +291,74 @@ export class UserUnderstandingService {
   }
   snapshot(contents) {
     const id = this.contextFor(contents),
+      physical = this.documentIdentity(contents),
       state = structuredClone(this.row(id, this.document(contents)).state);
     const references = [
-      ...state.relevant_context.map((e) => e.reference),
-      ...state.pending_questions.map((q) => q.proposed?.reference),
+      ...state.relevant_context
+        .filter((e) => e.status === 'active')
+        .map((e) => e.reference),
+      ...state.pending_questions
+        .filter((q) => q.status === 'open')
+        .map((q) => q.proposed?.reference),
     ].filter(Boolean);
-    const memories = this.enabled()
-      ? this.memory?.list({ limit: 6000 }) || []
-      : [];
+    const memories =
+      references.length && this.enabled()
+        ? this.memory?.list({ limit: 6000 }) || []
+        : [];
     const memoryReferences = references.map((ref) => {
       const found = memories.find((e) => e.id === ref.id);
       return {
         id: ref.id,
-        available: Boolean(found),
-        text: found?.text || null,
+        available:
+          Boolean(found) &&
+          ref.project_id === this.projectId &&
+          (!ref.digest || ref.digest === hash(found.text || '')),
+        text:
+          found &&
+          ref.project_id === this.projectId &&
+          (!ref.digest || ref.digest === hash(found.text || ''))
+            ? found.text
+            : null,
+        changed: Boolean(
+          found && ref.digest && ref.digest !== hash(found.text || ''),
+        ),
+        pinned: Boolean(ref.digest),
         kind: found?.kind || ref.kind,
         verified: false,
       };
     });
+    const sourceCache = new Map();
+    const contextReferences = (state.context_references || []).map((ref) =>
+      this.referenceView(ref, sourceCache),
+    );
+    const effective = effectiveUnderstanding(state);
+    effective.context_references = effective.context_references.map((r) => ({
+      ...r,
+      available:
+        contextReferences.find((v) => v.id === r.id)?.available === true,
+    }));
     return {
       state,
-      effective: effectiveUnderstanding(state),
+      effective,
       report: this.reports.get(id) || null,
       observationError: this.reports.get(`error-${contents.id}`)?.error || null,
       memoryReferences,
+      contextReferences,
+      contextSelection: {
+        mode: this.bindings.get(contents.id)?.manual ? 'explicit' : 'natural',
+        context_id: id,
+        document_context_id: physical.id,
+        document_url: physical.url,
+        source_url: this.row(id).url,
+        temporary: physical.temporary,
+        baselinePending: Boolean(
+          this.bindings.get(contents.id)?.baseline_pending,
+        ),
+      },
       observationEnabled: true,
       conversation: structuredClone(
-        this.liveConversations.get(id) ||
-          this.row(id).conversation ||
+        this.liveConversations.get(physical.id) ||
+          this.row(physical.id).conversation ||
           emptyObservation(),
       ),
       erased: Object.hasOwn(this.data.deleted_revisions, id),
@@ -380,8 +453,12 @@ export class UserUnderstandingService {
         url = this.document(contents);
       if (Object.hasOwn(this.data.deleted_revisions, id))
         return { skipped: 'erased' };
+      const physical = this.documentIdentity(contents),
+        binding = this.bindings.get(contents.id);
       const row = this.row(id, url),
-        previous = this.liveConversations.get(id) || row.conversation;
+        previous =
+          this.liveConversations.get(physical.id) ||
+          this.row(physical.id).conversation;
       const prepared = turns
         .filter(
           (t) =>
@@ -400,7 +477,18 @@ export class UserUnderstandingService {
         streaming,
         now: this.now(),
       });
-      if (plan.skipped) return { skipped: plan.skipped };
+      if (
+        binding?.baseline_pending &&
+        prepared.some((t) => t.role === 'user')
+      ) {
+        plan.users = [];
+        plan.observation.warnings = [
+          'Contexto elegido explícitamente: la ventana ya visible se toma como punto de partida, no se reimportan sus instrucciones.',
+        ];
+        plan.changed = true;
+      }
+      if (plan.skipped && !binding?.baseline_pending)
+        return { skipped: plan.skipped };
       let result = { ok: true, duplicate: !plan.changed };
       for (const user of plan.users) {
         result = this.observe(contents, user.content, {
@@ -419,22 +507,29 @@ export class UserUnderstandingService {
             (m) => m.status !== 'streaming',
           ),
         };
-        const saved = this.row(id, url).conversation || emptyObservation();
+        const saved =
+          this.row(physical.id, url).conversation || emptyObservation();
         if (
+          !Object.hasOwn(this.data.deleted_revisions, physical.id) &&
           JSON.stringify({ ...saved, revision: 0 }) !==
-          JSON.stringify({ ...stable, revision: 0 })
+            JSON.stringify({ ...stable, revision: 0 })
         ) {
           const next = structuredClone(this.data),
-            index = next.contexts.findIndex((r) => r.state.context_id === id);
+            index = next.contexts.findIndex(
+              (r) => r.state.context_id === physical.id,
+            );
           if (index < 0) {
             if (next.contexts.length >= 50)
               throw new UnderstandingError('Máximo 50 contextos', 'limit');
-            next.contexts.push({ ...this.row(id, url), conversation: stable });
+            next.contexts.push({
+              ...this.row(physical.id, url),
+              conversation: stable,
+            });
           } else next.contexts[index].conversation = stable;
           this.commit(next);
         }
-        this.liveConversations.delete(id);
-        this.liveConversations.set(id, plan.observation);
+        this.liveConversations.delete(physical.id);
+        this.liveConversations.set(physical.id, plan.observation);
         if (this.liveConversations.size > 50)
           this.liveConversations.delete(
             this.liveConversations.keys().next().value,
@@ -445,6 +540,12 @@ export class UserUnderstandingService {
           conversationRevision: plan.observation.revision,
         });
       }
+      if (
+        binding?.baseline_pending &&
+        prepared.some((t) => t.role === 'user') &&
+        !prepared.filter((t) => t.role === 'user').at(-1)?.clipped
+      )
+        binding.baseline_pending = false;
       this.reports.delete(`error-${contents.id}`);
       return result;
     } catch (error) {
@@ -456,6 +557,78 @@ export class UserUnderstandingService {
   edit(contents, operation) {
     const id = this.contextFor(contents),
       url = this.document(contents);
+    if (operation.contextId !== undefined && operation.contextId !== id)
+      throw new UnderstandingError(
+        'La conversación/contexto cambió; recargá antes de editar.',
+        'conflict',
+      );
+    if (operation.type === 'context-reference') {
+      const preview = this.inspect(
+        operation.sourceContextId,
+        operation.sourceRevision,
+        operation.targetKind || 'summary',
+        operation.targetId ?? null,
+      );
+      if (
+        operation.sourceDigest !== undefined &&
+        operation.sourceDigest !== preview.source_digest
+      )
+        throw new UnderstandingError(
+          'El origen cambió; inspeccionalo nuevamente.',
+          'conflict',
+        );
+      operation = {
+        type: 'context-reference',
+        revision: operation.revision,
+        reference: {
+          source_context_id: preview.source_context_id,
+          source_revision: preview.source_revision,
+          source_digest: preview.source_digest,
+          target_kind: preview.target_kind,
+          target_id: preview.target_id,
+          label: preview.label,
+        },
+      };
+    }
+    if (
+      ['context-reference-resolve', 'context-reference-refresh'].includes(
+        operation.type,
+      )
+    ) {
+      const r = (this.row(id).state.context_references || []).find(
+        (r) => r.id === operation.id,
+      );
+      if (!r)
+        throw new UnderstandingError('Referencia no disponible', 'conflict');
+      if (operation.type === 'context-reference-refresh') {
+        const preview = this.inspect(
+          r.source_context_id,
+          operation.sourceRevision,
+          r.target_kind,
+          r.target_id,
+        );
+        if (
+          operation.sourceDigest !== undefined &&
+          operation.sourceDigest !== preview.source_digest
+        )
+          throw new UnderstandingError(
+            'El origen cambió; inspeccionalo nuevamente.',
+            'conflict',
+          );
+        operation = {
+          ...operation,
+          source_revision: preview.source_revision,
+          source_digest: preview.source_digest,
+        };
+      } else if (
+        operation.action === 'confirm' &&
+        !this.referenceView(r).available
+      )
+        throw new UnderstandingError(
+          'El antecedente cambió o fue eliminado. Revisá y actualizá la referencia antes de confirmar.',
+          'conflict',
+        );
+    }
     if (operation.type === 'resolve' && operation.accept) {
       const q = this.row(id).state.pending_questions.find(
         (q) => q.id === operation.id,
@@ -465,7 +638,13 @@ export class UserUnderstandingService {
         (!this.enabled() ||
           !this.memory
             ?.list({ limit: 6000 })
-            .some((e) => e.id === q.proposed.reference.id))
+            .some(
+              (e) =>
+                e.id === q.proposed.reference.id &&
+                q.proposed.reference.project_id === this.projectId &&
+                (!q.proposed.reference.digest ||
+                  q.proposed.reference.digest === hash(e.text || '')),
+            ))
       )
         throw new UnderstandingError(
           'La referencia EVO ya no está disponible; no se reintroducirá.',
@@ -502,6 +681,7 @@ export class UserUnderstandingService {
             id: item.id,
             project_id: this.projectId,
             kind: item.kind,
+            digest: hash(item.text || ''),
           },
         },
         {
@@ -512,25 +692,153 @@ export class UserUnderstandingService {
       );
     return { count: found.length };
   }
+  inspect(id, revision, targetKind = 'summary', targetId = null, offset = 0) {
+    this.ready();
+    const row = this.data.contexts.find((r) => r.state.context_id === id);
+    if (!row || Object.hasOwn(this.data.deleted_revisions, id))
+      throw new UnderstandingError(
+        'Contexto eliminado o no disponible',
+        'conflict',
+      );
+    if (row.state.revision !== revision)
+      throw new UnderstandingError(
+        'El contexto de origen cambió; recargá la lista.',
+        'conflict',
+      );
+    if (
+      !['summary', 'entry'].includes(targetKind) ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset > 2000
+    )
+      throw new UnderstandingError('Selección de antecedente inválida');
+    const preview = contextPreview(row, targetKind, targetId);
+    if (!preview)
+      throw new UnderstandingError(
+        'La entrada de origen ya no está disponible',
+        'conflict',
+      );
+    const items = contextItems(row.state);
+    return {
+      ...preview,
+      source_digest: hash(JSON.stringify(row.state)),
+      items: items.slice(offset, offset + 20).map((i) => ({
+        id: i.entry.id,
+        label: i.entry.text.slice(0, 150),
+        kind: i.kind,
+        status: i.entry.status,
+        certainty: i.entry.certainty,
+      })),
+      offset,
+      total: items.length,
+    };
+  }
+  referenceView(ref, cache = new Map()) {
+    if (['rejected', 'retired'].includes(ref.status))
+      return {
+        id: ref.id,
+        available: false,
+        reason: 'inactive-reference',
+        preview: null,
+      };
+    if (!cache.has(ref.source_context_id)) {
+      const row = this.data.contexts.find(
+        (r) => r.state.context_id === ref.source_context_id,
+      );
+      cache.set(ref.source_context_id, {
+        row,
+        digest: row ? hash(JSON.stringify(row.state)) : null,
+      });
+    }
+    const { row, digest } = cache.get(ref.source_context_id);
+    if (
+      !row ||
+      Object.hasOwn(this.data.deleted_revisions, ref.source_context_id)
+    )
+      return {
+        id: ref.id,
+        available: false,
+        reason: 'deleted-source',
+        preview: null,
+      };
+    if (
+      row.state.revision !== ref.source_revision ||
+      digest !== ref.source_digest
+    )
+      return {
+        id: ref.id,
+        available: false,
+        reason: 'changed-source',
+        preview: null,
+        currentRevision: row.state.revision,
+      };
+    const preview = contextPreview(row, ref.target_kind, ref.target_id);
+    return {
+      id: ref.id,
+      available: Boolean(preview),
+      reason: preview ? 'available' : 'missing-entry',
+      preview,
+    };
+  }
   contexts() {
     this.ready();
     return this.data.contexts
+      .filter(
+        (r) => !Object.hasOwn(this.data.deleted_revisions, r.state.context_id),
+      )
       .map((r) => ({
         id: r.state.context_id,
         url: r.url,
         goal: r.state.user_goal?.text.slice(0, 150) || 'Sin objetivo',
+        project: r.state.project?.name || null,
+        revision: r.state.revision,
+        digest: hash(JSON.stringify(r.state)),
         updatedAt: r.state.last_context_update,
       }))
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
-  bind(contents, id) {
-    if (!this.data.contexts.some((r) => r.state.context_id === id))
-      throw new UnderstandingError('Contexto no disponible');
+  bind(contents, id, expected = {}) {
+    const current = this.contextFor(contents),
+      physical = this.documentIdentity(contents);
+    if (
+      (expected.revision !== undefined &&
+        this.row(current).state.revision !== expected.revision) ||
+      (expected.contextId !== undefined && expected.contextId !== current)
+    )
+      throw new UnderstandingError(
+        'El contexto activo cambió; recargá antes de elegir otro.',
+        'conflict',
+      );
+    if (id !== null) {
+      const row = this.data.contexts.find((r) => r.state.context_id === id);
+      if (!row || Object.hasOwn(this.data.deleted_revisions, id))
+        throw new UnderstandingError('Contexto no disponible', 'conflict');
+      if (
+        (expected.sourceRevision !== undefined &&
+          row.state.revision !== expected.sourceRevision) ||
+        (expected.sourceDigest !== undefined &&
+          hash(JSON.stringify(row.state)) !== expected.sourceDigest)
+      )
+        throw new UnderstandingError(
+          'El contexto de origen cambió; recargá la lista.',
+          'conflict',
+        );
+    }
+    const target = id ?? physical.id;
+    if (
+      target === current &&
+      Boolean(this.bindings.get(contents.id)?.manual) === (id !== null)
+    )
+      return;
     this.bindings.set(contents.id, {
-      id,
-      url: this.document(contents),
-      temporary: false,
+      id: target,
+      url: physical.url,
+      temporary: id === null && physical.temporary,
+      manual: id !== null,
+      baseline_pending: true,
     });
+    this.recent.delete(contents.id);
+    this.reports.delete(`error-${contents.id}`);
   }
   clear(contents, revision) {
     const id = this.contextFor(contents),
@@ -587,8 +895,39 @@ export function installUnderstandingIPC({
           JSON.stringify(p).length > 250000
         )
           throw new UnderstandingError('Solicitud inválida');
-        if (name === 'contexts')
-          return { ok: true, contexts: service.contexts() };
+        if (name === 'contexts') {
+          let activeContextId;
+          if (
+            p.webContentsId !== undefined &&
+            !Number.isSafeInteger(p.webContentsId)
+          )
+            throw new UnderstandingError('Pestaña inválida');
+          if (p.webContentsId !== undefined) {
+            let guest;
+            try {
+              guest = resolveGuest(event.sender, p.webContentsId);
+            } catch {
+              throw new UnderstandingError(
+                'Pestaña ajena o cerrada',
+                'unauthorized',
+              );
+            }
+            activeContextId = service.contextFor(guest);
+          }
+          if (p.mode === 'inspect')
+            return {
+              ok: true,
+              activeContextId,
+              preview: service.inspect(
+                p.contextId,
+                p.revision,
+                p.targetKind || 'summary',
+                p.targetId ?? null,
+                p.offset ?? 0,
+              ),
+            };
+          return { ok: true, activeContextId, contexts: service.contexts() };
+        }
         if (!Number.isSafeInteger(p.webContentsId))
           throw new UnderstandingError('Pestaña inválida');
         let contents;
@@ -617,6 +956,12 @@ export function installUnderstandingIPC({
   handle('edit', (_e, p, c) => {
     if (
       ![
+        'project',
+        'context-item',
+        'context-select',
+        'context-reference',
+        'context-reference-resolve',
+        'context-reference-refresh',
         'goal',
         'task-add',
         'task-update',
@@ -646,7 +991,22 @@ export function installUnderstandingIPC({
   }));
   handle('contexts', () => {});
   handle('bind', (_e, p, c) => {
-    service.bind(c, p.contextId);
+    if (
+      !Number.isSafeInteger(p.revision) ||
+      typeof p.expectedContextId !== 'string' ||
+      (p.contextId !== null &&
+        (!Number.isSafeInteger(p.sourceRevision) ||
+          typeof p.sourceDigest !== 'string'))
+    )
+      throw new UnderstandingError(
+        'Selección requiere contexto y revisiones actuales',
+      );
+    service.bind(c, p.contextId, {
+      revision: p.revision,
+      contextId: p.expectedContextId,
+      sourceRevision: p.sourceRevision,
+      sourceDigest: p.sourceDigest,
+    });
     return { ok: true, ...service.snapshot(c) };
   });
   handle('clear', async (e, p, c) => {

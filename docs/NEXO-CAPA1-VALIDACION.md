@@ -324,3 +324,19 @@ visual en Electron/Windows real ni cuenta ChatGPT. Compatibilidad, límites,
 corrupción, fallo de disco, reinicio, EVO apagada, aislamiento y seguridad IPC
 están detallados en el documento de etapas. Restan los bloques 5–7 y los gates
 manuales; no se proclaman completados los 72 requisitos.
+
+
+## Comprensión por etapas — quinto bloque posterior
+
+La [etapa 5 de proyectos, referencias y selección de contexto](NEXO-COMPRENSION-ETAPAS.md#etapa-5-implementada--proyectos-referencias-y-selección-de-contexto)
+añade etiquetas locales, alias actuales, inspección y vínculos de antecedentes
+sin autoridad normativa. Elegir otro contexto es explícito, reversible y temporal;
+la línea base evita reimportar sus mensajes históricos. Cambios/borrados del origen
+invalidan la versión vinculada; renovar exige revisar y confirmar de nuevo.
+
+Resultados: **175/175 focalizadas**, suite completa **916 totales, 915 aprobadas,
+0 fallidas y 1 omitida** (empaquetado Windows real). Build correcto. 29 pruebas
+nuevas de comportamiento, con servicio/archivos, DOM mínimo y Electron stub; sin
+prueba visual en Electron/Windows ni cuenta real. La gramática, versiones y selección
+tienen los límites y gates manuales del documento de etapas. Restan los bloques
+6–7: no se declaran completados los 72 requisitos ni se añade ejecución autónoma.

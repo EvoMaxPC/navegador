@@ -1,3 +1,4 @@
+import { createContextSection } from './understandingContexts.js';
 import { createTaskSection } from './understandingTasks.js';
 import { RULE_FIELDS } from '../../core/userRules.js';
 import { createUnderstandingRefresh } from './understandingRefresh.js';
@@ -130,7 +131,11 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
     lock(true);
     status.textContent = 'Guardando comprensión…';
     const r = await request('edit', {
-      operation: { ...operation, revision: snapshot.state.revision },
+      operation: {
+        ...operation,
+        revision: snapshot.state.revision,
+        contextId: snapshot.state.context_id,
+      },
     });
     lock(false);
     if (id !== target()) return refresh();
@@ -148,6 +153,37 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
     status.textContent = r.report?.isolated
       ? 'Solicitud independiente analizada sin modificar el contexto activo.'
       : r.report?.note || 'Estado local guardado. No se envió a ningún modelo.';
+  }
+  async function contextRequest(method, p = {}, { apply = false } = {}) {
+    if (busy || !snapshot) return null;
+    if (target() !== targetId) {
+      await refresh();
+      return null;
+    }
+    const id = targetId,
+      contextId = snapshot.state.context_id;
+    lock(true);
+    const result = await request(method, p);
+    lock(false);
+    if (
+      target() !== id ||
+      (result?.activeContextId && result.activeContextId !== contextId)
+    ) {
+      await refresh();
+      return null;
+    }
+    if (!result?.ok) {
+      status.textContent =
+        result?.error || 'No se pudo consultar el contexto local.';
+      return result;
+    }
+    if (apply) {
+      snapshot = result;
+      render();
+      status.textContent =
+        'Contexto elegido explícitamente. No se fusionaron reglas ni se enviaron datos al sitio.';
+    }
+    return result;
   }
   function form(name, title, defaultText, submitLabel, onSubmit) {
     const key = `${snapshot.state.context_id}:${name}`;
@@ -209,6 +245,27 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
           'note',
         ),
       );
+    }
+    if (e.reference) {
+      const ref = snapshot.memoryReferences.find(
+        (r) => r.id === e.reference.id,
+      );
+      if (ref?.changed)
+        c.append(
+          create(
+            'p',
+            'El antecedente EVO cambió; no se muestra como la versión vinculada.',
+            'note',
+          ),
+        );
+      if (ref?.available && !ref.pinned)
+        c.append(
+          create(
+            'p',
+            'Referencia anterior sin huella de versión; no prueba vigencia.',
+            'note',
+          ),
+        );
     }
     if (retire)
       c.append(
@@ -421,6 +478,21 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
           'note',
         ),
       );
+    body.append(
+      createContextSection({
+        snapshot,
+        create,
+        button,
+        form,
+        showEntry,
+        mutate,
+        drafts,
+        contextRequest,
+        isCurrent: () =>
+          snapshot?.state.context_id === s.context_id &&
+          snapshot?.state.revision === s.revision,
+      }),
+    );
     const policies = create('details');
     policies.append(create('summary', 'Jerarquía y límites de seguridad'));
     policies.append(
@@ -724,46 +796,6 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
       ),
     );
     const restore = create('div', undefined, 'work-actions');
-    restore.append(
-      button(
-        'Elegir otro contexto para continuar en esta pestaña',
-        async () => {
-          if (busy) return;
-          if (targetId !== target()) return refresh();
-          lock(true);
-          const r = await request('contexts');
-          lock(false);
-          if (!r?.ok) {
-            status.textContent = r?.error;
-            return;
-          }
-          const list = create('div', undefined, 'work-actions');
-          for (const c of r.contexts)
-            list.append(
-              button(`${c.goal} · ${c.url}`, async () => {
-                if (
-                  !window.confirm(
-                    '¿Usar este contexto en la conversación actual? No envía información al sitio.',
-                  )
-                )
-                  return;
-                if (targetId !== target()) return refresh();
-                lock(true);
-                const result = await request('bind', { contextId: c.id });
-                lock(false);
-                if (targetId !== target()) return refresh();
-                if (result?.ok) {
-                  snapshot = result;
-                  render();
-                  status.textContent =
-                    'Contexto vinculado explícitamente hasta cambiar de conversación.';
-                } else status.textContent = result?.error;
-              }),
-            );
-          restore.append(list);
-        },
-      ),
-    );
     restore.append(
       button('Eliminar este contexto…', async () => {
         if (busy) return;

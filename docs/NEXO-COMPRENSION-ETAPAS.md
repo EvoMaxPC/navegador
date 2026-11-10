@@ -4,8 +4,8 @@
 
 Los 72 requisitos describen un objetivo amplio, no capacidades ya demostradas.
 Se avanza por etapas sobre el UUE existente, sin reconstruir NEXO ni introducir
-un agente ejecutor. La entrega actual incorpora **las etapas 1–4**, sobre
-0.1.33. Las tres siguientes siguen planificadas; no se declara el panel completo.
+un agente ejecutor. La entrega actual incorpora **las etapas 1–5**, sobre
+0.1.33. Las dos siguientes siguen planificadas; no se declara el panel completo.
 
 No hay modelo semántico nuevo, envíos externos, nuevos permisos ni dependencia
 nueva. Las reglas actuales siguen siendo locales y conservadoras. Comprender no
@@ -22,7 +22,7 @@ entre bloques. Las funciones parciales existentes de UUE se reutilizarán.
 | 2 | Objetivo principal, múltiples objetivos, cambios y ciclo de vida | 7–12 | Implementada con gramática acotada y revisión explícita; detalle debajo |
 | 3 | Reglas, restricciones, preferencias, decisiones y vigencia | 13–18, 37–41, 43–44, 50–51, 53, 67, 72 | Ampliada con gramática acotada, revisión de conflictos y edición de vigencia; detalle debajo |
 | 4 | Tareas, subtareas, dependencias, prioridades y siguiente paso | 19–24, 34, 36 | Base estructurada implementada; gramática acotada, sin plan ni ejecución automáticos |
-| 5 | Proyectos, referencias, selección de contexto y antecedentes | 25–30, 47, 55–57, 59, 71 | Parcial previo; EVO opcional y referencias revisables |
+| 5 | Proyectos, referencias, selección de contexto y antecedentes | 25–30, 47, 55–57, 59, 71 | Base local ampliada: etiquetas, referencias e inspección/selección explícitas; límites debajo |
 | 6 | Progreso, errores, bloqueos, propuestas y evidencia de resultados | 31–33, 35, 45–46, 69–70 | Pendiente de interpretación ampliada; observar no verifica |
 | 7 | Inspector completo, explicación, corrección e inferencias confirmables | 42, 48, 52, 60–66 | Controles parciales previos; consolidar tras las bases |
 
@@ -618,10 +618,9 @@ escapado y tema BLACK & ELECTRIC BLUE existente.
 Nuevos: `src/core/userTasks.js`, `src/ui/shell/understandingTasks.js`,
 `test/understanding-tasks.test.js` y `test/understanding-tasks-panel.test.js`.
 Modificados: core/servicio UUE, panel, manifest de empaquetado, fixture DOM,
-tests main, README y documentación. La entrega se cierra con commit y push sobre
-la rama de trabajo. El siguiente bloque es el **5: proyectos, referencias,
-selección de contexto y antecedentes**. Los bloques 5–7 y los gates manuales
-siguen pendientes; **no se declaran completados los 72 requisitos**.
+tests main, README y documentación. La etapa 4 se publicó como `880ab58`. Su
+siguiente bloque se desarrolla debajo. Los gates manuales siguen pendientes;
+**no se declaran completados los 72 requisitos**.
 
 El ZIP de esta entrega es de **fuentes**, no un ejecutable Windows ya validado.
 Para probar desde fuentes, ubicarse en la raíz que contiene `package.json` y `src`,
@@ -629,3 +628,199 @@ no en `dist/Nexo-win32-x64`. El ZIP no incluye `.git`: los comandos Git requiere
 un clon del repositorio. En PowerShell pegar sólo los comandos, no el prefijo
 `PS C:\…>` ni los mensajes de salida/error de otra ejecución. Ver el README para
 instalación y arranque; no se ejecutaron esos pasos en el equipo del usuario.
+
+
+## Etapa 5 implementada — proyectos, referencias y selección de contexto
+
+### Modelo local y alcance real
+
+Este bloque amplía el UUE existente, sin crear otro expediente ni depender de
+EVO para comprender la conversación actual. Su base cubre etiquetas de proyecto,
+referencias actuales nombradas, antecedentes de contextos guardados y selección
+explícita para continuar. No es un gestor global de proyectos ni un sistema de
+resolución semántica universal.
+
+- **Etiqueta de proyecto por contexto:** nombre libre de hasta 200 caracteres y
+  descripción de hasta 10.000, con origen, fechas e historia. Se conserva literal,
+  no se deduce del sitio, un archivo, un objetivo o una respuesta del asistente.
+  Renombrar/quitar etiqueta no borra objetivos, tareas o reglas. Una etiqueta igual
+  en dos conversaciones **no las fusiona ni comparte sus instrucciones**.
+- **Cambio de proyecto ambiguo:** una declaración distinta con «Proyecto: …»
+  cuando ya existe etiqueta pide aclaración. Renombrar explícitamente sólo cambia
+  la etiqueta; para separar otro trabajo hay que usar otra conversación/contexto.
+  No se migra un proyecto por similitud de palabras ni por una inferencia.
+- **Referencias actuales nombradas:** alias locales para archivo, documento,
+  componente o nota, dentro de `relevant_context`. Son datos declarados por el
+  usuario; no leen archivos, validan rutas ni ejecutan comandos. Se puede elegir
+  una referencia por ID/alias único y retirarla con historia. Un alias activo no
+  se sustituye silenciosamente con otro contenido. Retirarlo limpia su selección.
+- **Inspección sin activar:** listar contextos muestra etiqueta, objetivo breve,
+  URL, revisión y fecha. Inspeccionar permite ver resumen/entradas del origen,
+  estado y certeza, sin cambiar el contexto activo ni copiar sus reglas.
+  Sólo incluye datos UUE del usuario: no usa respuestas del asistente como fuente
+  de objetivos, decisiones o antecedentes confirmados.
+- **Antecedentes vinculados, no importados:** una referencia a otro contexto o a
+  una entrada concreta primero queda pendiente. Confirmar vincula sólo ese
+  puntero, con `authority: reference-data-only` y `verified: false`. No incorpora
+  el objetivo, tareas ni reglas ajenas al estado actual. «Sí» genérico no vincula.
+  Rechazar/retirar conserva historia pero deja de recuperar el contenido asociado.
+- **Origen con revisión y huella:** se registra ID de contexto, revisión, SHA-256
+  de su estado UUE y destino exacto. Si el origen cambia, caduca o se elimina,
+  no se muestra un texto actual como si fuera la versión vinculada. Se informa
+  indisponibilidad/cambio. Renovar requiere inspeccionar la versión actual,
+  vuelve a pendiente y exige confirmar de nuevo. No hay renovación automática.
+
+La huella detecta cambios, **no prueba la verdad del origen ni cifra los datos**.
+Es conservadora sobre el estado completo: un cambio no relacionado con la entrada
+puede volver obsoleta una referencia, incluso al caducar una regla temporal sin
+incrementar la revisión. No se guarda un texto histórico duplicado para reconstruir
+una versión eliminada. La etiqueta descriptiva del puntero se conserva desde su
+propuesta; el preview siempre indica revisión, contenido y estado del origen disponible.
+
+### Continuar en un contexto no es vincular un antecedente
+
+El panel separa dos acciones:
+
+1. **Inspeccionar/proponer antecedente:** lectura y vínculo sin cambiar contexto.
+2. **Continuar en este contexto:** confirmación explícita, contexto/revisión
+   actuales y revisión/huella del origen. Los próximos mensajes actualizan ese
+   contexto elegido; no se mezclan automáticamente los dos estados. Se muestran
+   la URL visible, el contexto activo y la URL de origen. Se puede volver al
+   contexto natural con otro control explícito.
+
+La selección manual vive en RAM hasta cambiar de URL, cerrar la pestaña o reiniciar.
+Las etiquetas, reglas, tareas y referencias sí persisten en sus contextos guardados.
+Al volver/reiniciar se usa el contexto natural de la conversación, no una elección
+oculta guardada. No se promete sincronización global ni continuidad entre perfiles
+que no comparten el archivo UUE.
+
+**Límite protegido de relectura:** al cambiar selección se establece una línea base
+con el primer snapshot visible: sus usuarios históricos no se interpretan en el
+contexto elegido. Luego sólo se procesan nuevos turnos según el lector/ledger
+existentes. La ventana observacional se conserva por documento físico, separada
+del contexto normativo elegido; no sobrescribe la conversación observada del origen.
+Esto también impide reimportar en el destino, tras reiniciar, los mensajes del
+período vinculado. Si el documento físico estaba borrado, no se vuelve a crear
+su fila persistida por esta observación.
+
+Si el último usuario está recortado, la línea base espera su versión completa.
+Un mensaje visto sólo por DOM antes de completar esa línea base puede quedar
+fuera de interpretación, deliberadamente: no se inventa si era histórico o nuevo.
+Los originales recibidos por preparación siguen su camino existente. La selección
+no altera el lector ni la cola de 500 ms. No se afirma captura perfecta de mensajes
+que nunca llegaron a esos mecanismos.
+
+Las raíces reconocidas `/g/<id>` y `/g/<id>/project` ahora son temporales por
+pestaña/sesión, como la raíz previa: no se comparte una conversación sin ID por
+estar en la portada de un proyecto. Sólo migran a una conversación de su misma
+ruta de proyecto/origen. No se fusionan rutas distintas como `/c/id` y
+`/g/proyecto/c/id` por suponer equivalencias semánticas. Los contextos antiguos
+ambiguos siguen en la lista para selección explícita, no se sobrescriben.
+
+### Uso y procedencia
+
+Ejemplos de gramática ES/EN acotada:
+
+```text
+Proyecto: NEXO accesibilidad
+Renombrar proyecto: NEXO documentación
+Referencia actual «lector»: src/preload/chatgptReader.js
+Usar referencia «lector»
+```
+
+El editor permite descripción y tipos de referencia adicionales. Elegir un alias
+identifica un dato, no autoriza utilizarlo en una herramienta ni insertar su texto
+en un prompt. No se resuelven «ese archivo», «lo anterior» o «el mismo proyecto»
+por intuición cuando falta una referencia única. Las continuaciones ambiguas
+conservan el contexto o piden aclaración con los controles existentes; no buscan
+un proyecto ajeno automáticamente.
+
+En **Comprensión → Proyecto, contexto y referencias**: etiqueta/descripcion,
+referencias actuales, antecedentes pendientes/vinculados, lista de contextos,
+inspección y continuación explícita. Los previews son extractos de hasta 1.000
+caracteres, con recorte declarado; las entradas se paginan de 20 en 20. No hay
+una segunda transcripción ni recuperación oculta de archivos o sitios externos.
+La UI conserva borradores y descarta acciones si cambió la pestaña/contexto.
+Las ediciones de la shell incluyen ahora la identidad esperada del contexto,
+además de revisión, para no aplicar una edición a otra URL con igual revisión.
+
+### EVO sigue siendo opcional y separado
+
+La búsqueda EVO previa sigue siendo manual y aporta sólo referencias no verificadas,
+no información actual confirmada. Ahora los candidatos nuevos guardan huella del
+texto EVO, sin copiar ese texto al archivo UUE: sustituir un elemento con el mismo
+ID invalida preview/confirmación de esa versión. También se verifica su proyecto
+EVO. Referencias antiguas sin huella siguen siendo compatibles y se marcan sin
+versión fijada; no se inventa retrospectivamente su huella original.
+
+Con EVO apagada no se llama a `list`/`recall` ni se muestran sus textos; siguen
+funcionando etiquetas, alias, inspección local, vínculos y lectura/comprensión
+actual. Con EVO encendida sólo se consulta su lista si hay referencias activas o
+preguntas de referencia abiertas, no para toda lectura del panel.
+
+### Persistencia, seguridad y límites
+
+Aditivos opcionales al leer archivos anteriores: `project`, `project_history`,
+`context_references`, `context_events`, `selected_reference_id`, metadato `entity`
+en entradas actuales y huella `digest` en referencias EVO nuevas. Se mantiene
+`schema_version: 1`, el archivo UUE, sus límites de 50 contextos/8 MB y 2 millones
+de caracteres por contexto. No se modifica el archivo EVO ni se añade dependencia.
+
+Hasta 50 versiones anteriores de etiqueta, 30 antecedentes (incluidos retirados)
+y 200 eventos de vínculos. Los alias reutilizan los límites de 200 entradas de
+contexto y 400 históricas. Capacidad llena rechaza transacciones sin poda silenciosa.
+Las estructuras, roles, punteros, eventos y huellas se validan. Corrupción bloquea
+escritura sin sobrescribir; fallo de disco no confirma cambios en RAM y permite
+reintentar. El borrado conserva tombstones: no reintroduce origen ni destinos.
+
+Se reutilizan `edit`, `contexts` (lista/inspección) y `bind`, sin canal/preload nuevo.
+La inspección sólo está disponible para shell confiable; con guest indicado se
+valida propiedad de la pestaña. Mutación y selección mantienen mainFrame, guest
+propio y control optimista de contexto/revisiones. Fuente observada no da autoridad.
+Las huellas de orígenes se calculan una vez por origen en cada lectura del panel,
+sin un índice global que pueda quedar desactualizado. No hay mediciones nuevas de
+CPU/RAM ni afirmaciones de eficiencia cuantificada. No se cambian permisos,
+preparación/envío, CDP, guard, tokenización ni contadores. Versión: 0.1.33.
+
+### Validación ejecutada y pendientes
+
+| Ejecución | Total | Aprobadas | Fallidas | Omitidas |
+|---|---:|---:|---:|---:|
+| Focalizadas: UUE, observación, main/IPC, independencia, shell, objetivos, reglas, tareas, proyectos y paneles | 175 | 175 | 0 | 0 |
+| `npm test` | 916 | 915 | 0 | 1 |
+
+La suite completa duró 103.277,685645 ms. La omitida sigue siendo el empaquetado
+Windows real con `NEXO_ELECTRON_ZIP_DIR`. Build correcto de inyección:
+53,7 kB / 19,3 kB gzip, 11 módulos.
+
+Se añaden **29 pruebas de comportamiento**: 26 en
+`test/understanding-projects.test.js`, una del panel en
+`test/understanding-projects-panel.test.js` y dos de flujo IPC/main en
+`test/user-understanding-main.test.js`. Cubren etiquetas/historia, alias,
+inspección/paginación/recorte, vínculos no normativos, cambio/borrado de origen,
+renovación, EVO apagada y texto EVO reemplazado, reinicio, aislamiento, selección y
+retorno, línea base, ventanas separadas, raíces de proyecto, identidad/revisiones,
+compatibilidad, capacidades, corrupción, disco/reintento y remitentes no autorizados.
+
+No se probaron Electron real, Windows real ni una cuenta ChatGPT real. DOM mínimo,
+puente de fixture y Electron stub no prueban renderizado, accesibilidad, foco/scroll,
+selectores ni navegación real de proveedores. No hay clasificación semántica
+universal, lectura de archivos, importación automática de reglas, verificación
+factual ni ejecución. La implementación acotada no declara satisfechas todas las
+redacciones posibles de los requisitos, ni los 72 completos.
+
+Gate manual pendiente: EVO apagada → dos conversaciones/proyectos distintos →
+igual etiqueta sin mezcla → alias actual y retiro → inspección sin activar →
+antecedente pendiente/confirmado → cambio/borrado del origen → renovación explícita
+→ continuar en otro contexto y revisar línea base → nuevos mensajes → volver al
+natural → reinicio → borrado. Comprobar URLs/origen, borradores, tema BLACK &
+ELECTRIC BLUE y que no se recupera contenido de vínculos rechazados/retirados.
+
+### Archivos y siguiente bloque
+
+Nuevos: `src/core/userProjects.js`, `src/ui/shell/understandingContexts.js`,
+`test/understanding-projects.test.js` y `test/understanding-projects-panel.test.js`.
+Modificados: core/servicio UUE, panel, manifest de empaquetado, tests main, README
+y documentación. Se cierra con commit y push sobre la rama de trabajo. El siguiente
+bloque es el **6: progreso, errores, bloqueos, propuestas y evidencia de resultados**.
+Los bloques 6–7 y los gates manuales siguen pendientes; no hay ejecución autónoma.

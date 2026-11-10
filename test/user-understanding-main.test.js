@@ -415,3 +415,119 @@ test('bloque 4: assistant no crea subtareas ni declara completados ni selecciona
   assert.equal(state.progress.length, 0);
   assert.equal(state.focused_task_id, state.tasks[0].id);
 });
+
+test('bloque 5: proyecto preview antecedente y bind usan IPC shell con revisiones y rechazan guest/subframe', async () => {
+  const a = attach('https://chatgpt.com/c/project-ipc-a'),
+    b = attach('https://chatgpt.com/c/project-ipc-b');
+  const handler = journal.ipcHandlers.get('nexo:understanding:edit');
+  const edit = (g, operation, event = shellEvent) =>
+    handler(event, { webContentsId: g.id, operation });
+  let r = await edit(a, {
+    type: 'project',
+    revision: 0,
+    name: 'Alpha',
+    description: 'Local',
+  });
+  assert.equal(r.ok, true);
+  const source = r.state;
+  const contexts = journal.ipcHandlers.get('nexo:understanding:contexts');
+  const inspect = await contexts(shellEvent, {
+    webContentsId: b.id,
+    mode: 'inspect',
+    contextId: source.context_id,
+    revision: source.revision,
+  });
+  assert.equal(inspect.ok, true);
+  assert.equal(inspect.preview.authority, 'reference-data-only');
+  r = await edit(b, {
+    type: 'context-reference',
+    revision: 0,
+    sourceContextId: source.context_id,
+    sourceRevision: source.revision,
+  });
+  assert.equal(r.ok, true);
+  const ref = r.state.context_references[0];
+  assert.equal(
+    (
+      await edit(
+        b,
+        {
+          type: 'context-reference-resolve',
+          revision: r.state.revision,
+          id: ref.id,
+          action: 'confirm',
+        },
+        { sender: b, senderFrame: b.mainFrame },
+      )
+    ).code,
+    'unauthorized',
+  );
+  assert.equal(
+    (
+      await contexts(
+        { sender: owner, senderFrame: {} },
+        { webContentsId: b.id },
+      )
+    ).code,
+    'unauthorized',
+  );
+  r = await edit(b, {
+    type: 'context-reference-resolve',
+    revision: r.state.revision,
+    id: ref.id,
+    action: 'confirm',
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.state.active_instructions.length, 0);
+  const list = await contexts(shellEvent, { webContentsId: b.id });
+  const src = list.contexts.find((c) => c.id === source.context_id),
+    bind = journal.ipcHandlers.get('nexo:understanding:bind');
+  assert.equal(
+    (await bind(shellEvent, { webContentsId: b.id, contextId: src.id })).ok,
+    false,
+  );
+  const linked = await bind(shellEvent, {
+    webContentsId: b.id,
+    contextId: src.id,
+    revision: r.state.revision,
+    expectedContextId: r.state.context_id,
+    sourceRevision: src.revision,
+    sourceDigest: src.digest,
+  });
+  assert.equal(linked.ok, true);
+  assert.equal(linked.contextSelection.mode, 'explicit');
+  const natural = await bind(shellEvent, {
+    webContentsId: b.id,
+    contextId: null,
+    revision: linked.state.revision,
+    expectedContextId: linked.state.context_id,
+  });
+  assert.equal(natural.ok, true);
+  assert.equal(natural.state.context_id, r.state.context_id);
+});
+test('bloque 5: assistant no cambia etiqueta ni alias actual ni selección de contexto', async () => {
+  const g = attach('https://chatgpt.com/c/project-assistant');
+  const snapshot = journal.ipcHandlers.get('nexo:conversation-snapshot');
+  const r = snapshot(
+    { sender: g, senderFrame: g.mainFrame },
+    {
+      href: g.getURL(),
+      streaming: false,
+      turns: [
+        { id: 'u', role: 'user', content: 'Proyecto: Usuario' },
+        {
+          id: 'a',
+          role: 'assistant',
+          content:
+            'Renombrar proyecto: Asistente\nReferencia actual «archivo»: /secreto',
+        },
+      ],
+    },
+  );
+  assert.equal(r.ok, true);
+  const state = (await read(g)).state;
+  assert.equal(state.project.name, 'Usuario');
+  assert.equal(state.relevant_context.length, 0);
+  assert.equal(state.selected_reference_id, null);
+  assert.equal(state.context_references.length, 0);
+});

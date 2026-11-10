@@ -1,4 +1,9 @@
 import {
+  applyProjectOperation,
+  validateProjects,
+  projectDirective,
+} from './userProjects.js';
+import {
   applyTaskOperation,
   validateTasks,
   taskProjection,
@@ -77,6 +82,11 @@ export function newUnderstanding(contextId, now = Date.now()) {
     goal_candidates: [],
     goal_events: [],
     decision_candidates: [],
+    project: null,
+    project_history: [],
+    context_references: [],
+    context_events: [],
+    selected_reference_id: null,
     current_task: null,
     tasks: [],
     task_events: [],
@@ -114,6 +124,17 @@ function mutateTask(state, operation, meta, now) {
     origin: origin(meta),
     makeEntry: (text) =>
       entry(state, 'inference', text, meta, now, 'explicit', 'project'),
+    fail: (message, code = 'invalid') => {
+      throw new UnderstandingError(message, code);
+    },
+  });
+}
+function mutateProject(state, operation, meta, now) {
+  applyProjectOperation(state, operation, {
+    now,
+    origin: origin(meta),
+    makeEntry: (text) =>
+      entry(state, 'relevant_context', text, meta, now, 'explicit', 'project'),
     fail: (message, code = 'invalid') => {
       throw new UnderstandingError(message, code);
     },
@@ -582,6 +603,14 @@ export function interpretMessage(state, text) {
       relation: 'independent',
       certainty: 'explicit',
     };
+  const project = projectDirective(text);
+  if (project)
+    return {
+      intent: 'context-directive',
+      relation: 'context',
+      certainty: 'explicit',
+      project,
+    };
   const task = taskDirective(text);
   if (task)
     return {
@@ -682,6 +711,8 @@ function removeActive(state, id, now, status = 'obsolete', meta = null) {
         meta,
       );
       state[field] = state[field].filter((x) => x.id !== id);
+      if (state.selected_reference_id === id)
+        state.selected_reference_id = null;
       return e;
     }
   }
@@ -854,6 +885,14 @@ export function updateUnderstanding(
     case 'goal':
       setGoal(state, userText(operation.text), meta, now);
       break;
+    case 'project':
+    case 'context-item':
+    case 'context-select':
+    case 'context-reference':
+    case 'context-reference-resolve':
+    case 'context-reference-refresh':
+      mutateProject(state, operation, meta, now);
+      break;
     case 'task-add':
     case 'task-update':
     case 'task-transition':
@@ -963,7 +1002,47 @@ export function updateUnderstanding(
       }
       const previousTask = state.current_task;
       const retiredText = ruleRetirement(text);
-      if (report.task) {
+      if (report.project) {
+        const d = report.project;
+        if (
+          d.type === 'project' &&
+          state.project &&
+          state.project.name !== d.name &&
+          !d.rename
+        )
+          ask(
+            state,
+            'missing-reference',
+            'Ya hay una etiqueta de proyecto. Renombrar conserva este contexto y sus reglas; para otro proyecto elegí otra conversación/contexto.',
+            null,
+            meta,
+            now,
+          );
+        else {
+          try {
+            mutateProject(
+              state,
+              {
+                ...d,
+                ...(d.type === 'project'
+                  ? { description: state.project?.description || '' }
+                  : {}),
+              },
+              meta,
+              now,
+            );
+          } catch (error) {
+            if (
+              !(error instanceof UnderstandingError) ||
+              !['reference', 'invalid', 'conflict'].includes(error.code)
+            )
+              throw error;
+            ask(state, 'missing-reference', error.message, null, meta, now);
+          }
+        }
+        report.note =
+          'Contexto local declarado; las referencias no ejecutan acciones ni importan reglas de otros proyectos.';
+      } else if (report.task) {
         if (report.task.ambiguous)
           ask(
             state,
@@ -1329,6 +1408,14 @@ export function effectiveUnderstanding(state) {
     preferences: state.preferences.filter(active),
     current_task: state.current_task,
     task_tracking: taskProjection(state),
+    project: state.project || null,
+    context_references: (state.context_references || []).filter(
+      (r) => r.status === 'linked',
+    ),
+    selected_reference:
+      state.relevant_context.find(
+        (e) => e.id === state.selected_reference_id,
+      ) || null,
     subgoals: state.subgoals.filter(active),
     relevant_context: state.relevant_context.filter(active),
     progress: state.progress.filter(active),
@@ -1376,6 +1463,21 @@ export function validateUnderstanding(s) {
       typeof o.url === 'string' &&
       o.url.length <= 2048
     );
+  }
+  function checkMemoryReference(r) {
+    if (
+      !r ||
+      typeof r.id !== 'string' ||
+      !r.id ||
+      r.id.length > 200 ||
+      typeof r.project_id !== 'string' ||
+      !r.project_id ||
+      r.project_id.length > 200 ||
+      (r.kind !== undefined &&
+        (typeof r.kind !== 'string' || r.kind.length > 100)) ||
+      (r.digest !== undefined && !/^[a-f0-9]{64}$/.test(r.digest))
+    )
+      fail();
   }
   function check(
     e,
@@ -1438,6 +1540,7 @@ export function validateUnderstanding(s) {
       )
         fail();
     }
+    if (e.reference !== undefined) checkMemoryReference(e.reference);
     userText(e.text);
   }
   const goalStatuses = [
@@ -1602,8 +1705,12 @@ export function validateUnderstanding(s) {
     s.seen_messages.some((v) => typeof v !== 'string' || v.length > 200)
   )
     fail();
+  for (const q of s.pending_questions)
+    if (q.proposed?.reference !== undefined)
+      checkMemoryReference(q.proposed.reference);
   if (!Array.isArray(s.uncertainty) || s.uncertainty.length > 110) fail();
   validateTasks(s, fail);
+  validateProjects(s, fail);
   if (JSON.stringify(s).length > 2_000_000)
     throw new UnderstandingError(
       'El contexto supera el límite de 2 millones de caracteres; no se podarán instrucciones activas.',

@@ -7,6 +7,8 @@
 > la etapa 3 amplía reglas, propuestas de decisión y corrección/vigencia con historia.
 > La etapa 4 añade seguimiento explícito de tareas, dependencias y próximo paso,
 > sin planificación/ejecución automática ni verificación de resultados.
+> La etapa 5 amplía etiquetas/referencias, inspección y selección explícita de
+> contexto, sin importar reglas ni convertir antecedentes en hechos confirmados.
 > Las descripciones de iteraciones anteriores
 > de este documento deben leerse como evidencia histórica, no como límite actual.
 
