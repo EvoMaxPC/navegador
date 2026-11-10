@@ -29,7 +29,7 @@ export function readChatGptConversation(document, { literal = false, selection =
 /** Un solo observador, agrupado; funciona aunque ChatGPT no use nuestro fetch. */
 export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => isChatGptStreaming(document), publishLive = null }) {
   if (typeof document?.querySelectorAll !== 'function') return { read() {}, disconnect() {} };
-  let timer = null, pollTimer = null, last = '', lastLive = '', observer = null, stopped = false;
+  let timer = null, pollTimer = null, last = '', pending = '', lastLive = '', observer = null, stopped = false;
   const session = `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const read = () => {
     timer = null;
@@ -57,9 +57,24 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
       const conversationId = url.pathname.includes('/c/') ? url.pathname : `${url.pathname}#${session}`;
       const payload = { conversationId, href: window.location.href, turns, streaming: Boolean(isStreaming()) };
       const signature = JSON.stringify(payload);
-      if (signature === last) return;
-      last = signature;
-      publish(payload);
+      if (signature === last || signature === pending) return;
+      pending = signature;
+      let delivery;
+      try { delivery = publish(payload); }
+      catch { pending = ''; schedule(); return; }
+      if (delivery && typeof delivery.then === 'function') {
+        delivery.then((result) => {
+          pending = '';
+          if (result?.ok === true) last = signature;
+          else schedule();
+        }).catch(() => {
+          pending = '';
+          schedule();
+        });
+      } else {
+        pending = '';
+        last = signature;
+      }
     } catch (error) {
       // La página no debe romperse si cambia el DOM; error visible al consumidor.
       publish({ error: String(error?.message || error) });
