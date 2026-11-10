@@ -129,8 +129,8 @@ test('B: lector existente → vista en vivo → UUE con EVO y mediación apagada
     await Promise.resolve();
     assert.deepEqual(
       calls,
-      ['nexo:repetition:snapshot'],
-      'el lector no requiere cambios ni emite captura persistente',
+      ['nexo:repetition:snapshot', 'nexo:conversation-snapshot'],
+      'el lector envía observación UUE por el snapshot existente aunque EVO esté apagada',
     );
     let snap = await read(g);
     assert.equal(snap.state.user_goal.text, 'comprender sin EVO');
