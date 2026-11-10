@@ -18,7 +18,8 @@ let injectSource = '';
 let conversationReader = null;
 
 function startConversationReader(config) {
-  if (conversationReader || typeof document === 'undefined' ||
+  if (conversationReader) { conversationReader.updateSettings(config); return; }
+  if (typeof document === 'undefined' ||
     (typeof process !== 'undefined' && process.isMainFrame === false) ||
     !['chatgpt.com', 'chat.openai.com'].includes(location.hostname) || location.protocol !== 'https:') return;
   try {
@@ -101,8 +102,9 @@ function boot() {
 
   const host = location.hostname;
   const config = readConfigSync(host);
+  // La vista RAM puede arrancar aun si la configuración aún no está disponible.
+  startConversationReader(config || { settings: { memory: { enabled: false } } });
   if (config) {
-    startConversationReader(config);
     if (shouldInject(config, host)) inject(config);
     return;
   }

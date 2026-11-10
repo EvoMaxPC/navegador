@@ -329,10 +329,13 @@ async function medirMemoria() {
 {
   const ruta = join(root, 'build', 'inject.js');
   const fuente = readFileSync(ruta, 'utf8');
-  const kb = statSync(ruta).size / 1024;
+  const lector = join(root, 'build', 'chatgpt-reader.cjs');
+  const fuenteLector = readFileSync(lector, 'utf8');
+  // Total de ambos mundos: no esconder coste trasladándolo al preload.
+  const kb = (statSync(ruta).size + statSync(lector).size) / 1024;
   const vueltas = 50;
   medir('inyección · evaluar el bundle en una página nueva', 'evaluación', () => {
-    for (let i = 0; i < vueltas; i += 1) new Function(fuente);
+    for (let i = 0; i < vueltas; i += 1) { new Function(fuente); new Function('module', 'exports', fuenteLector); }
     return vueltas;
   });
   resultados.push({

@@ -7,6 +7,7 @@ const { pathToFileURL } = require('node:url');
 
 const out = process.env.NEXO_REPETITION_OUT || resolve('ci-repetition.json');
 app.setPath('userData', mkdtempSync(join(tmpdir(), 'nexo-repetition-')));
+app.setPath('documents', app.getPath('userData'));
 app.disableHardwareAcceleration();
 process.env.NEXO_NETWATCH = '0';
 process.env.NEXO_CDP = '0';
@@ -56,6 +57,11 @@ app.whenReady().then(() => {
     report.checks.push('texto literal y memoria apagada');
     await guest.executeJavaScript(`document.querySelector('.markdown').textContent+='Respuesta final';`);
     await until(() => shell.executeJavaScript('document.querySelectorAll(".repeat-text")[1]?.textContent.endsWith("Respuesta final")'), 'streaming DOM actualiza panel sin duplicados');
+    // Las APIs del mundo principal no deben controlar el lector aislado.
+    await guest.executeJavaScript(`delete window.__nexo; Document.prototype.querySelectorAll=function(){throw Error('API alterada por la página de prueba');};const body=document.createElement('body');body.innerHTML='<article data-turn="assistant"><pre class="markdown">GPT tras reemplazar body</pre></article>';document.body.replaceWith(body);`);
+    await until(() => shell.executeJavaScript('document.querySelectorAll(".repeat-text").length===1 && document.querySelector(".repeat-text").textContent==="GPT tras reemplazar body"'), 'lector aislado sobrevive APIs de página alteradas y body sustituido');
+    await guest.executeJavaScript(`window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));document.getElementsByTagName('pre')[0].textContent='GPT después de pageshow';window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));`);
+    await until(() => shell.executeJavaScript('document.querySelector(".repeat-text")?.textContent==="GPT después de pageshow"'), 'reanuda tras eventos pagehide/pageshow sintéticos');
     finish();
   } catch (error) {
     report.reader = await guest.executeJavaScript('window.__nexo?.conversationReader?.()').catch(() => null);

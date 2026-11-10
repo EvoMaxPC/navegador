@@ -92,7 +92,7 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
   // Cinco vías complementarias de recuperación: selectores de rol/data-turn/article
   // del adaptador, MutationObserver, sondeo periódico, eventos de navegación y
   // lectura inmediata al volver a la pestaña. El sondeo cubre cambios que React
-  // puede aplicar sin mutaciones observables en los nodos seleccionados.
+  // puede aplicar al cambiar de URL sin emitir popstate. También reintenta IPC rechazado.
   const poll = () => {
     if (stopped || suspended) return;
     if (document.visibilityState !== 'hidden') schedule();

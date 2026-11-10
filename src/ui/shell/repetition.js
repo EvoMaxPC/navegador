@@ -32,7 +32,7 @@ export function createRepetitionView({ list, status, scroller, diagnostics }) {
         const strategy = snapshot?.strategy || 'none';
         const user = turns.filter((turn) => turn.role === 'user').length;
         const assistant = turns.filter((turn) => turn.role === 'assistant').length;
-        diagnostics.textContent = `Estrategia: ${strategy === 'none' ? 'ninguna detectada' : strategy}\nMensajes en el panel: ${turns.length} · Vos: ${user} · ChatGPT: ${assistant}\n${snapshot?.streaming ? 'Respuesta en curso' : 'Sin botón de detener activo'}`;
+        diagnostics.textContent = !snapshot ? 'Lector de pestaña: todavía no se recibió ningún snapshot. No es un resultado de cero mensajes.' : `Estrategia: ${strategy === 'none' ? 'ninguna detectada' : strategy}\nMensajes en el panel: ${turns.length} · Vos: ${user} · ChatGPT: ${assistant}\n${snapshot?.streaming ? 'Respuesta en curso' : 'Sin botón de detener activo'}`;
       }
       if (follow) scroller.scrollTop = scroller.scrollHeight;
     },

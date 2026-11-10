@@ -19,9 +19,9 @@ class Element {
 function view() {
   const previous = globalThis.document;
   globalThis.document = { createElement: () => new Element() };
-  const list = new Element(), status = new Element();
+  const list = new Element(), status = new Element(), diagnostics = new Element();
   const scroller = { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 };
-  return { list, status, scroller, render: createRepetitionView({ list, status, scroller }).render,
+  return { list, status, diagnostics, scroller, render: createRepetitionView({ list, status, diagnostics, scroller }).render,
     restore: () => { globalThis.document = previous; } };
 }
 const snapshot = (answer) => ({ turns: [
@@ -67,5 +67,16 @@ test('no fuerza el scroll si el usuario está leyendo mensajes anteriores', () =
     h.render(snapshot('Nuevo texto')); assert.equal(h.scroller.scrollTop, 10);
     h.scroller.scrollTop = 600;
     h.render(snapshot('Más texto')); assert.equal(h.scroller.scrollTop, 1000);
+  } finally { h.restore(); }
+});
+
+test('el diagnóstico diferencia falta de conexión de una lectura activa sin mensajes', () => {
+  const h = view();
+  try {
+    h.render(null);
+    assert.match(h.diagnostics.textContent, /no se recibió ningún snapshot/);
+    h.render({ strategy: 'none', turns: [] });
+    assert.match(h.diagnostics.textContent, /ninguna detectada/);
+    assert.doesNotMatch(h.diagnostics.textContent, /no se recibió/);
   } finally { h.restore(); }
 });
