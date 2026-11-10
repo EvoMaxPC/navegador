@@ -1,3 +1,4 @@
+import { RULE_FIELDS } from '../../core/userRules.js';
 import { createUnderstandingRefresh } from './understandingRefresh.js';
 
 /** Inspector y aclaraciones UUE. No envía prompts ni ejecuta herramientas. */
@@ -117,7 +118,8 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
           : 'No se pudo confirmar el estado de observación.');
     tabButton?.classList.toggle(
       'has-question',
-      r.state.pending_questions.some((q) => q.status === 'open'),
+      r.state.pending_questions.some((q) => q.status === 'open') ||
+        (r.state.decision_candidates || []).some((e) => e.status === 'pending'),
     );
   }
   async function mutate(operation, draftKey) {
@@ -175,10 +177,20 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
     c.append(
       create(
         'p',
-        `${e.certainty === 'inferred' ? 'Inferido, sin confirmar' : e.certainty === 'confirmed' ? 'Confirmado por el usuario' : 'Declaración explícita'} · ${e.scope === 'session' ? 'Temporal de sesión' : 'Proyecto'} · ${e.origin.channel} · ${e.status} · ${new Date(e.updated_at).toLocaleString()}`,
+        `${e.certainty === 'inferred' ? 'Inferido, sin confirmar' : e.certainty === 'confirmed' ? 'Confirmado por el usuario' : 'Declaración explícita'} · ${e.scope === 'session' ? 'Temporal de sesión' : 'Contexto persistente'} · prioridad ${e.priority} · ${e.origin.channel} · ${e.status} · ${new Date(e.updated_at).toLocaleString()}`,
         'note',
       ),
     );
+    if (e.change)
+      c.append(
+        create(
+          'p',
+          `Cambio: ${e.change.kind} · ${new Date(e.change.at).toLocaleString()}${e.change.origin ? ` · ${e.change.origin.channel} · ${e.change.origin.message_id}` : ''}`,
+          'note',
+        ),
+      );
+    if (e.category)
+      c.append(create('p', `Categoría: ${LABELS[e.category]}`, 'note'));
     if (e.origin.url) c.append(create('p', e.origin.url, 'note'));
     if (e.reference) {
       const ref = snapshot.memoryReferences.find(
@@ -199,6 +211,90 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         button('Marcar obsoleta', () => mutate({ type: 'retire', id: e.id })),
       );
     return c;
+  }
+  function ruleCard(e, field) {
+    const card = showEntry(e, e.status === 'active');
+    if (e.status !== 'active') return card;
+    if (field === 'preferences') {
+      card.append(
+        create(
+          'p',
+          'Preferencia orientativa: no anula objetivos, restricciones, instrucciones ni decisiones.',
+          'note',
+        ),
+      );
+      if (
+        snapshot.effective.preference_conflicts?.some(
+          (c) => c.preference_id === e.id,
+        )
+      )
+        card.append(
+          create(
+            'p',
+            'Hay una regla reconocida de mayor prioridad incompatible con esta preferencia; la preferencia no la reemplaza.',
+            'note',
+          ),
+        );
+    }
+    if (field === 'confirmed_decisions')
+      card.append(
+        create(
+          'p',
+          'Decisión declarada por el usuario; no prueba ejecución, no valida resultados y no autoriza herramientas.',
+          'note',
+        ),
+      );
+    const details = create('details');
+    details.append(create('summary', 'Editar texto, categoría o vigencia'));
+    const formKey = `rule-${e.id}`;
+    const edit = form(
+      formKey,
+      'Actualizar esta regla',
+      e.text,
+      'Guardar actualización explícita',
+      (text, key) =>
+        mutate(
+          {
+            type: 'rule-update',
+            id: e.id,
+            text,
+            field: category.value,
+            scope: scope.value,
+          },
+          key,
+        ),
+    );
+    const category = create('select'),
+      categoryLabel = create('label', 'Categoría de la regla');
+    for (const f of RULE_FIELDS) {
+      const option = create('option', LABELS[f]);
+      option.value = f;
+      category.append(option);
+    }
+    const categoryKey = `${snapshot.state.context_id}:${formKey}:category`;
+    category.value = drafts.get(categoryKey) || field;
+    category.addEventListener('change', () =>
+      drafts.set(categoryKey, category.value),
+    );
+    categoryLabel.append(category);
+    const scope = create('select'),
+      scopeLabel = create('label', 'Vigencia de la regla');
+    for (const [value, label] of [
+      ['project', 'Contexto: permanece hasta cambio explícito'],
+      ['session', 'Sólo esta sesión: expira al reiniciar NEXO'],
+    ]) {
+      const option = create('option', label);
+      option.value = value;
+      scope.append(option);
+    }
+    const scopeKey = `${snapshot.state.context_id}:${formKey}:scope`;
+    scope.value = drafts.get(scopeKey) || e.scope;
+    scope.addEventListener('change', () => drafts.set(scopeKey, scope.value));
+    scopeLabel.append(scope);
+    edit.prepend(categoryLabel, scopeLabel);
+    details.append(edit);
+    card.append(details);
+    return card;
   }
   function goalCard(goal) {
     const card = showEntry(goal, false);
@@ -480,6 +576,48 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         (text, key) => mutate({ type: 'message', text }, key),
       ),
     );
+    const proposals = create('details');
+    proposals.open = (s.decision_candidates || []).some(
+      (c) => c.status === 'pending',
+    );
+    proposals.append(
+      create(
+        'summary',
+        `Propuestas del usuario, no decisiones (${(s.decision_candidates || []).length})`,
+      ),
+    );
+    proposals.append(
+      create(
+        'p',
+        'Las propuestas observadas del asistente siguen siendo sólo datos de conversación; no son decisiones tuyas. Un sí genérico no confirma esta lista.',
+        'note',
+      ),
+    );
+    for (const c of s.decision_candidates || []) {
+      const card = showEntry(c, false);
+      if (c.status === 'pending') {
+        card.append(
+          button('Confirmar esta decisión concreta', () =>
+            mutate({ type: 'decision-candidate', id: c.id, action: 'confirm' }),
+          ),
+        );
+        card.append(
+          button('Rechazar esta propuesta', () =>
+            mutate({ type: 'decision-candidate', id: c.id, action: 'reject' }),
+          ),
+        );
+      }
+      proposals.append(card);
+    }
+    body.append(proposals);
+    if (snapshot.effective.preference_conflicts_clipped)
+      body.append(
+        create(
+          'p',
+          'Se muestran sólo los primeros 100 cruces reconocidos de preferencias; las reglas completas se conservan.',
+          'note',
+        ),
+      );
     const addForm = form(
       'entry',
       'Agregar una regla o contexto explícito',
@@ -506,7 +644,7 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
     const scope = create('select');
     const scopeLabel = create('label', 'Vigencia');
     for (const [v, l] of [
-      ['project', 'Proyecto: permanece hasta actualización explícita'],
+      ['project', 'Contexto: permanece hasta actualización explícita'],
       ['session', 'Temporal: expira al reiniciar NEXO'],
     ]) {
       const o = create('option', l);
@@ -526,7 +664,10 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         field,
       );
       details.append(create('summary', `${label} (${s[field].length})`));
-      for (const e of s[field]) details.append(showEntry(e));
+      for (const e of s[field])
+        details.append(
+          RULE_FIELDS.includes(field) ? ruleCard(e, field) : showEntry(e),
+        );
       body.append(details);
     }
     const history = create('details');

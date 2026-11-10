@@ -4,8 +4,8 @@
 
 Los 72 requisitos describen un objetivo amplio, no capacidades ya demostradas.
 Se avanza por etapas sobre el UUE existente, sin reconstruir NEXO ni introducir
-un agente ejecutor. La entrega actual incorpora **las etapas 1 y 2**, sobre
-0.1.33. Las cinco siguientes siguen planificadas; no se declara el panel completo.
+un agente ejecutor. La entrega actual incorpora **las etapas 1, 2 y 3**, sobre
+0.1.33. Las cuatro siguientes siguen planificadas; no se declara el panel completo.
 
 No hay modelo semántico nuevo, envíos externos, nuevos permisos ni dependencia
 nueva. Las reglas actuales siguen siendo locales y conservadoras. Comprender no
@@ -20,7 +20,7 @@ entre bloques. Las funciones parciales existentes de UUE se reutilizarán.
 |---|---|---|---|
 | 1 | Observación incremental, roles y actualización automática | 1–6, 49, 54, 58, 68 | Base implementada; límites semánticos debajo |
 | 2 | Objetivo principal, múltiples objetivos, cambios y ciclo de vida | 7–12 | Implementada con gramática acotada y revisión explícita; detalle debajo |
-| 3 | Reglas, restricciones, preferencias, decisiones y vigencia | 13–18, 37–41, 43–44, 50–51, 53, 67, 72 | Parcial previo; falta ampliar y validar sistemáticamente |
+| 3 | Reglas, restricciones, preferencias, decisiones y vigencia | 13–18, 37–41, 43–44, 50–51, 53, 67, 72 | Ampliada con gramática acotada, revisión de conflictos y edición de vigencia; detalle debajo |
 | 4 | Tareas, subtareas, dependencias, prioridades y siguiente paso | 19–24, 34, 36 | Pendiente; no inventar plan ni ejecutar tareas |
 | 5 | Proyectos, referencias, selección de contexto y antecedentes | 25–30, 47, 55–57, 59, 71 | Parcial previo; EVO opcional y referencias revisables |
 | 6 | Progreso, errores, bloqueos, propuestas y evidencia de resultados | 31–33, 35, 45–46, 69–70 | Pendiente de interpretación ampliada; observar no verifica |
@@ -291,6 +291,158 @@ Nuevos: `src/core/userGoals.js`, `test/understanding-goals.test.js` y
 `test/understanding-goals-panel.test.js`.
 Modificados: core y servicio UUE, panel Comprensión, manifest de empaquetado,
 tests IPC y documentación. No se añade dependencia de producción ni de pruebas.
-La entrega se cierra con commit y push sobre la rama de trabajo. **El próximo
-bloque es el 3: reglas, restricciones, preferencias, decisiones y vigencia.**
+La entrega de etapa 2 se publicó como `2ab790e`. Su siguiente bloque, reglas,
+restricciones, preferencias, decisiones y vigencia, se desarrolla debajo.
 No se declaran completados los 72 requisitos.
+
+
+## Etapa 3 implementada — reglas, preferencias, decisiones y vigencia
+
+### Qué amplía este bloque
+
+Se reutilizan las categorías y prioridades UUE existentes: restricciones
+obligatorias → instrucciones → decisiones declaradas → preferencias orientativas.
+El objetivo explícito y las políticas de sistema conservan su precedencia. Se
+mantienen separados los subobjetivos, contexto y avances; no hay ejecutor ni
+modificación de prompts a partir de estas reglas.
+
+- **Categoría y prioridad visibles:** las reglas nuevas guardan `category`, además
+  de texto, estado, origen de usuario, certeza, alcance y fechas. El panel muestra
+  esta información, sin presentar una preferencia como obligación ni una decisión
+  como ejecución comprobada.
+- **Comparación conservadora:** además de acciones/objetivos textuales comparables
+  de la base UUE, se reconocen algunas dimensiones de idioma, longitud y formato
+  de respuesta. Un conflicto entre reglas no se resuelve por intuición. Una nueva
+  indicación dudosa abre la propuesta concreta y conserva las anteriores. Una
+  actualización inequívoca del mismo nivel y vigencia puede sustituirla con
+  historia; no salta una regla superior ni sustituye automáticamente una regla
+  duradera por otra temporal.
+- **Preferencias orientativas:** sólo compiten con preferencias; no retiran
+  restricciones, instrucciones ni decisiones. Los cruces reconocidos con reglas
+  superiores producen avisos calculados, sin activar una excepción. El índice por
+  dimensión se calcula localmente; se muestran hasta 100 cruces con aviso de
+  recorte, sin podar reglas. No se compara semánticamente todo el lenguaje.
+- **Corrección transaccional:** `rule-update` permite editar texto, categoría y/o
+  vigencia de una regla activa por ID y revisión. Corrige un borde anterior: una
+  corrección incompatible con otra regla **ya no retira primero la original**.
+  Ambas permanecen hasta confirmar la sustitución concreta; rechazar la propuesta
+  no las modifica. Al confirmar se revalidan las referencias y los conflictos
+  actuales; una propuesta obsoleta no puede retirar reglas nuevas por accidente.
+- **Retiro e historia:** se puede retirar una regla por control del panel o texto
+  exacto inequívoco. La historia conserva categoría anterior, literal y origen
+  originales, más tipo, actor y fecha del cambio. Continuar una conversación no
+  reactiva reglas retiradas. No se borra historia para hacer espacio.
+- **Propuestas ≠ decisiones:** las sugerencias reconocidas del usuario quedan en
+  una lista pendiente, con origen y certeza inferida respecto de una decisión.
+  Confirmar/rechazar exige seleccionar esa propuesta concreta; «sí»/«dale» no
+  confirman la lista. Una declaración explícita de decisión que coincide con una
+  propuesta pendiente la vincula a la decisión resultante. Si la confirmación
+  entra en conflicto con una obligación, primero se exige revisar ese conflicto;
+  no se activa la decisión ni se pierde la propuesta original. El estado resuelto
+  conserva `verified: false`. Confirmar jamás autoriza una herramienta.
+- **Asistente sin autoridad:** sus sugerencias y afirmaciones siguen siendo sólo
+  datos de la ventana observacional. No crean reglas, propuestas normativas del
+  usuario, decisiones ni pruebas de progreso. También se filtran bloques de código,
+  citas, ejemplos y secciones reconocidas «El asistente dijo: …» en mensajes propios.
+
+### Vigencia y ejemplos de uso
+
+Se mantienen dos alcances compatibles con la persistencia existente:
+
+- `project`: **este contexto UUE**, hasta actualización/retiro explícitos; no es
+  una regla global para todas las conversaciones ni un ámbito por objetivo.
+- `session`: esta sesión de NEXO, expira al reiniciar. Las reglas se archivan como
+  obsoletas con `change.kind: session-expired`. Si la historia ya está llena,
+  permanecen obsoletas en su categoría y fuera de la proyección activa; no se
+  descartan para permitir arrancar. Las propuestas temporales pendientes y sus
+  conflictos también caducan. Las duraderas se conservan con EVO apagada.
+
+Ejemplos reconocidos desde la conversación:
+
+```text
+Restricción: No borres información
+Instrucción: Usa español
+Prefiero respuestas cortas
+Decisión confirmada: Mantener Electron
+Propuesta: Documentar una API local
+Solo por esta sesión: No ejecutes código
+Preferencia temporal: respuestas cortas
+Instrucción permanente: Usa español
+De ahora en más prefiero respuestas detalladas
+Reemplaza «Usa español» por «Usa inglés»
+Retira la restricción «No borres información»
+```
+
+La etiqueta o envoltura de alcance se interpreta; se conserva el valor de la regla
+sin resumirlo. El origen apunta al mensaje observado. El editor conserva textos
+libres/extensos aunque no estén en la gramática. En el panel cada regla vigente
+incluye **Editar texto, categoría o vigencia**, y las propuestas tienen controles
+separados para confirmar o rechazar.
+
+«Sólo esta vez», condiciones y ciertos alcances no modelados —por ejemplo «hasta
+terminar la tarea»— piden aclaración. No se reinterpretan como permanentes ni como
+toda la sesión. No hay todavía alcance automático por turno, fecha o finalización
+de tarea. Cambiar explícitamente una regla duradera a temporal la sustituye; al
+expirar **no se restaura automáticamente una versión histórica**. Las excepciones
+con restauración, si se amplían, necesitan otro modelo explícito, no heurísticas.
+
+### Compatibilidad y protección de datos
+
+`decision_candidates` es opcional en archivos antiguos, con máximo de 30 registros
+por contexto, incluidos aceptados/rechazados/obsoletos. Las categorías anteriores
+siguen limitadas a 200 entradas y la historia a 400. Al llenarse, se rechaza la
+transacción; no hay poda silenciosa ni corrección parcial. `category` y `change`
+son metadatos aditivos validados; no se cambia `schema_version: 1` ni los archivos
+EVO. Corrupción bloquea escritura sin sobrescribir. Fallos de disco no confirman
+ediciones/decisiones en RAM y permiten reintentar.
+
+`rule-update` y `decision-candidate` pasan por el IPC de edición existente, con
+revisión optimista, shell confiable, mainFrame y propiedad del guest. No hay API
+privilegiada nueva en la página ni lectura adicional. Se conservan lector, cola de
+500 ms, ACK, CDP, guard, preparación/envío, tokenización y contadores anteriores.
+Se mantiene la versión 0.1.33 y no se añade dependencia de producción ni pruebas.
+
+### Validación ejecutada y límites
+
+| Ejecución | Total | Aprobadas | Fallidas | Omitidas |
+|---|---:|---:|---:|---:|
+| Focalizadas: UUE, observación, IPC, independencia, shell, objetivos, reglas y paneles | 118 | 118 | 0 | 0 |
+| `npm test` | 859 | 858 | 0 | 1 |
+
+La suite completa duró 101.544,728808 ms. La omitida sigue siendo el empaquetado
+Windows real con `NEXO_ELECTRON_ZIP_DIR`. Build de inyección correcto:
+53,7 kB / 19,3 kB gzip, 11 módulos.
+
+Se añaden **28 pruebas de comportamiento**: 25 en
+`test/understanding-rules.test.js`, una de callbacks del panel en
+`test/understanding-rules-panel.test.js` y dos de flujo IPC/main en
+`test/user-understanding-main.test.js`. Cubren categorías, prioridad, preferencias,
+conflictos, correcciones sin pérdida, propuestas obsoletas, retiro, alcances,
+condiciones/citas, reinicio, EVO apagada, aislamiento, compatibilidad, corrupción,
+límites y fallos de disco con reintento. Se extrae el DOM mínimo de fixture a
+`test/harness/dom-fixture.mjs` para reutilizarlo con los objetivos sin duplicarlo;
+el runner completo cuenta además ese archivo de infraestructura, sin aserciones
+propias, como una entrada aprobada.
+
+No se ejecutaron Electron real, Windows real ni una cuenta ChatGPT real. DOM de
+fixture y Electron stub verifican callbacks y contratos, **no la apariencia,
+foco/scroll, accesibilidad ni interacción real de la shell**. Tampoco hay mediciones
+de rendimiento o calidad semántica. Las claves de conflicto son acotadas: ausencia
+de aviso no prueba compatibilidad, ni esta implementación satisface cualquier
+redacción de los requisitos. La comprensión sigue siendo local ES/EN, sin LLM.
+
+Gate manual pendiente: EVO apagada → objetivo → restricción e instrucción →
+preferencia incompatible → edición que entra en conflicto → rechazar/confirmar
+cambio concreto → sugerencia y confirmación → regla/propuesta temporal → reinicio
+→ revisión de historia → cambio de conversación y borrado. Revisar borradores,
+selección de categoría/vigencia, literal escapado y tema BLACK & ELECTRIC BLUE.
+
+### Archivos y siguiente bloque
+
+Nuevos: `src/core/userRules.js`, `test/understanding-rules.test.js`,
+`test/understanding-rules-panel.test.js` y `test/harness/dom-fixture.mjs`.
+Modificados: core/servicio UUE, panel, manifest de empaquetado, tests main y de
+objetivos del panel, README y documentación. Se cierra con commit y push a la
+rama de trabajo. El siguiente bloque es el **4: tareas, subtareas, dependencias,
+prioridades y siguiente paso**. Los bloques restantes y los gates manuales siguen
+pendientes; **no se declaran completados los 72 requisitos**.

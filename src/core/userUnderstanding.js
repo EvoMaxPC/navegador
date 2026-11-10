@@ -1,4 +1,11 @@
 import {
+  RULE_FIELDS,
+  DECISION_CANDIDATE_LIMIT,
+  ruleSegment,
+  ruleRetirement,
+  ruleValueKey,
+} from './userRules.js';
+import {
   goalDirective,
   possibleGoal,
   goalKey,
@@ -63,6 +70,7 @@ export function newUnderstanding(contextId, now = Date.now()) {
     independent_goals: [],
     goal_candidates: [],
     goal_events: [],
+    decision_candidates: [],
     current_task: null,
     subgoals: [],
     active_instructions: [],
@@ -107,6 +115,7 @@ function entry(
     certainty,
     scope,
     priority: certainty === 'inferred' ? 7 : PRIORITY[field] || 7,
+    ...(RULE_FIELDS.includes(field) ? { category: field } : {}),
     created_at: now,
     updated_at: now,
   };
@@ -119,12 +128,43 @@ function boundedPush(array, item, max = 200) {
     );
   array.push(item);
 }
-function archive(state, e, now, status = 'superseded') {
+function archive(state, e, now, status = 'superseded', meta = null) {
   boundedPush(
     state.instruction_history,
-    { ...e, status, updated_at: now },
+    {
+      ...e,
+      status,
+      updated_at: now,
+      ...(meta
+        ? {
+            change: {
+              kind: status === 'obsolete' ? 'retired' : 'replaced',
+              at: now,
+              origin: origin(meta),
+            },
+          }
+        : {}),
+    },
     400,
   );
+}
+function acceptMatchingDecisions(state, decision, meta, now) {
+  for (const c of state.decision_candidates || [])
+    if (
+      c.status === 'pending' &&
+      c.scope === decision.scope &&
+      normalized(c.text) === normalized(decision.text)
+    ) {
+      c.status = 'accepted';
+      c.target_id = decision.id;
+      c.updated_at = now;
+      c.resolution = {
+        kind: 'user-confirmation',
+        verified: false,
+        at: now,
+        origin: origin(meta),
+      };
+    }
 }
 function add(
   state,
@@ -136,11 +176,18 @@ function add(
   scope = 'project',
 ) {
   const same = state[field].find(
-    (e) => active(e) && normalized(e.text) === normalized(text),
+    (e) =>
+      active(e) && e.scope === scope && normalized(e.text) === normalized(text),
   );
-  if (same) return same;
+  if (same) {
+    if (field === 'confirmed_decisions')
+      acceptMatchingDecisions(state, same, meta, now);
+    return same;
+  }
   const e = entry(state, field, text, meta, now, certainty, scope);
   boundedPush(state[field], e);
+  if (field === 'confirmed_decisions')
+    acceptMatchingDecisions(state, e, meta, now);
   return e;
 }
 function goalEvent(state, goal, action, meta, now, from = null) {
@@ -301,6 +348,8 @@ function ask(state, kind, text, proposed, meta, now, conflictIds = []) {
       q.status === 'open' &&
       q.kind === kind &&
       normalized(q.proposed?.text || '') === normalized(proposed?.text || '') &&
+      q.proposed?.field === proposed?.field &&
+      q.proposed?.scope === proposed?.scope &&
       q.conflict_ids.join() === conflictIds.join(),
   );
   if (same) return same;
@@ -355,13 +404,31 @@ export function instructionKey(text) {
       : 'allow',
   };
 }
+function comparableRule(text) {
+  return (
+    instructionKey(text) ||
+    ruleValueKey(text) ||
+    instructionKey(
+      text.replace(
+        /^\s*(?:preferencia\s*:\s*|prefiero\s+|preferir[ií]a\s+|i prefer\s+)/i,
+        '',
+      ),
+    )
+  );
+}
 function conflicting(state, field, text) {
-  const k = instructionKey(text);
+  const k = comparableRule(text);
   if (!k) return [];
-  return [...state.explicit_constraints, ...state.active_instructions]
-    .filter((e) => active(e))
+  // Las preferencias sólo compiten con otras preferencias; nunca retiran obligaciones.
+  const fields =
+    field === 'preferences'
+      ? ['preferences']
+      : [...RULE_FIELDS.filter((f) => f !== 'preferences')];
+  return fields
+    .flatMap((f) => state[f])
+    .filter(active)
     .filter((e) => {
-      const old = instructionKey(e.text);
+      const old = comparableRule(e.text);
       return old && old.key === k.key && old.value !== k.value;
     });
 }
@@ -371,20 +438,26 @@ function proposal(
   text,
   meta,
   now,
-  { updating = false, scope = 'project' } = {},
+  {
+    updating = false,
+    scope = 'project',
+    replaces = null,
+    certainty = 'explicit',
+  } = {},
 ) {
-  if (!['explicit_constraints', 'active_instructions'].includes(field))
-    return add(state, field, text, meta, now, 'explicit', scope);
-  const clashes = conflicting(state, field, text);
-  if (clashes.length) {
-    // Una actualización inequívoca de instrucciones del mismo nivel no cambia restricciones superiores.
-    if (updating && clashes.every((e) => e.priority === PRIORITY[field])) {
-      for (const e of clashes) {
-        archive(state, e, now);
-        state[field] = state[field].filter((x) => x.id !== e.id);
-      }
-      return add(state, field, text, meta, now, 'explicit', scope);
-    }
+  if (!RULE_FIELDS.includes(field))
+    return add(state, field, text, meta, now, certainty, scope);
+  const clashes = conflicting(state, field, text).filter(
+    (e) => e.id !== replaces,
+  );
+  // Actualizar mismo nivel es explícito; jamás permite saltar una regla superior.
+  if (
+    clashes.length &&
+    !(
+      updating &&
+      clashes.every((e) => e.priority === PRIORITY[field] && e.scope === scope)
+    )
+  ) {
     return ask(
       state,
       'conflict',
@@ -392,10 +465,44 @@ function proposal(
       { field, text, scope },
       meta,
       now,
-      clashes.map((e) => e.id),
+      [...clashes.map((e) => e.id), ...(replaces ? [replaces] : [])],
     );
   }
-  return add(state, field, text, meta, now, 'explicit', scope);
+  for (const id of new Set([
+    ...(updating ? clashes.map((e) => e.id) : []),
+    ...(replaces ? [replaces] : []),
+  ]))
+    removeActive(state, id, now, 'superseded', meta);
+  return add(state, field, text, meta, now, certainty, scope);
+}
+function decisionCandidate(state, text, scope, meta, now) {
+  state.decision_candidates ||= [];
+  if (
+    state.decision_candidates.some(
+      (e) => normalized(e.text) === normalized(text) && e.scope === scope,
+    )
+  )
+    return;
+  const e = entry(state, 'inference', text, meta, now, 'inferred', scope);
+  e.status = 'pending';
+  e.source_kind = 'user-proposal';
+  boundedPush(state.decision_candidates, e, DECISION_CANDIDATE_LIMIT);
+}
+function updateRule(state, operation, meta, now) {
+  const oldField = RULE_FIELDS.find((f) =>
+    state[f].some((e) => e.id === operation.id && active(e)),
+  );
+  if (!oldField)
+    throw new UnderstandingError('La regla ya no está activa', 'conflict');
+  const old = state[oldField].find((e) => e.id === operation.id),
+    field = operation.field ?? oldField,
+    scope = operation.scope ?? old.scope,
+    text = operation.text ?? old.text;
+  if (!RULE_FIELDS.includes(field) || !['project', 'session'].includes(scope))
+    throw new UnderstandingError('Categoría o vigencia de regla inválida');
+  userText(text);
+  if (field === oldField && scope === old.scope && text === old.text) return;
+  return proposal(state, field, text, meta, now, { scope, replaces: old.id });
 }
 /** Sólo segmentos propios: se ignoran bloques de código, citas y secciones de ejemplos. */
 function ownSegments(text) {
@@ -408,7 +515,11 @@ function ownSegments(text) {
       continue;
     }
     if (fenced || /^\s*>/.test(line)) continue;
-    if (/^\s*(?:ejemplos?|examples?|texto citado)\s*:/i.test(line)) {
+    if (
+      /^\s*(?:ejemplos?|examples?|texto citado|el asistente dijo|respuesta del asistente|assistant said|assistant response)\s*:/i.test(
+        line,
+      )
+    ) {
       examples = true;
       continue;
     }
@@ -530,11 +641,17 @@ export function interpretMessage(state, text) {
     certainty: 'inferred',
   };
 }
-function removeActive(state, id, now, status = 'obsolete') {
+function removeActive(state, id, now, status = 'obsolete', meta = null) {
   for (const field of FIELDS) {
-    const e = state[field].find((e) => e.id === id);
+    const e = state[field].find((e) => e.id === id && active(e));
     if (e) {
-      archive(state, e, now, status);
+      archive(
+        state,
+        { ...e, ...(RULE_FIELDS.includes(field) ? { category: field } : {}) },
+        now,
+        status,
+        meta,
+      );
       state[field] = state[field].filter((x) => x.id !== id);
       return e;
     }
@@ -557,9 +674,34 @@ function resolve(state, id, accept, meta, now) {
   if (accept) {
     if (q.kind === 'goal-change') setGoal(state, q.proposed.text, meta, now);
     else if (q.kind === 'conflict') {
+      const activeIds = FIELDS.flatMap((f) => state[f])
+        .filter(active)
+        .map((e) => e.id);
+      if (
+        q.conflict_ids.some((id) => !activeIds.includes(id)) ||
+        conflicting(state, q.proposed.field, q.proposed.text).some(
+          (e) => !q.conflict_ids.includes(e.id),
+        )
+      )
+        throw new UnderstandingError(
+          'Las reglas cambiaron desde esta propuesta; revisá y formulá el cambio nuevamente.',
+          'conflict',
+        );
+      const candidate = q.proposed.decision_candidate_id
+        ? (state.decision_candidates || []).find(
+            (c) =>
+              c.id === q.proposed.decision_candidate_id &&
+              c.status === 'pending',
+          )
+        : null;
+      if (q.proposed.decision_candidate_id && !candidate)
+        throw new UnderstandingError(
+          'La propuesta de decisión ya no está pendiente',
+          'conflict',
+        );
       for (const ref of q.conflict_ids)
-        removeActive(state, ref, now, 'superseded');
-      add(
+        removeActive(state, ref, now, 'superseded', meta);
+      const confirmed = add(
         state,
         q.proposed.field,
         q.proposed.text,
@@ -568,6 +710,17 @@ function resolve(state, id, accept, meta, now) {
         'confirmed',
         q.proposed.scope,
       );
+      if (candidate) {
+        candidate.status = 'accepted';
+        candidate.target_id = confirmed.id;
+        candidate.updated_at = now;
+        candidate.resolution = {
+          kind: 'user-confirmation',
+          verified: false,
+          at: now,
+          origin: origin(meta),
+        };
+      }
     } else if (q.kind === 'context-reference') {
       const e = add(
         state,
@@ -672,6 +825,48 @@ export function updateUnderstanding(
     case 'goal':
       setGoal(state, userText(operation.text), meta, now);
       break;
+    case 'rule-update':
+      updateRule(state, operation, meta, now);
+      break;
+    case 'decision-candidate': {
+      if (!['confirm', 'reject'].includes(operation.action))
+        throw new UnderstandingError('Respuesta a propuesta inválida');
+      const c = (state.decision_candidates || []).find(
+        (e) => e.id === operation.id && e.status === 'pending',
+      );
+      if (!c)
+        throw new UnderstandingError(
+          'La propuesta ya no está pendiente',
+          'conflict',
+        );
+      if (operation.action === 'reject') c.status = 'rejected';
+      else {
+        const result = proposal(
+          state,
+          'confirmed_decisions',
+          c.text,
+          meta,
+          now,
+          { scope: c.scope, certainty: 'confirmed' },
+        );
+        if (result.kind === 'conflict') {
+          result.proposed.decision_candidate_id = c.id;
+          report.note =
+            'La propuesta sigue pendiente: primero revisá el conflicto concreto. No se activa una decisión.';
+          break;
+        }
+        c.status = 'accepted';
+        c.target_id = result.id;
+      }
+      c.updated_at = now;
+      c.resolution = {
+        kind: 'user-confirmation',
+        verified: false,
+        at: now,
+        origin: origin(meta),
+      };
+      break;
+    }
     case 'add': {
       if (!FIELDS.includes(operation.field))
         throw new UnderstandingError('Categoría inválida');
@@ -702,7 +897,7 @@ export function updateUnderstanding(
       break;
     }
     case 'retire':
-      removeActive(state, operation.id, now);
+      removeActive(state, operation.id, now, 'obsolete', meta);
       break;
     case 'resolve':
       if (typeof operation.accept !== 'boolean')
@@ -730,7 +925,23 @@ export function updateUnderstanding(
         if (state.seen_messages.length > 2048) state.seen_messages.shift();
       }
       const previousTask = state.current_task;
-      if (report.directive) {
+      const retiredText = ruleRetirement(text);
+      if (retiredText) {
+        const matches = RULE_FIELDS.flatMap((f) => state[f]).filter(
+          (e) => active(e) && normalized(e.text) === normalized(retiredText),
+        );
+        if (matches.length === 1)
+          removeActive(state, matches[0].id, now, 'obsolete', meta);
+        else
+          ask(
+            state,
+            'missing-reference',
+            'No identifico una única regla vigente con ese texto. Seleccionala en el panel.',
+            null,
+            meta,
+            now,
+          );
+      } else if (report.directive) {
         const d = report.directive;
         if (d.type === 'independent')
           for (const text of d.texts)
@@ -799,11 +1010,12 @@ export function updateUnderstanding(
         ).filter((x) => normalized(x.e.text) === normalized(parts[1]));
         if (candidates.length === 1) {
           const { field, e } = candidates[0];
-          removeActive(state, e.id, now, 'superseded');
-          proposal(state, field, parts[2], meta, now, {
-            updating: true,
-            scope: e.scope,
-          });
+          if (RULE_FIELDS.includes(field))
+            updateRule(state, { id: e.id, text: parts[2] }, meta, now);
+          else {
+            removeActive(state, e.id, now, 'superseded', meta);
+            proposal(state, field, parts[2], meta, now, { scope: e.scope });
+          }
         } else
           ask(
             state,
@@ -872,11 +1084,6 @@ export function updateUnderstanding(
             field = 'subgoals';
             value = line.slice(line.indexOf(':') + 1).trim();
           } else if (
-            /^(?:decision confirmada|decidimos|decision)\s*:/.test(n)
-          ) {
-            field = 'confirmed_decisions';
-            value = line.slice(line.indexOf(':') + 1).trim();
-          } else if (
             /^(?:avance|progreso|problema pendiente|referencia|contexto)\s*:/.test(
               n,
             )
@@ -884,40 +1091,37 @@ export function updateUnderstanding(
             field = /^(avance|progreso)/.test(n)
               ? 'progress'
               : 'relevant_context';
-          } else if (/^(?:preferencia|prefiero|preferiria|i prefer)\b/.test(n))
-            field = 'preferences';
-          else if (/^(?:restriccion|obligatorio)\s*:/.test(n)) {
-            field = 'explicit_constraints';
-            value = line.slice(line.indexOf(':') + 1).trim();
-          } else if (
-            /^(?:instruccion|resultado esperado|prioridad)\s*:/.test(n)
-          ) {
-            field = 'active_instructions';
-            value = line.slice(line.indexOf(':') + 1).trim();
-          } else if (
-            /^(?:no|nunca|never|do not|don't)\s+(?:modifi\w*|cambi\w*|ejecut\w*|borr\w*|elimin\w*|reescrib\w*|invent\w*|alter\w*|uses?|utilic\w*|hagas?|tom\w*|edit\w*|run|delet\w*)\b/.test(
-              n,
-            )
-          )
-            field = 'explicit_constraints';
-          else if (
-            /^(?:ahora\s+(?:si\s+)?)?(?:usa|use|utiliza|responde|escribi|escribe|modifica|ejecuta|mejora|analiza|implementa|crea|conserva|mantene|prioriza|respeta|debes|tene en cuenta)\b/.test(
-              n,
-            )
-          )
-            field = 'active_instructions';
+          }
+          const rule = field ? null : ruleSegment(line);
+          if (rule?.ambiguous) {
+            recognized = true;
+            ask(
+              state,
+              'missing-reference',
+              'El alcance de la regla es condicional, puntual o dudoso. Aclará su vigencia antes de activarla.',
+              null,
+              meta,
+              now,
+            );
+            continue;
+          }
+          if (rule?.proposal) {
+            recognized = true;
+            if (rule.value)
+              decisionCandidate(state, rule.value, rule.scope, meta, now);
+            continue;
+          }
+          if (rule) {
+            field = rule.field;
+            value = rule.value;
+            scope = rule.scope;
+          }
           if (field) {
             recognized = true;
-            if (
-              field === 'active_instructions' &&
-              /^(?:ahora\s+)?(?:modifica|ejecuta|mejora|analiza|implementa|crea)\b/.test(
-                n,
-              )
-            )
-              taskRequested = true;
+            if (rule?.taskRequested) taskRequested = true;
             if (value)
               proposal(state, field, value, meta, now, {
-                updating: /^ahora\b/.test(n),
+                updating: rule?.updating || false,
                 scope,
               });
           }
@@ -989,6 +1193,14 @@ export function updateUnderstanding(
       reference_id: state.goal_candidates.find((g) => g.status === 'pending')
         .id,
     });
+  if ((state.decision_candidates || []).some((e) => e.status === 'pending'))
+    state.uncertainty.push({
+      kind: 'decision-proposal',
+      text: 'Hay propuestas del usuario pendientes; no son decisiones confirmadas.',
+      reference_id: state.decision_candidates.find(
+        (e) => e.status === 'pending',
+      ).id,
+    });
   state.uncertainty.push(
     ...state.pending_questions
       .filter((q) => q.status === 'open')
@@ -1007,8 +1219,35 @@ export function updateUnderstanding(
     },
   };
 }
+// Índice por dimensión: no se normaliza cada regla una vez por preferencia.
+function preferenceAdvisories(state) {
+  const index = new Map(),
+    conflicts = [];
+  for (const f of RULE_FIELDS.filter((f) => f !== 'preferences'))
+    for (const e of state[f].filter(active)) {
+      const k = comparableRule(e.text);
+      if (!k) continue;
+      if (!index.has(k.key)) index.set(k.key, []);
+      index.get(k.key).push({ id: e.id, value: k.value });
+    }
+  for (const p of state.preferences.filter(active)) {
+    const k = comparableRule(p.text);
+    if (!k) continue;
+    for (const old of index.get(k.key) || [])
+      if (old.value !== k.value) {
+        if (conflicts.length === 100) return { conflicts, clipped: true };
+        conflicts.push({
+          preference_id: p.id,
+          rule_id: old.id,
+          reason: 'La preferencia no sustituye una regla de mayor prioridad.',
+        });
+      }
+  }
+  return { conflicts, clipped: false };
+}
 export function effectiveUnderstanding(state) {
   validateUnderstanding(state);
+  const advisory = preferenceAdvisories(state);
   return {
     context_id: state.context_id,
     revision: state.revision,
@@ -1018,6 +1257,11 @@ export function effectiveUnderstanding(state) {
     goal_candidates: (state.goal_candidates || []).filter(
       (g) => g.status === 'pending',
     ),
+    decision_candidates: (state.decision_candidates || []).filter(
+      (e) => e.status === 'pending',
+    ),
+    preference_conflicts: advisory.conflicts,
+    preference_conflicts_clipped: advisory.clipped,
     explicit_constraints: state.explicit_constraints.filter(active),
     active_instructions: state.active_instructions.filter(active),
     confirmed_decisions: state.confirmed_decisions.filter(active),
@@ -1033,11 +1277,13 @@ export function effectiveUnderstanding(state) {
     last_context_update: state.last_context_update,
     readiness: state.pending_questions.some((q) => q.status === 'open')
       ? 'needs-clarification'
-      : !active(state.user_goal)
-        ? (state.goal_candidates || []).some((g) => g.status === 'pending')
-          ? 'needs-goal-confirmation'
-          : 'no-active-goal'
-        : 'structured-context-available',
+      : (state.decision_candidates || []).some((e) => e.status === 'pending')
+        ? 'needs-decision-confirmation'
+        : !active(state.user_goal)
+          ? (state.goal_candidates || []).some((g) => g.status === 'pending')
+            ? 'needs-goal-confirmation'
+            : 'no-active-goal'
+          : 'structured-context-available',
   };
 }
 export function validateUnderstanding(s) {
@@ -1114,6 +1360,22 @@ export function validateUnderstanding(s) {
         fail();
     }
     if (['completed', 'cancelled'].includes(e.status) && !e.resolution) fail();
+    if (
+      e.category !== undefined &&
+      (!RULE_FIELDS.includes(e.category) ||
+        (e.certainty !== 'inferred' && e.priority !== PRIORITY[e.category]))
+    )
+      fail();
+    if (e.change !== undefined) {
+      const c = e.change;
+      if (
+        !c ||
+        !['retired', 'replaced', 'session-expired'].includes(c.kind) ||
+        !Number.isFinite(c.at) ||
+        (c.kind !== 'session-expired' && !validOrigin(c.origin))
+      )
+        fail();
+    }
     userText(e.text);
   }
   const goalStatuses = [
@@ -1197,10 +1459,32 @@ export function validateUnderstanding(s) {
     )
       fail();
   }
+  if (s.decision_candidates !== undefined) {
+    if (
+      !Array.isArray(s.decision_candidates) ||
+      s.decision_candidates.length > DECISION_CANDIDATE_LIMIT
+    )
+      fail();
+    for (const e of s.decision_candidates) {
+      check(e, ['pending', 'accepted', 'rejected', 'obsolete']);
+      if (
+        e.source_kind !== 'user-proposal' ||
+        e.certainty !== 'inferred' ||
+        (['accepted', 'rejected'].includes(e.status) &&
+          e.resolution?.kind !== 'user-confirmation') ||
+        (e.status === 'accepted' &&
+          (typeof e.target_id !== 'string' || e.target_id.length > 150))
+      )
+        fail();
+    }
+  }
   if (s.current_task) check(s.current_task);
   for (const field of FIELDS) {
     if (!Array.isArray(s[field]) || s[field].length > 200) fail();
-    s[field].forEach((e) => check(e));
+    s[field].forEach((e) => {
+      check(e);
+      if (e.category !== undefined && e.category !== field) fail();
+    });
   }
   for (const [field, max] of [
     ['goal_history', 50],
@@ -1240,10 +1524,13 @@ export function validateUnderstanding(s) {
             q.proposed.text.length > MAX_USER_TEXT)) ||
         (q.kind === 'conflict' &&
           q.proposed &&
-          (!['active_instructions', 'explicit_constraints'].includes(
-            q.proposed.field,
-          ) ||
-            !['project', 'session'].includes(q.proposed.scope))),
+          (!RULE_FIELDS.includes(q.proposed.field) ||
+            !['project', 'session'].includes(q.proposed.scope) ||
+            !q.conflict_ids.length ||
+            (q.proposed.decision_candidate_id !== undefined &&
+              (q.proposed.field !== 'confirmed_decisions' ||
+                typeof q.proposed.decision_candidate_id !== 'string' ||
+                q.proposed.decision_candidate_id.length > 150)))),
     )
   )
     fail();

@@ -4,7 +4,8 @@
 > La etapa 1 amplía la recepción incremental y observación del asistente, con
 > renovación automática del panel. La etapa 2 añade objetivos independientes,
 > inferencias confirmables y cierre/reapertura explícitos sin verificar ejecución;
-> las descripciones de iteraciones anteriores
+> la etapa 3 amplía reglas, propuestas de decisión y corrección/vigencia con historia.
+> Las descripciones de iteraciones anteriores
 > de este documento deben leerse como evidencia histórica, no como límite actual.
 
 ## Alcance y estado real

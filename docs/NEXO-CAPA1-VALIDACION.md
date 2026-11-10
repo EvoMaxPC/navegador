@@ -290,3 +290,20 @@ inyección correcto. 28 pruebas nuevas; el test del panel usa DOM mínimo de fix
 y el flujo main usa Electron stub. No se probó Electron real ni una cuenta real.
 Restan los bloques 3–7 y los gates manuales documentados; no son 72 requisitos
 completados.
+
+
+## Comprensión por etapas — tercer bloque posterior
+
+La [etapa 3 de reglas, preferencias, decisiones y vigencia](NEXO-COMPRENSION-ETAPAS.md#etapa-3-implementada--reglas-preferencias-decisiones-y-vigencia)
+conserva categorías/prioridades, añade propuestas revisables y edición explícita
+de reglas con historia. Corrige el retiro prematuro de una regla cuando su
+reemplazo entra en conflicto. La confirmación revalida referencias actuales;
+preferencias no retiran obligaciones y decisiones no prueban ejecución.
+
+Resultados de esta iteración: **118/118 focalizadas**, suite completa **859 totales,
+858 aprobadas, 0 fallidas y 1 omitida** (empaquetado Windows real). Build de
+inyección correcto. Se añaden 28 pruebas de comportamiento y se comparte el DOM
+mínimo de fixture, contado también por el runner completo. No se probó Electron
+real, Windows real ni una cuenta ChatGPT. La gramática y los alcances son limitados;
+ver el documento de etapas para compatibilidad, límites y gates manuales. Restan
+los bloques 4–7, sin proclamar completados los 72 requisitos.

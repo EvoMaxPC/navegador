@@ -62,7 +62,12 @@ export class UserUnderstandingService {
               retained.push(e);
               continue;
             }
-            const expired = { ...e, status: 'obsolete', updated_at: now() };
+            const expired = {
+              ...e,
+              status: 'obsolete',
+              updated_at: now(),
+              change: { kind: 'session-expired', at: now() },
+            };
             // Nunca bloquear la lectura o descartar una regla porque el historial se llenó.
             if (row.state.instruction_history.length < 400)
               row.state.instruction_history.push(expired);
@@ -70,11 +75,24 @@ export class UserUnderstandingService {
           }
           row.state[field] = retained;
         }
+        for (const c of row.state.decision_candidates || [])
+          if (c.scope === 'session' && c.status === 'pending') {
+            c.status = 'obsolete';
+            c.updated_at = now();
+            c.change = { kind: 'session-expired', at: now() };
+          }
         for (const q of row.state.pending_questions)
           if (q.status === 'open' && q.proposed?.scope === 'session') {
             q.status = 'rejected';
             q.resolved_at = now();
           }
+        row.state.uncertainty = row.state.uncertainty.filter(
+          (u) =>
+            u.kind !== 'decision-proposal' ||
+            (row.state.decision_candidates || []).some(
+              (c) => c.status === 'pending',
+            ),
+        );
         if (row.state.current_task)
           row.state.current_task.validity = 'last-known';
       }
@@ -230,9 +248,11 @@ export class UserUnderstandingService {
     this.notify('nexo:understanding-changed', {
       contextId: id,
       revision: result.state.revision,
-      needsClarification: result.state.pending_questions.some(
-        (q) => q.status === 'open',
-      ),
+      needsClarification:
+        result.state.pending_questions.some((q) => q.status === 'open') ||
+        (result.state.decision_candidates || []).some(
+          (e) => e.status === 'pending',
+        ),
     });
     return result;
   }
@@ -598,6 +618,8 @@ export function installUnderstandingIPC({
     if (
       ![
         'goal',
+        'rule-update',
+        'decision-candidate',
         'goal-independent',
         'goal-transition',
         'goal-candidate',
