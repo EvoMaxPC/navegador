@@ -133,3 +133,51 @@ test('outer usa ancestros reales para descartar nodos anidados sin comparar todo
   parent.contains = () => { throw Error('No recorrer todos los pares'); };
   assert.equal(selectChatGptMessages(documentFor('author-role', [parent, child])).messages.length, 1);
 });
+
+
+test('DOM observado de ChatGPT: si la etiqueta sólo detecta al usuario, recupera también la respuesta estructural', () => {
+  const userBody = { innerText: 'Pregunta de prueba', textContent: 'Pregunta de prueba' };
+  const userNode = {
+    innerText: 'Pregunta de prueba',
+    getAttribute: (name) => name === 'data-message-author-role' ? 'user' : null,
+    querySelector: (selector) => selector === '.whitespace-pre-wrap' ? userBody : null,
+  };
+  const assistantMarkdown = { innerText: 'Respuesta real de ChatGPT', textContent: 'Respuesta real de ChatGPT' };
+  const assistantArticle = {
+    innerText: 'Respuesta real de ChatGPT',
+    getAttribute: () => null,
+    querySelector: (selector) => selector === '.markdown' ? assistantMarkdown : null,
+  };
+  const userHeader = {
+    textContent: 'Dijiste:',
+    nextElementSibling: userNode,
+  };
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === 'main h4') return [userHeader]; // La etiqueta de GPT no está disponible en esta variante.
+      if (selector === '[data-message-author-role]') return [userNode];
+      if (selector === 'article') return [assistantArticle];
+      return [];
+    },
+  };
+
+  const selected = selectChatGptMessages(document);
+  assert.deepEqual(selected.messages.map(({ role }) => role), ['user', 'assistant']);
+  assert.deepEqual(readChatGptConversation(document).map(({ content }) => content),
+    ['Pregunta de prueba', 'Respuesta real de ChatGPT']);
+});
+
+test('DOM observado de ChatGPT: las dos etiquetas visibles extraen usuario y respuesta', () => {
+  const userNode = { innerText: 'Pregunta', querySelector: () => null };
+  const assistantNode = { innerText: 'Respuesta', querySelector: () => null };
+  const headers = [
+    { textContent: 'Dijiste:', nextElementSibling: userNode },
+    { textContent: 'ChatGPT dijo:', nextElementSibling: assistantNode },
+  ];
+  const document = { querySelectorAll: (selector) => selector === 'main h4' ? headers : [] };
+  const turns = readChatGptConversation(document);
+  assert.deepEqual(turns.map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'Pregunta' },
+    { role: 'assistant', content: 'Respuesta' },
+  ]);
+});
