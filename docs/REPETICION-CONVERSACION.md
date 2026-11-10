@@ -37,7 +37,7 @@ Flujo: DOM → bundle → preload aislado → `nexo:repetition:snapshot` → cac
 
 ## Validación
 
-- Suite completa: **655 pruebas, 654 aprobadas, una omitida, cero fallos**.
+- Suite completa: **661 pruebas, 660 aprobadas, una omitida, cero fallos**.
 - Tests del lector: espacios, saltos, Unicode, chats ya abiertos, cambios parciales, cambio SPA/chat vacío, exclusión de temporales, mensajes mayores de 10k y límites explícitos.
 - Tests de IPC: memoria/mediación apagadas, aislamiento por pestaña, cambio de URL, limpieza al destruir, rechazo de páginas ajenas, subframes y lectores no privilegiados; la repetición no mueve contadores ni memorias.
 - Test del circuito de producción: DOM simulado → bundle generado → preload real → IPC del principal → consulta desde shell, incluyendo respuesta de más de 18k, actualización sin duplicación y fetch de paso directo con memoria/mediación apagadas.
@@ -62,3 +62,5 @@ El texto visible se conserva con `innerText`; los bloques de código siguen dent
 El estado de generación reconoce Stop/Detener/Parar, descarta botones deshabilitados y etiquetas de dictado/voz/micrófono. El diagnóstico desplegable del panel muestra estrategia, número de mensajes visibles y estado; `window.__nexo.conversationReader()` añade los conteos de candidatos sin contenido, IDs ni rutas. La estrategia que cruza IPC se valida contra una lista permitida.
 
 Validación adicional: cuatro estrategias con ambos roles, literalidad, DPU, prioridad de selectores, anidamiento, rechazo de roles ambiguos, IDs, código, botones y metadatos sin contenido. Chromium con DOM/MutationObserver reales: estrategias alternativas en la fixture del panel, texto exacto, sin duplicados ni errores JS; cero infracciones axe detectadas en el recorrido. Captura: `/home/user/nexo-repeticion-adaptador.png`. No se probó una cuenta real de ChatGPT ni el ejecutable Windows de esta versión.
+
+Se integraron además los cambios concurrentes hasta `e9334eb` y sus seis pruebas del lector histórico/IDs. Se mantuvo el adaptador compartido (sin duplicar estrategias ni asignar roles a ciegas por paridad), con reconocimiento de estructuras anidadas también para `data-turn`. Suite completa posterior a esta integración: 661 pruebas, 660 aprobadas, una omitida y cero fallos.
