@@ -1,4 +1,10 @@
 import {
+  applyWorkOperation,
+  validateWork,
+  workProjection,
+  workDirective,
+} from './userProgress.js';
+import {
   applyProjectOperation,
   validateProjects,
   projectDirective,
@@ -90,6 +96,9 @@ export function newUnderstanding(contextId, now = Date.now()) {
     current_task: null,
     tasks: [],
     task_events: [],
+    work_records: [],
+    work_evidence: [],
+    work_events: [],
     focused_task_id: null,
     next_step: null,
     subgoals: [],
@@ -117,6 +126,17 @@ function origin(meta) {
     authority:
       meta.channel === 'shell' ? 'user-confirmed-input' : 'observed-user-text',
   };
+}
+function mutateWork(state, operation, meta, now) {
+  applyWorkOperation(state, operation, {
+    now,
+    origin: origin(meta),
+    source: meta.workSource || null,
+    makeEntry: (text) => entry(state, 'progress', text, meta, now),
+    fail: (message, code = 'invalid') => {
+      throw new UnderstandingError(message, code);
+    },
+  });
 }
 function mutateTask(state, operation, meta, now) {
   applyTaskOperation(state, operation, {
@@ -603,6 +623,14 @@ export function interpretMessage(state, text) {
       relation: 'independent',
       certainty: 'explicit',
     };
+  const work = workDirective(text);
+  if (work)
+    return {
+      intent: 'work-report',
+      relation: 'current-work',
+      certainty: 'explicit',
+      work,
+    };
   const project = projectDirective(text);
   if (project)
     return {
@@ -893,6 +921,12 @@ export function updateUnderstanding(
     case 'context-reference-refresh':
       mutateProject(state, operation, meta, now);
       break;
+    case 'work-add':
+    case 'work-transition':
+    case 'work-evidence':
+    case 'work-evidence-withdraw':
+      mutateWork(state, operation, meta, now);
+      break;
     case 'task-add':
     case 'task-update':
     case 'task-transition':
@@ -1002,7 +1036,11 @@ export function updateUnderstanding(
       }
       const previousTask = state.current_task;
       const retiredText = ruleRetirement(text);
-      if (report.project) {
+      if (report.work) {
+        mutateWork(state, report.work, meta, now);
+        report.note =
+          'Seguimiento declarado, no ejecución comprobada. No cambia tareas, decisiones ni reglas.';
+      } else if (report.project) {
         const d = report.project;
         if (
           d.type === 'project' &&
@@ -1408,6 +1446,7 @@ export function effectiveUnderstanding(state) {
     preferences: state.preferences.filter(active),
     current_task: state.current_task,
     task_tracking: taskProjection(state),
+    work_tracking: workProjection(state),
     project: state.project || null,
     context_references: (state.context_references || []).filter(
       (r) => r.status === 'linked',
@@ -1709,6 +1748,7 @@ export function validateUnderstanding(s) {
     if (q.proposed?.reference !== undefined)
       checkMemoryReference(q.proposed.reference);
   if (!Array.isArray(s.uncertainty) || s.uncertainty.length > 110) fail();
+  validateWork(s, fail);
   validateTasks(s, fail);
   validateProjects(s, fail);
   if (JSON.stringify(s).length > 2_000_000)

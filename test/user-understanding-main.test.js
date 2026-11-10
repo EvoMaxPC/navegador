@@ -531,3 +531,97 @@ test('bloque 5: assistant no cambia etiqueta ni alias actual ni selección de co
   assert.equal(state.selected_reference_id, null);
   assert.equal(state.context_references.length, 0);
 });
+
+test('bloque 6: IPC conserva evidencia no verificada y rechaza invitados/subframes sin alterar tareas o permisos', async () => {
+  const g = attach('https://chatgpt.com/c/work-ipc');
+  const handler = journal.ipcHandlers.get('nexo:understanding:edit'),
+    edit = async (operation, event = shellEvent) =>
+      handler(event, { webContentsId: g.id, operation });
+  let r = await edit({
+    type: 'work-add',
+    kind: 'result',
+    text: 'Tests verdes',
+    outcome: 'success',
+    revision: 0,
+    verified: true,
+  });
+  assert.equal(r.ok, true);
+  const record = r.state.work_records[0];
+  assert.equal(record.verified, false);
+  const evidence = {
+    type: 'work-evidence',
+    record_id: record.id,
+    text: 'Log declarado',
+    kind: 'supplied-artifact',
+    revision: r.state.revision,
+    contextId: r.state.context_id,
+  };
+  assert.equal(
+    (await edit(evidence, { sender: g, senderFrame: g.mainFrame })).code,
+    'unauthorized',
+  );
+  assert.equal(
+    (await edit(evidence, { sender: owner, senderFrame: {} })).code,
+    'unauthorized',
+  );
+  r = await edit(evidence);
+  assert.equal(r.ok, true);
+  assert.equal(r.state.work_evidence[0].verified, false);
+  assert.equal(r.state.tasks.length, 0);
+  assert.equal(r.state.confirmed_decisions.length, 0);
+  assert.equal((await edit({ ...evidence, revision: 0 })).code, 'conflict');
+});
+test('bloque 6: assistant observado no produce progreso verificado y captura exige revisión de observación actual', async () => {
+  const g = attach('https://chatgpt.com/c/work-observed-ipc'),
+    snapshot = journal.ipcHandlers.get('nexo:conversation-snapshot'),
+    handler = journal.ipcHandlers.get('nexo:understanding:edit');
+  const observe = (text) =>
+    snapshot(
+      { sender: g, senderFrame: g.mainFrame },
+      {
+        href: g.getURL(),
+        streaming: false,
+        turns: [
+          { id: 'u', role: 'user', content: 'Resultado: todavía pendiente' },
+          { id: 'a', role: 'assistant', content: text },
+        ],
+      },
+    );
+  assert.equal(observe('Listo todo').ok, true);
+  const before = await read(g),
+    m = before.conversation.messages.find((m) => m.role === 'assistant');
+  assert.equal(before.state.work_records.length, 1);
+  assert.equal(before.state.work_records[0].source.role, 'user');
+  observe('Propuesta regenerada');
+  const op = {
+    type: 'work-capture',
+    kind: 'proposal',
+    revision: before.state.revision,
+    contextId: before.state.context_id,
+    messageId: m.id,
+    digest: m.digest,
+    observationRevision: before.conversation.revision,
+  };
+  assert.equal(
+    (await handler(shellEvent, { webContentsId: g.id, operation: op })).code,
+    'conflict',
+  );
+  const current = await read(g),
+    latest = current.conversation.messages.find((m) => m.role === 'assistant');
+  const r = await handler(shellEvent, {
+    webContentsId: g.id,
+    operation: {
+      ...op,
+      revision: current.state.revision,
+      digest: latest.digest,
+      observationRevision: current.conversation.revision,
+      text: 'No usar esto',
+      source: { role: 'user' },
+    },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.state.work_records.at(-1).text, 'Propuesta regenerada');
+  assert.equal(r.state.work_records.at(-1).source.role, 'assistant');
+  assert.equal(r.state.work_records.at(-1).verified, false);
+  assert.equal(r.effective.work_tracking.pending_proposals.length, 1);
+});

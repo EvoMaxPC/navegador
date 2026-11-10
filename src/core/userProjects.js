@@ -353,6 +353,9 @@ export function contextItems(state) {
     'relevant_context',
   ])
     for (const e of state[field]) entries.push({ kind: field, entry: e });
+  for (const r of state.work_records || [])
+    if (r.source.role === 'user' && r.status !== 'withdrawn')
+      entries.push({ kind: 'work', entry: r });
   return entries;
 }
 export function contextPreview(row, targetKind = 'summary', targetId = null) {

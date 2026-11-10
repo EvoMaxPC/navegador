@@ -340,3 +340,21 @@ nuevas de comportamiento, con servicio/archivos, DOM mínimo y Electron stub; si
 prueba visual en Electron/Windows ni cuenta real. La gramática, versiones y selección
 tienen los límites y gates manuales del documento de etapas. Restan los bloques
 6–7: no se declaran completados los 72 requisitos ni se añade ejecución autónoma.
+
+
+## Comprensión por etapas — sexto bloque posterior
+
+La [etapa 6 de progreso, problemas y evidencia](NEXO-COMPRENSION-ETAPAS.md#etapa-6-implementada--progreso-problemas-y-evidencia)
+añade registros explícitos, asociación opcional por ID a tareas/objetivos, resolución
+y reapertura de problemas con motivos e historia, propuestas evaluables y evidencia
+aportada. Los resultados son declaraciones, no comprobaciones. La captura manual de
+un extracto del asistente usa la observación existente, conserva su autoría y fija
+su versión; no se acepta como instrucción, decisión ni prueba de ejecución.
+
+Resultados: **210/210 focalizadas**; suite completa **951 totales, 950 aprobadas,
+0 fallidas y 1 omitida** (empaquetado Windows real). Build correcto. Se añaden 35
+pruebas de comportamiento: 31 core/servicio, 2 de panel y 2 main/IPC. Se comprueban
+capacidades sin poda, compatibilidad, corrupción, disco/reintento, reinicio,
+tombstones, aislamiento, EVO apagada, versiones observadas, autoría y permisos.
+Fixtures DOM/Electron stub no prueban Electron/Windows real ni una cuenta real.
+Restan el bloque 7 y los gates manuales: no se declaran completados los 72 requisitos.

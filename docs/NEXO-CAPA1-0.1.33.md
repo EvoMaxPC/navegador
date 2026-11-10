@@ -9,6 +9,8 @@
 > sin planificación/ejecución automática ni verificación de resultados.
 > La etapa 5 amplía etiquetas/referencias, inspección y selección explícita de
 > contexto, sin importar reglas ni convertir antecedentes en hechos confirmados.
+> La etapa 6 añade seguimiento de resultados/problemas, propuestas y evidencia
+> aportada sin verificación factual ni autoridad para ejecutar.
 > Las descripciones de iteraciones anteriores
 > de este documento deben leerse como evidencia histórica, no como límite actual.
 

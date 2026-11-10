@@ -1,3 +1,4 @@
+import { createProgressSection } from './understandingProgress.js';
 import { createContextSection } from './understandingContexts.js';
 import { createTaskSection } from './understandingTasks.js';
 import { RULE_FIELDS } from '../../core/userRules.js';
@@ -610,6 +611,18 @@ export function createUnderstandingPanel({ nexo, root, activeTab, notice }) {
         mutate,
         drafts,
         showEntry,
+      }),
+    );
+    body.append(
+      createProgressSection({
+        state: s,
+        tracking: snapshot.effective.work_tracking,
+        conversation: snapshot.conversation,
+        create,
+        button,
+        form,
+        mutate,
+        drafts,
       }),
     );
     if (s.current_task) {

@@ -562,6 +562,49 @@ export class UserUnderstandingService {
         'La conversación/contexto cambió; recargá antes de editar.',
         'conflict',
       );
+    let workSource = null;
+    if (operation.type === 'work-capture') {
+      const physical = this.documentIdentity(contents);
+      const observation =
+        this.liveConversations.get(physical.id) ||
+        this.row(physical.id).conversation ||
+        emptyObservation();
+      const message = observation.messages.find(
+        (m) => m.id === operation.messageId && m.role === 'assistant',
+      );
+      if (
+        Object.hasOwn(this.data.deleted_revisions, physical.id) ||
+        observation.revision !== operation.observationRevision ||
+        !message ||
+        message.digest !== operation.digest ||
+        message.status !== 'complete' ||
+        !['proposal', 'result'].includes(operation.kind) ||
+        !message.preview.trim()
+      )
+        throw new UnderstandingError(
+          'La respuesta cambió, está incompleta o ya no está disponible; recargá antes de registrarla.',
+          'conflict',
+        );
+      workSource = {
+        role: 'assistant',
+        channel: 'conversation-read',
+        message_id: message.id,
+        digest: message.digest,
+        context_id: physical.id,
+        url: physical.url,
+        observation_revision: observation.revision,
+        observed_at: message.observed_at,
+      };
+      // Un extracto acotado de la observación existente; nunca texto ni rol suministrados por el guest.
+      operation = {
+        type: 'work-add',
+        revision: operation.revision,
+        kind: operation.kind,
+        text: message.preview.slice(0, 1000),
+        task_id: operation.task_id ?? null,
+        goal_id: operation.goal_id ?? null,
+      };
+    }
     if (operation.type === 'context-reference') {
       const preview = this.inspect(
         operation.sourceContextId,
@@ -652,6 +695,7 @@ export class UserUnderstandingService {
     }
     return this.change(id, url, operation, {
       channel: 'shell',
+      workSource,
       messageId: randomUUID(),
       url,
     });
@@ -963,6 +1007,11 @@ export function installUnderstandingIPC({
         'context-reference-resolve',
         'context-reference-refresh',
         'goal',
+        'work-add',
+        'work-capture',
+        'work-transition',
+        'work-evidence',
+        'work-evidence-withdraw',
         'task-add',
         'task-update',
         'task-transition',

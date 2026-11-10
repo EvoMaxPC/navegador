@@ -84,6 +84,8 @@ export const requiredAsarEntries = [
   'src/core/userRules.js',
   'src/core/userTasks.js',
   'src/core/userProjects.js',
+  'src/core/userProgress.js',
+  'src/ui/shell/understandingProgress.js',
   'src/core/conversationObservation.js',
   'src/main/userUnderstanding.js',
   'src/ui/shell/understandingPanel.js',

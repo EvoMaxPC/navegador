@@ -4,8 +4,8 @@
 
 Los 72 requisitos describen un objetivo amplio, no capacidades ya demostradas.
 Se avanza por etapas sobre el UUE existente, sin reconstruir NEXO ni introducir
-un agente ejecutor. La entrega actual incorpora **las etapas 1–5**, sobre
-0.1.33. Las dos siguientes siguen planificadas; no se declara el panel completo.
+un agente ejecutor. La entrega actual incorpora **las etapas 1–6**, sobre
+0.1.33. La última sigue planificada; no se declara el panel completo.
 
 No hay modelo semántico nuevo, envíos externos, nuevos permisos ni dependencia
 nueva. Las reglas actuales siguen siendo locales y conservadoras. Comprender no
@@ -23,7 +23,7 @@ entre bloques. Las funciones parciales existentes de UUE se reutilizarán.
 | 3 | Reglas, restricciones, preferencias, decisiones y vigencia | 13–18, 37–41, 43–44, 50–51, 53, 67, 72 | Ampliada con gramática acotada, revisión de conflictos y edición de vigencia; detalle debajo |
 | 4 | Tareas, subtareas, dependencias, prioridades y siguiente paso | 19–24, 34, 36 | Base estructurada implementada; gramática acotada, sin plan ni ejecución automáticos |
 | 5 | Proyectos, referencias, selección de contexto y antecedentes | 25–30, 47, 55–57, 59, 71 | Base local ampliada: etiquetas, referencias e inspección/selección explícitas; límites debajo |
-| 6 | Progreso, errores, bloqueos, propuestas y evidencia de resultados | 31–33, 35, 45–46, 69–70 | Pendiente de interpretación ampliada; observar no verifica |
+| 6 | Progreso, errores, bloqueos, propuestas y evidencia de resultados | 31–33, 35, 45–46, 69–70 | Base explícita de registros, propuestas y evidencia aportada; sin verificación factual |
 | 7 | Inspector completo, explicación, corrección e inferencias confirmables | 42, 48, 52, 60–66 | Controles parciales previos; consolidar tras las bases |
 
 Cada etapa deberá cerrar con casos positivos/negativos, conservación de reglas,
@@ -821,6 +821,227 @@ ELECTRIC BLUE y que no se recupera contenido de vínculos rechazados/retirados.
 Nuevos: `src/core/userProjects.js`, `src/ui/shell/understandingContexts.js`,
 `test/understanding-projects.test.js` y `test/understanding-projects-panel.test.js`.
 Modificados: core/servicio UUE, panel, manifest de empaquetado, tests main, README
-y documentación. Se cierra con commit y push sobre la rama de trabajo. El siguiente
-bloque es el **6: progreso, errores, bloqueos, propuestas y evidencia de resultados**.
-Los bloques 6–7 y los gates manuales siguen pendientes; no hay ejecución autónoma.
+y documentación. La etapa 5 se publicó como `50e3160`. Su siguiente bloque se
+desarrolla debajo. Los gates manuales siguen pendientes; no hay ejecución autónoma.
+
+
+## Etapa 6 implementada — progreso, problemas y evidencia
+
+### Alcance explícito, sin fabricar comprobaciones
+
+Los requisitos 31–33, 35, 45–46 y 69–70 se amplían con un registro local de avances,
+resultados, errores, bloqueos y propuestas dentro del mismo UUE. No se añade un
+agente, verificador de herramientas, lectura de archivos, diagnóstico semántico
+general ni una transcripción adicional. Comprender/registrar no significa ejecutar,
+certificar, aprobar acciones sensibles ni cambiar permisos.
+
+Hay cinco tipos de entrada:
+
+- **Avance declarado:** texto literal del usuario, sin convertirlo en porcentaje.
+- **Resultado declarado:** desenlace seleccionado explícitamente como desconocido,
+  éxito informado, parcial informado o fallo informado. El texto «todo pasó» no
+  selecciona éxito automáticamente. Un resultado nuevo por gramática y cualquier
+  afirmación capturada del asistente empiezan con desenlace **desconocido**.
+- **Error informado:** un problema descrito, no una causa técnica demostrada.
+- **Bloqueo informado:** un impedimento descrito; no se presupone dependencia,
+  autorización pendiente ni indisponibilidad de herramientas que no se declararon.
+- **Propuesta de trabajo:** pendiente hasta evaluación explícita por el usuario.
+  Aceptar aquí es registrar esa evaluación, **no una decisión normativa, regla,
+  tarea nueva, aprobación ejecutora ni permiso para el futuro**. Para una decisión
+  o tarea se mantienen sus controles separados de las etapas anteriores.
+
+La entrada puede vincularse a una tarea y/o un objetivo locales por ID exacto. Por
+defecto no hay vínculo; no se usa el foco, la última solicitud, similitud de texto,
+la etiqueta de proyecto ni el orden del DOM para inventarlo. Se permiten vínculos
+a elementos cerrados para registrar lo que ocurrió; no se los reabre ni completa.
+
+Texto, tipo, fuente y asociaciones son inmutables en cada entrada. Corregir requiere
+retirar con motivo y registrar otra, conservando la original. Errores/bloqueos
+pueden resolverse y reabrirse con motivo; propuestas pueden aceptarse/rechazarse
+una vez y retirarse después. El retiro es terminal: no se reactiva una entrada.
+Cada creación/transición tiene identidad, autoría y fecha; se valida la cadena de
+estados contra el estado actual y no se podan eventos.
+
+### Evidencia aportada no equivale a evidencia independiente
+
+Se puede asociar a una entrada un **relato del usuario** o un **extracto de artefacto
+aportado por el usuario**, con texto literal y ubicación opcional. Son dos clases
+de aporte, no dos niveles de verdad. Una ruta/URL es sólo texto: no se crea un
+enlace ejecutable, no se abre, no se lee, no se descarga y no se envía a otro sistema.
+Ningún aporte se presenta como salida observada de un comando que NEXO no ejecutó.
+
+Todos los registros conservan `verified: false` y `authority: tracking-data-only`;
+los aportes, `verified: false` y `authority: evidence-data-only`. Que haya un log
+pegado, un hash de versión o una confirmación humana **no cambia esos atributos**.
+La captura correcta de una afirmación no demuestra que su contenido sea verdadero.
+
+Retirar una evidencia requiere motivo, conserva el texto en historia y la excluye
+de la vista efectiva. Retirar su entrada excluye también sus aportes de esa vista,
+sin borrar la historia. No se pueden añadir aportes a entradas retiradas. Para
+eliminar el contenido del expediente sigue disponible el borrado explícito del
+contexto con tombstone; «retirar» no pretende ser un borrado físico.
+
+En el panel se ven el resultado esperado de la tarea vinculada y lo informado,
+**sin decidir automáticamente si coinciden**. La comparación queda pendiente de
+revisión humana. Resultado favorable + aporte no resuelve errores abiertos, no
+satisface dependencias ni completa tareas/objetivos. Del mismo modo, cerrar una
+tarea no crea un resultado o una evidencia. Los bloques previos siguen intactos.
+
+### Asistente observado: fuente separada y captura manual versionada
+
+La lectura automática existente ya mantiene una ventana de 24 mensajes, con roles,
+estados y previews del asistente de hasta 4.000 caracteres. Este bloque la reutiliza;
+no añade otro lector, transcript, temporizador ni análisis semántico de respuestas.
+Una respuesta completa, un stream terminado o texto que dice «hecho» sigue siendo
+**información observada del asistente, no progreso comprobado**.
+
+En «Registrar un extracto observado del asistente explícitamente» el usuario puede
+clasificar manualmente un extracto como **propuesta** o **afirmación de resultado**.
+La operación está reservada a la shell; main obtiene el texto y el rol de la ventana
+observacional del documento físico. No confía en un texto/rol remitido en la solicitud.
+Exige ID de mensaje, digest SHA-256 y revisión observacional actuales, además de
+contexto/revisión UUE. Rechaza versiones modificadas aunque no haya cambiado la
+revisión UUE, streams, mensajes recortados por el lector, versiones ausentes y
+orígenes borrados. Un mensaje largo completo cuyo preview está recortado a 4.000
+sí permite capturar su extracto: nunca se lo presenta como respuesta completa.
+
+Se conserva sólo el primer extracto de hasta **1.000 caracteres**, identificado
+como tal, con URL/contexto físico de origen, ID/huella del mensaje completo, fecha
+de observación y revisión. `source.role` sigue siendo `assistant`, con certeza
+`observed-not-verified`; `origin` identifica al usuario que lo registró por la shell.
+Las declaraciones directas del usuario mantienen fuente `user` y certeza `explicit`.
+No se atribuyen palabras del asistente al usuario que eligió registrarlas.
+
+La captura **fija un extracto histórico**, no un puntero dinámico: regenerar la
+respuesta no reemplaza el registro. El mismo mensaje/huella/tipo no se vuelve a
+capturar en ese contexto, incluso si se retiró. Una versión distinta requiere otra
+captura explícita. Que ese texto sea una propuesta o una afirmación lo decide aquí
+el usuario, no un clasificador que deduzca acciones a partir de «listo».
+
+Si se está continuando explícitamente en otro contexto, la captura se registra en
+el contexto elegido y conserva la URL/identidad física de la pestaña de donde salió.
+No importa la conversación guardada del contexto elegido ni busca mensajes en otros
+contextos. El extracto explícitamente conservado permanece en el destino aun si
+sale de la ventana observacional o se borra otro contexto de origen: no se recupera
+ni reintroduce su contenido. Para retirarlo/borrarlo se usan los controles del destino.
+Esta copia acotada elegida por el usuario se diferencia de los antecedentes por
+puntero de la etapa 5, que sí se vuelven indisponibles cuando cambia el origen.
+
+### Panel, gramática y continuidad compatibles
+
+Nueva sección **Progreso, problemas y evidencia** en Comprensión, con los mismos
+componentes y estilo existentes: registro literal, tarea/objetivo explícitos,
+desenlace, evaluación/resolución con motivo, aportes y su retiro, autoría, fuentes
+y eventos. Usa `textContent`, no HTML del mensaje ni ejecución de URLs. Conserva
+borradores; controles bloqueados durante peticiones. Las ediciones llevan identidad
+del contexto y revisión; cambiar de pestaña o de URL no aplica acciones anteriores
+a otro trabajo con igual revisión. No se agrega un canal ni API privilegiada web.
+
+Gramática ES/EN acotada, sólo declaraciones completas de una línea:
+
+```text
+Avance registrado: revisé las comprobaciones de IPC
+Resultado: se informa que la prueba terminó
+Error observado: el panel no actualiza
+Problema pendiente: falta revisar la accesibilidad
+Bloqueo: no tengo acceso a la cuenta
+Propuesta de trabajo: revisar primero los tests
+```
+
+También `Recorded progress:`, `Result:`, `Observed error:`, `Blocker:` y
+`Work proposal:`. No se interpretan como estos registros nuevos los bloques de
+código, citas completas, texto con backticks, preguntas o párrafos multirenglón.
+El formulario sí permite texto libre literal multirenglón. No hay resolución
+automática de «ya está», «eso falló», «el mismo problema» o mensajes sin un marcador
+inequívoco; la observación no convierte esas expresiones en hechos.
+
+Se preserva el contrato de **`Avance:` / `Progreso:`** y los registros simples
+anteriores en `progress`, visibles en «Avances y problemas declarados». No se los
+migra, vincula, duplica como registros nuevos ni inventa evidencia retrospectiva.
+El panel indica cuántos existen. Para seguimiento enriquecido se registra una
+entrada nueva explícitamente, por formulario o con «Avance registrado:». Una línea
+«Problema pendiente:» ahora se reconoce en el registro de errores, sin modificar
+los contextos simples históricos que usaron esa frase.
+
+La proyección efectiva separa entradas no retiradas, aportes activos, problemas
+abiertos, propuestas pendientes, resultados y resultados sin aporte activo. También
+muestra **conteos de estados declarados** de tareas, no porcentajes ni métricas de
+trabajo real. Una tarea pendiente con bloqueo informado aquí no se bloquea en el
+grafo: es otro dato que exige cambiar su estado explícitamente en Tareas. Esto evita
+que una afirmación del asistente o un relato ambiguo silenciosamente impida/autorice
+el siguiente paso. La elegibilidad previa sigue siendo sólo estructural.
+
+Inspeccionar otros contextos incluye entradas de seguimiento **del usuario** no
+retiradas, paginadas y con origen/estado/certeza; pueden proponerse como antecedente
+versionado, sin importarlas al registro actual. No expone capturas del asistente
+como declaraciones del usuario ni entradas retiradas. El cambio/retiro de una
+entrada invalida los punteros anteriores como en la etapa 5.
+
+### Persistencia, seguridad y límites
+
+Campos aditivos `work_records`, `work_evidence`, `work_events`, opcionales al leer
+archivos anteriores, con `schema_version: 1` y versión de app **0.1.33** conservadas.
+Se usa el archivo UUE propio, también con EVO apagada. No hay llamadas nuevas a
+EVO ni dependencia, permisos, envíos o integración de herramientas nueva.
+
+Hasta 100 registros, 150 aportes de evidencia y 300 eventos, incluidos los retirados.
+Texto de registro/aporte/motivo hasta 10.000 caracteres, ubicación hasta 2.048.
+Exceso o capacidad llena rechaza sin recortar ni podar. Siguen vigentes los límites
+anteriores por contexto/archivo: pueden alcanzarse antes que estos máximos.
+Cambios transaccionales: se valida el estado completo antes de publicarlo/guardarlo;
+fallo de disco conserva RAM/archivo previos y permite reintentar. Datos incompatibles,
+autorías falsas, referencias rotas, verificación inventada o historia inconsistente
+bloquean escritura sin sobrescribir el expediente. Sin recuperación desde tombstones.
+
+Se reutiliza `nexo:understanding:edit`, ampliando su allowlist; `work-capture` se
+resuelve dentro de main con la observación existente. Se conserva shell mainFrame,
+propiedad de guest, revisión y contexto esperado. Un guest o subframe no puede
+registrar evidencia, aceptar propuestas ni capturar respuestas con privilegios.
+No se cambian cola de 500 ms, ACK, permisos, aislamiento, CDP, mediación, envío,
+contadores, tokenización ni archivo EVO. No se afirman mediciones nuevas de CPU/RAM.
+
+### Validación y límites de la evidencia de desarrollo
+
+| Ejecución | Total | Aprobadas | Fallidas | Omitidas |
+|---|---:|---:|---:|---:|
+| Focalizadas: UUE, observación, main/IPC, independencia, shell y seis bloques/paneles | 210 | 210 | 0 | 0 |
+| `npm test` | 951 | 950 | 0 | 1 |
+
+La suite completa duró 103.465,839027 ms. La omitida sigue siendo el empaquetado
+Windows real que requiere `NEXO_ELECTRON_ZIP_DIR`. Build correcto de inyección:
+53,7 kB / 19,3 kB gzip, 11 módulos. No es evidencia de ejecución de cada registro
+que pudiera declarar un usuario dentro del panel.
+
+Se añaden **35 pruebas de comportamiento**: 31 core/servicio en
+`test/understanding-progress.test.js`, 2 DOM/puente en
+`test/understanding-progress-panel.test.js` y 2 de main/IPC en
+`test/user-understanding-main.test.js`. Cubren literalidad, gramática/compatibilidad,
+asociaciones por ID, no autorización, no cierre implícito, estados y motivos,
+aportes/retirada, proyección sin métricas inventadas, capacidad sin poda, transacciones,
+corrupción en archivo real, disco/reintento, reinicio EVO apagada, borrado/tombstone,
+captura versionada, recortes/stream, duplicados, fuentes separadas, cambio de URL,
+selección explícita e inspección de antecedentes no normativos.
+
+No se ejecutaron Electron real, Windows real ni una cuenta ChatGPT real. DOM mínimo,
+servicio real y Electron stub prueban contratos, no renderizado, accesibilidad,
+foco/scroll ni comportamiento real de los selectores del proveedor. No hay una
+prueba factual de resultados externos, un parser de logs que los certifique,
+diagnóstico causal automático ni recuperación/ejecución autónoma. No se declaran
+satisfechas todas las redacciones posibles de los requisitos por tener este registro.
+
+Gate manual: EVO apagada → tarea con resultado esperado → registrar error/bloqueo →
+resultado parcial sin cerrar tarea → aportar log/ruta sin abrir → retirar aporte →
+resolver/reabrir problema con motivo → propuesta y «sí» genérico sin aceptar →
+aceptación explícita sin permiso → observar stream del asistente → captura estable
+con autoría correcta → regeneración sin sobreescribir → selección de otro contexto,
+retorno/reinicio → borrado. Revisar BLACK & ELECTRIC BLUE, foco, borradores y URLs.
+
+### Archivos y siguiente bloque
+
+Nuevos: `src/core/userProgress.js`, `src/ui/shell/understandingProgress.js`,
+`test/understanding-progress.test.js`, `test/understanding-progress-panel.test.js`.
+Modificados: core/servicio UUE, selección de entradas inspeccionables, panel, manifest
+de empaquetado, tests main, README y documentación. Se cierra con commit y push
+normal sobre la rama de trabajo. Sigue el **bloque 7: inspector, explicación,
+corrección e inferencias confirmables** y los gates manuales pendientes. **No se
+proclaman completados los 72 requisitos ni se habilita ejecución autónoma**.
