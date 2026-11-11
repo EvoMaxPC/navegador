@@ -1,0 +1,841 @@
+[
+  {
+    "name": "prompt-corto",
+    "mode": "prompt",
+    "text": "Preservar EVO MEMORY. Corregir sólo parseURL().",
+    "expect": "unnecessary",
+    "model": "gpt-5"
+  },
+  {
+    "name": "prompt-largo-repetitivo",
+    "mode": "prompt",
+    "text": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\n",
+    "expect": "optimized",
+    "model": "gpt-5"
+  },
+  {
+    "name": "informacion-tecnica",
+    "mode": "prompt",
+    "text": "Repositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\nRepositorio EvoMaxPC/navegador, rama arena/4678aef7-navegador. Ruta /home/user/navegador/src/main/main.js. Versión 0.1.33. Función parseURL(url, timeout=5000). Parámetros: maxItems=200, delay=500 ms; fecha 2026-11-09. No cambiar EVO MEMORY.\n\n",
+    "expect": "optimized",
+    "model": "gpt-5"
+  },
+  {
+    "name": "contradiccion-correccion",
+    "messages": [
+      {
+        "id": "1",
+        "role": "user",
+        "content": "Usa versión 1. No borres archivos.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\n"
+      },
+      {
+        "id": "2",
+        "role": "assistant",
+        "content": "Propongo borrar archivos; no está ejecutado."
+      },
+      {
+        "id": "3",
+        "role": "user",
+        "content": "Corrección: usa versión 2. Nunca borres archivos. NO es autorización para enviar datos."
+      }
+    ],
+    "expect": "optimized",
+    "model": "gpt-5"
+  },
+  {
+    "name": "roles-y-propuestas",
+    "messages": [
+      {
+        "id": "0",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "1",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "2",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "3",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "4",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "5",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "6",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "7",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "8",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "9",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "10",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "11",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "12",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "13",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "14",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "15",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "16",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "17",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "18",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "19",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "20",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "21",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "22",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "23",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "24",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "25",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "26",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "27",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "28",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "29",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      }
+    ],
+    "expect": "optimized",
+    "model": "gpt-5"
+  },
+  {
+    "name": "conversacion-extensa",
+    "messages": [
+      {
+        "id": "0",
+        "role": "user",
+        "content": "Dato único 0: archivo /src/task-0.js; valor=0; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "1",
+        "role": "assistant",
+        "content": "Dato único 1: archivo /src/task-1.js; valor=17; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "2",
+        "role": "user",
+        "content": "Dato único 2: archivo /src/task-2.js; valor=34; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "3",
+        "role": "assistant",
+        "content": "Dato único 3: archivo /src/task-3.js; valor=51; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "4",
+        "role": "user",
+        "content": "Dato único 4: archivo /src/task-4.js; valor=68; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "5",
+        "role": "assistant",
+        "content": "Dato único 5: archivo /src/task-5.js; valor=85; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "6",
+        "role": "user",
+        "content": "Dato único 6: archivo /src/task-6.js; valor=102; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "7",
+        "role": "assistant",
+        "content": "Dato único 7: archivo /src/task-7.js; valor=119; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "8",
+        "role": "user",
+        "content": "Dato único 8: archivo /src/task-8.js; valor=136; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "9",
+        "role": "assistant",
+        "content": "Dato único 9: archivo /src/task-9.js; valor=153; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "10",
+        "role": "user",
+        "content": "Dato único 10: archivo /src/task-10.js; valor=170; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "11",
+        "role": "assistant",
+        "content": "Dato único 11: archivo /src/task-11.js; valor=187; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "12",
+        "role": "user",
+        "content": "Dato único 12: archivo /src/task-12.js; valor=204; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "13",
+        "role": "assistant",
+        "content": "Dato único 13: archivo /src/task-13.js; valor=221; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "14",
+        "role": "user",
+        "content": "Dato único 14: archivo /src/task-14.js; valor=238; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "15",
+        "role": "assistant",
+        "content": "Dato único 15: archivo /src/task-15.js; valor=255; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "16",
+        "role": "user",
+        "content": "Dato único 16: archivo /src/task-16.js; valor=272; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "17",
+        "role": "assistant",
+        "content": "Dato único 17: archivo /src/task-17.js; valor=289; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "18",
+        "role": "user",
+        "content": "Dato único 18: archivo /src/task-18.js; valor=306; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "19",
+        "role": "assistant",
+        "content": "Dato único 19: archivo /src/task-19.js; valor=323; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "20",
+        "role": "user",
+        "content": "Dato único 20: archivo /src/task-20.js; valor=340; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "21",
+        "role": "assistant",
+        "content": "Dato único 21: archivo /src/task-21.js; valor=357; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "22",
+        "role": "user",
+        "content": "Dato único 22: archivo /src/task-22.js; valor=374; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "23",
+        "role": "assistant",
+        "content": "Dato único 23: archivo /src/task-23.js; valor=391; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "24",
+        "role": "user",
+        "content": "Dato único 24: archivo /src/task-24.js; valor=408; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "25",
+        "role": "assistant",
+        "content": "Dato único 25: archivo /src/task-25.js; valor=425; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "26",
+        "role": "user",
+        "content": "Dato único 26: archivo /src/task-26.js; valor=442; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "27",
+        "role": "assistant",
+        "content": "Dato único 27: archivo /src/task-27.js; valor=459; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "28",
+        "role": "user",
+        "content": "Dato único 28: archivo /src/task-28.js; valor=476; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "29",
+        "role": "assistant",
+        "content": "Dato único 29: archivo /src/task-29.js; valor=493; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "30",
+        "role": "user",
+        "content": "Dato único 30: archivo /src/task-30.js; valor=510; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "31",
+        "role": "assistant",
+        "content": "Dato único 31: archivo /src/task-31.js; valor=527; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "32",
+        "role": "user",
+        "content": "Dato único 32: archivo /src/task-32.js; valor=544; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "33",
+        "role": "assistant",
+        "content": "Dato único 33: archivo /src/task-33.js; valor=561; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "34",
+        "role": "user",
+        "content": "Dato único 34: archivo /src/task-34.js; valor=578; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "35",
+        "role": "assistant",
+        "content": "Dato único 35: archivo /src/task-35.js; valor=595; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "36",
+        "role": "user",
+        "content": "Dato único 36: archivo /src/task-36.js; valor=612; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "37",
+        "role": "assistant",
+        "content": "Dato único 37: archivo /src/task-37.js; valor=629; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "38",
+        "role": "user",
+        "content": "Dato único 38: archivo /src/task-38.js; valor=646; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "39",
+        "role": "assistant",
+        "content": "Dato único 39: archivo /src/task-39.js; valor=663; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "40",
+        "role": "user",
+        "content": "Dato único 40: archivo /src/task-40.js; valor=680; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "41",
+        "role": "assistant",
+        "content": "Dato único 41: archivo /src/task-41.js; valor=697; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "42",
+        "role": "user",
+        "content": "Dato único 42: archivo /src/task-42.js; valor=714; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "43",
+        "role": "assistant",
+        "content": "Dato único 43: archivo /src/task-43.js; valor=731; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "44",
+        "role": "user",
+        "content": "Dato único 44: archivo /src/task-44.js; valor=748; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "45",
+        "role": "assistant",
+        "content": "Dato único 45: archivo /src/task-45.js; valor=765; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "46",
+        "role": "user",
+        "content": "Dato único 46: archivo /src/task-46.js; valor=782; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "47",
+        "role": "assistant",
+        "content": "Dato único 47: archivo /src/task-47.js; valor=799; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "48",
+        "role": "user",
+        "content": "Dato único 48: archivo /src/task-48.js; valor=816; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "49",
+        "role": "assistant",
+        "content": "Dato único 49: archivo /src/task-49.js; valor=833; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "50",
+        "role": "user",
+        "content": "Dato único 50: archivo /src/task-50.js; valor=850; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "51",
+        "role": "assistant",
+        "content": "Dato único 51: archivo /src/task-51.js; valor=867; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "52",
+        "role": "user",
+        "content": "Dato único 52: archivo /src/task-52.js; valor=884; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "53",
+        "role": "assistant",
+        "content": "Dato único 53: archivo /src/task-53.js; valor=901; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "54",
+        "role": "user",
+        "content": "Dato único 54: archivo /src/task-54.js; valor=918; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "55",
+        "role": "assistant",
+        "content": "Dato único 55: archivo /src/task-55.js; valor=935; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "56",
+        "role": "user",
+        "content": "Dato único 56: archivo /src/task-56.js; valor=952; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "57",
+        "role": "assistant",
+        "content": "Dato único 57: archivo /src/task-57.js; valor=969; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "58",
+        "role": "user",
+        "content": "Dato único 58: archivo /src/task-58.js; valor=986; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "59",
+        "role": "assistant",
+        "content": "Dato único 59: archivo /src/task-59.js; valor=1003; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "60",
+        "role": "user",
+        "content": "Dato único 60: archivo /src/task-60.js; valor=1020; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "61",
+        "role": "assistant",
+        "content": "Dato único 61: archivo /src/task-61.js; valor=1037; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "62",
+        "role": "user",
+        "content": "Dato único 62: archivo /src/task-62.js; valor=1054; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "63",
+        "role": "assistant",
+        "content": "Dato único 63: archivo /src/task-63.js; valor=1071; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "64",
+        "role": "user",
+        "content": "Dato único 64: archivo /src/task-64.js; valor=1088; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "65",
+        "role": "assistant",
+        "content": "Dato único 65: archivo /src/task-65.js; valor=1105; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "66",
+        "role": "user",
+        "content": "Dato único 66: archivo /src/task-66.js; valor=1122; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "67",
+        "role": "assistant",
+        "content": "Dato único 67: archivo /src/task-67.js; valor=1139; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "68",
+        "role": "user",
+        "content": "Dato único 68: archivo /src/task-68.js; valor=1156; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "69",
+        "role": "assistant",
+        "content": "Dato único 69: archivo /src/task-69.js; valor=1173; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "70",
+        "role": "user",
+        "content": "Dato único 70: archivo /src/task-70.js; valor=1190; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "71",
+        "role": "assistant",
+        "content": "Dato único 71: archivo /src/task-71.js; valor=1207; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "72",
+        "role": "user",
+        "content": "Dato único 72: archivo /src/task-72.js; valor=1224; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "73",
+        "role": "assistant",
+        "content": "Dato único 73: archivo /src/task-73.js; valor=1241; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "74",
+        "role": "user",
+        "content": "Dato único 74: archivo /src/task-74.js; valor=1258; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "75",
+        "role": "assistant",
+        "content": "Dato único 75: archivo /src/task-75.js; valor=1275; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "76",
+        "role": "user",
+        "content": "Dato único 76: archivo /src/task-76.js; valor=1292; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "77",
+        "role": "assistant",
+        "content": "Dato único 77: archivo /src/task-77.js; valor=1309; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "78",
+        "role": "user",
+        "content": "Dato único 78: archivo /src/task-78.js; valor=1326; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "79",
+        "role": "assistant",
+        "content": "Dato único 79: archivo /src/task-79.js; valor=1343; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "80",
+        "role": "user",
+        "content": "Dato único 80: archivo /src/task-80.js; valor=1360; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "81",
+        "role": "assistant",
+        "content": "Dato único 81: archivo /src/task-81.js; valor=1377; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "82",
+        "role": "user",
+        "content": "Dato único 82: archivo /src/task-82.js; valor=1394; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "83",
+        "role": "assistant",
+        "content": "Dato único 83: archivo /src/task-83.js; valor=1411; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "84",
+        "role": "user",
+        "content": "Dato único 84: archivo /src/task-84.js; valor=1428; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "85",
+        "role": "assistant",
+        "content": "Dato único 85: archivo /src/task-85.js; valor=1445; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "86",
+        "role": "user",
+        "content": "Dato único 86: archivo /src/task-86.js; valor=1462; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "87",
+        "role": "assistant",
+        "content": "Dato único 87: archivo /src/task-87.js; valor=1479; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "88",
+        "role": "user",
+        "content": "Dato único 88: archivo /src/task-88.js; valor=1496; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "89",
+        "role": "assistant",
+        "content": "Dato único 89: archivo /src/task-89.js; valor=1513; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "90",
+        "role": "user",
+        "content": "Dato único 90: archivo /src/task-90.js; valor=1530; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "91",
+        "role": "assistant",
+        "content": "Dato único 91: archivo /src/task-91.js; valor=1547; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "92",
+        "role": "user",
+        "content": "Dato único 92: archivo /src/task-92.js; valor=1564; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "93",
+        "role": "assistant",
+        "content": "Dato único 93: archivo /src/task-93.js; valor=1581; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "94",
+        "role": "user",
+        "content": "Dato único 94: archivo /src/task-94.js; valor=1598; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "95",
+        "role": "assistant",
+        "content": "Dato único 95: archivo /src/task-95.js; valor=1615; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "96",
+        "role": "user",
+        "content": "Dato único 96: archivo /src/task-96.js; valor=1632; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "97",
+        "role": "assistant",
+        "content": "Dato único 97: archivo /src/task-97.js; valor=1649; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "98",
+        "role": "user",
+        "content": "Dato único 98: archivo /src/task-98.js; valor=1666; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "99",
+        "role": "assistant",
+        "content": "Dato único 99: archivo /src/task-99.js; valor=1683; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "100",
+        "role": "user",
+        "content": "Dato único 100: archivo /src/task-100.js; valor=1700; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "101",
+        "role": "assistant",
+        "content": "Dato único 101: archivo /src/task-101.js; valor=1717; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "102",
+        "role": "user",
+        "content": "Dato único 102: archivo /src/task-102.js; valor=1734; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "103",
+        "role": "assistant",
+        "content": "Dato único 103: archivo /src/task-103.js; valor=1751; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "104",
+        "role": "user",
+        "content": "Dato único 104: archivo /src/task-104.js; valor=1768; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "105",
+        "role": "assistant",
+        "content": "Dato único 105: archivo /src/task-105.js; valor=1785; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "106",
+        "role": "user",
+        "content": "Dato único 106: archivo /src/task-106.js; valor=1802; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "107",
+        "role": "assistant",
+        "content": "Dato único 107: archivo /src/task-107.js; valor=1819; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "108",
+        "role": "user",
+        "content": "Dato único 108: archivo /src/task-108.js; valor=1836; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "109",
+        "role": "assistant",
+        "content": "Dato único 109: archivo /src/task-109.js; valor=1853; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "110",
+        "role": "user",
+        "content": "Dato único 110: archivo /src/task-110.js; valor=1870; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "111",
+        "role": "assistant",
+        "content": "Dato único 111: archivo /src/task-111.js; valor=1887; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "112",
+        "role": "user",
+        "content": "Dato único 112: archivo /src/task-112.js; valor=1904; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "113",
+        "role": "assistant",
+        "content": "Dato único 113: archivo /src/task-113.js; valor=1921; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "114",
+        "role": "user",
+        "content": "Dato único 114: archivo /src/task-114.js; valor=1938; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "115",
+        "role": "assistant",
+        "content": "Dato único 115: archivo /src/task-115.js; valor=1955; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "116",
+        "role": "user",
+        "content": "Dato único 116: archivo /src/task-116.js; valor=1972; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "117",
+        "role": "assistant",
+        "content": "Dato único 117: archivo /src/task-117.js; valor=1989; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "118",
+        "role": "user",
+        "content": "Dato único 118: archivo /src/task-118.js; valor=2006; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "119",
+        "role": "assistant",
+        "content": "Dato único 119: archivo /src/task-119.js; valor=2023; estado declarado, no verificado.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      }
+    ],
+    "expect": "optimized",
+    "model": "gpt-5"
+  },
+  {
+    "name": "ya-sin-redundancias",
+    "mode": "prompt",
+    "text": "Conservar /src/file-0.js, versión 0.1; parámetro único: 0; no reemplazar nombre entry_0.\nConservar /src/file-1.js, versión 1.1; parámetro único: 101; no reemplazar nombre entry_1.\nConservar /src/file-2.js, versión 2.1; parámetro único: 202; no reemplazar nombre entry_2.\nConservar /src/file-3.js, versión 3.1; parámetro único: 303; no reemplazar nombre entry_3.\nConservar /src/file-4.js, versión 4.1; parámetro único: 404; no reemplazar nombre entry_4.\nConservar /src/file-5.js, versión 5.1; parámetro único: 505; no reemplazar nombre entry_5.\nConservar /src/file-6.js, versión 6.1; parámetro único: 606; no reemplazar nombre entry_6.\nConservar /src/file-7.js, versión 7.1; parámetro único: 707; no reemplazar nombre entry_7.\nConservar /src/file-8.js, versión 8.1; parámetro único: 808; no reemplazar nombre entry_8.\nConservar /src/file-9.js, versión 9.1; parámetro único: 909; no reemplazar nombre entry_9.\nConservar /src/file-10.js, versión 10.1; parámetro único: 1010; no reemplazar nombre entry_10.\nConservar /src/file-11.js, versión 11.1; parámetro único: 1111; no reemplazar nombre entry_11.\nConservar /src/file-12.js, versión 12.1; parámetro único: 1212; no reemplazar nombre entry_12.\nConservar /src/file-13.js, versión 13.1; parámetro único: 1313; no reemplazar nombre entry_13.\nConservar /src/file-14.js, versión 14.1; parámetro único: 1414; no reemplazar nombre entry_14.\nConservar /src/file-15.js, versión 15.1; parámetro único: 1515; no reemplazar nombre entry_15.\nConservar /src/file-16.js, versión 16.1; parámetro único: 1616; no reemplazar nombre entry_16.\nConservar /src/file-17.js, versión 17.1; parámetro único: 1717; no reemplazar nombre entry_17.\nConservar /src/file-18.js, versión 18.1; parámetro único: 1818; no reemplazar nombre entry_18.\nConservar /src/file-19.js, versión 19.1; parámetro único: 1919; no reemplazar nombre entry_19.\nConservar /src/file-20.js, versión 20.1; parámetro único: 2020; no reemplazar nombre entry_20.\nConservar /src/file-21.js, versión 21.1; parámetro único: 2121; no reemplazar nombre entry_21.\nConservar /src/file-22.js, versión 22.1; parámetro único: 2222; no reemplazar nombre entry_22.\nConservar /src/file-23.js, versión 23.1; parámetro único: 2323; no reemplazar nombre entry_23.\nConservar /src/file-24.js, versión 24.1; parámetro único: 2424; no reemplazar nombre entry_24.\nConservar /src/file-25.js, versión 25.1; parámetro único: 2525; no reemplazar nombre entry_25.\nConservar /src/file-26.js, versión 26.1; parámetro único: 2626; no reemplazar nombre entry_26.\nConservar /src/file-27.js, versión 27.1; parámetro único: 2727; no reemplazar nombre entry_27.\nConservar /src/file-28.js, versión 28.1; parámetro único: 2828; no reemplazar nombre entry_28.\nConservar /src/file-29.js, versión 29.1; parámetro único: 2929; no reemplazar nombre entry_29.\nConservar /src/file-30.js, versión 30.1; parámetro único: 3030; no reemplazar nombre entry_30.\nConservar /src/file-31.js, versión 31.1; parámetro único: 3131; no reemplazar nombre entry_31.\nConservar /src/file-32.js, versión 32.1; parámetro único: 3232; no reemplazar nombre entry_32.\nConservar /src/file-33.js, versión 33.1; parámetro único: 3333; no reemplazar nombre entry_33.\nConservar /src/file-34.js, versión 34.1; parámetro único: 3434; no reemplazar nombre entry_34.\nConservar /src/file-35.js, versión 35.1; parámetro único: 3535; no reemplazar nombre entry_35.\nConservar /src/file-36.js, versión 36.1; parámetro único: 3636; no reemplazar nombre entry_36.\nConservar /src/file-37.js, versión 37.1; parámetro único: 3737; no reemplazar nombre entry_37.\nConservar /src/file-38.js, versión 38.1; parámetro único: 3838; no reemplazar nombre entry_38.\nConservar /src/file-39.js, versión 39.1; parámetro único: 3939; no reemplazar nombre entry_39.",
+    "expect": "unnecessary",
+    "model": "gpt-5"
+  },
+  {
+    "name": "equivalencia-incierta",
+    "mode": "prompt",
+    "text": "Caso 0: No modificar la memoria.\nCaso 1: Preservar los datos de EVO.\nCaso 2: No borrar los recuerdos.\nCaso 3: Conservar EVO MEMORY, pero puede modificarse la interfaz.\nCaso 4: Se permite actualizar un índice sin cambiar los datos.\nCaso 5: Nunca confundir el índice con los datos persistidos.\nCaso 6: Antes se propuso borrar, no se confirmó.\nCaso 7: Ahora sólo cambia la vista.\nCaso 8: El alcance de las excepciones no está confirmado.\nCaso 9: No inferir que todas las frases anteriores son equivalentes.",
+    "expect": "unnecessary",
+    "model": "gpt-5"
+  },
+  {
+    "name": "stream-incompleto",
+    "messages": [
+      {
+        "id": "1",
+        "role": "user",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar."
+      },
+      {
+        "id": "2",
+        "role": "assistant",
+        "content": "Modificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\nModificar únicamente la función solicitada. Preservar EVO MEMORY y el lector DOM. Evitar cambios ajenos al objetivo. Validar la integración antes de continuar.\n\n"
+      }
+    ],
+    "streaming": true,
+    "expect": "analyzing",
+    "model": "gpt-5"
+  }
+]

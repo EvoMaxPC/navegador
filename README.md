@@ -5,38 +5,27 @@ con IA, no acumular funciones. Sin cambiar silenciosamente el objetivo ni invent
 información para corregir respuestas.
 [Prioridades y criterios de revisión](docs/NEXO-CRITERIOS-RECTORES.md).
 
-**Comprensión por etapas:** [plan de siete bloques y alcance comprobado de las siete etapas](docs/NEXO-COMPRENSION-ETAPAS.md).
-La base observacional incorpora roles, mensajes nuevos en orden, respuestas no
-verificadas del asistente y renovación automática del panel. El bloque 2 añade
-objetivos independientes, inferencias confirmables y estados activo/completado/
-cancelado con historia; completar es una declaración, no ejecución verificada.
-El bloque 3 amplía reglas, preferencias orientativas, propuestas de decisión,
-correcciones con historia y edición de vigencia, sin convertirlas en autorización
-de ejecución. El bloque 4 añade tareas/subtareas, dependencias sin ciclos,
-prioridad/orden explícitos y próximo paso acordado, sin inventar planes ni tomar
-los cierres declarados como evidencia. El bloque 5 añade etiquetas por contexto,
-alias actuales, inspección y antecedentes versionados, y selección explícita para
-continuar sin importar el historial visible. El bloque 6 añade registros de
-avances/resultados, problemas y propuestas, evidencia aportada y captura explícita
-de extractos del asistente, siempre sin verificación factual. No completa aún los
-72 requisitos ni añade autonomía. El bloque 7 consolida el inspector paginado,
-explicaciones de alcance y correcciones humanas con historia. Desarrollo por
-etapas cerrado con [revisión final y límites pendientes](docs/NEXO-COMPRENSION-REVISION-FINAL.md).
+**0.1.33 · Comprensión reconstruida:** lector DOM independiente de EVO Memory,
+motor local de optimización conversacional, medición BPE y una única pantalla
+con estado, ahorro y comparación del original con el resultado. El motor anterior
+de objetivos, reglas, proyectos, tareas, inspector y formularios fue eliminado.
+Los archivos históricos del usuario se conservan intactos y no se reimportan.
 
-**Interruptor EVO:** al desactivar Mediación global también se desactiva EVO Memory
-(captura y visualización), sin borrar recuerdos. **Comprensión sigue activa**.
-[Corrección y validación](docs/NEXO-EVO-OFF-MEMORY-OFF.md).
+La compresión usa diccionario y referencias cronológicas reversibles: verifica
+la reconstrucción literal completa y sólo entrega un resultado si reduce tokens
+netos. No es una paráfrasis semántica general, no infiere vigencias ambiguas y no
+altera silenciosamente los envíos ni el historial remoto de ChatGPT.
+[Arquitectura, alcance y pendientes](docs/NEXO-COMPRENSION-OPTIMIZACION.md) ·
+[Ahorro medido reproducible](docs/COMPRENSION-AHORRO-MEDIDO.json) ·
+[Archivos eliminados, creados y modificados](docs/COMPRENSION-ARCHIVOS.md).
+Acceso: **Comprensión** en la barra lateral o **Ctrl+K → Comprensión · optimización conversacional**.
 
-**0.1.33 · Capa 1 — User Understanding Engine:** objetivo literal persistente,
-restricciones separadas de preferencias, tarea/subobjetivos, procedencia, vigencia,
-incertidumbre y aclaraciones revisables. Integrado a preparación de mensajes y
-al consumidor del lector ChatGPT existente, sin cambiar su lectura ni duplicar EVO.
-Interpretación local basada en reglas ES/EN; no es comprensión semántica general
-ni incorpora un modelo, agente o segunda capa.
-Acceso: **Comprensión** en la barra lateral o **Ctrl+K → Comprensión del usuario**.
-[Arquitectura, uso y límites](docs/NEXO-CAPA1-0.1.33.md) ·
-[Validación y pendientes reales](docs/NEXO-CAPA1-VALIDACION.md) ·
-[Archivos de esta entrega](docs/NEXO-CAPA1-ARCHIVOS.txt).
+**Interruptor EVO:** Mediación global OFF desactiva EVO Memory (captura y vista),
+sin borrar recuerdos; el lector y el procesamiento de Comprensión siguen activos.
+[Corrección del interruptor](docs/NEXO-EVO-OFF-MEMORY-OFF.md).
+
+La documentación anterior de Capa 1 y de las siete etapas se conserva como
+registro histórico, no como descripción del módulo actual.
 
 **0.1.32 · Expediente de objetivo (primera capa de Fase 5):** objetivos y criterios
 versionados por workspace, citas explícitas con procedencia, tareas manuales,

@@ -1,5 +1,4 @@
-import { UserUnderstandingService, installUnderstandingIPC } from './userUnderstanding.js';
-import { createHash } from 'node:crypto';
+import { ConversationOptimizer, installOptimizationIPC } from './conversationOptimizer.js';
 import { installWorkDossier } from './workDossier.js';
 import { installAdvancedBrowser } from './advancedBrowser.js';
 import { repetitionSnapshot } from '../core/conversationRepetition.js';
@@ -114,7 +113,7 @@ if (isSmoke && smokeOut) {
 let win = null;
 let advancedBrowser = null;
 let workDossier = null;
-let userUnderstanding = null;
+let conversationOptimizer = null;
 let store = null;
 let engine = null;
 /**
@@ -405,7 +404,7 @@ function createWindow() {
   // Las pestañas no pueden abrir ventanas: se convierten en pestañas nuevas.
   win.webContents.on('did-attach-webview', (_event, contents) => {
     advancedBrowser?.attachGuest(contents, win.webContents);
-    contents.once('destroyed',()=>userUnderstanding?.release(contents));
+    contents.once('destroyed',()=>conversationOptimizer?.release(contents));
     contents.setWindowOpenHandler(({ url }) => {
       if (isAuthPopup(url, isAiHost(hostOf(contents.getURL())))) {
         return {
@@ -569,7 +568,8 @@ function registerIpc() {
   });
   ipcMain.handle('nexo:prepare', (event, payload) => {
     const result = engine.prepare(event.sender.id, payload);
-    if((!result?.skipped || result.skipped==='disabled') && !isAuthRequest(String(payload?.url || '')) && isUnderstandingSource(event))userUnderstanding?.observe(event.sender,payload.prompt,{channel:'prepare',transmittedText:result.text});
+    // Lectura paralela, sin alterar el envío ni los motores de EVO.
+    if(isUnderstandingSource(event)&&isChatGptMemoryUrl(event.sender.getURL())&&!isAuthRequest(String(payload?.url||'')))conversationOptimizer?.observePrompt(event.sender,payload?.prompt,payload?.model);
     // La capa de la página sólo pide mediación cuando ya reconoció una petición
     // de chat. Si el motor la descarta, es un dato: significa que el sitio no se
     // está mediando. Antes, ese silencio se veía como «0 turnos» y nada más.
@@ -692,7 +692,6 @@ function registerIpc() {
     const snapshot = repetitionSnapshot(payload);
     if (!snapshot) return { ok: false };
     // Consumir la vista literal ya validada: existe aun con EVO desactivada.
-    if(isUnderstandingSource(event))userUnderstanding?.observeConversation(sender,snapshot.turns,{streaming:snapshot.streaming});
     const next = { ...snapshot, href, webContentsId: sender.id };
     const previous = repetitionSnapshots.get(sender.id);
     repetitionSnapshots.set(sender.id, next);
@@ -716,6 +715,27 @@ function registerIpc() {
     return snapshot && snapshot.href === payload.href ? snapshot : null;
   });
 
+  /* Canal DOM UUE propio: no consulta ni captura EVO, sin autoridad para la página. */
+  ipcMain.handle('nexo:understanding:conversation', (event, payload) => {
+    const href = event.sender?.getURL?.() || '';
+    if (!isUnderstandingSource(event) || !isChatGptMemoryUrl(href) || !payload ||
+      typeof payload.href !== 'string' || payload.href.length > 2048 || !isChatGptMemoryUrl(payload.href)) {
+      return { ok: false, observed: false, code: 'unauthorized' };
+    }
+    try {
+      const current = new URL(href), incoming = new URL(payload.href);
+      if (current.origin !== incoming.origin || current.pathname !== incoming.pathname)
+        return { ok: false, observed: false, code: 'conflict' };
+      if (payload.ready === true) {
+        conversationOptimizer.activate(event.sender);
+        return { ok: true, ready: true };
+      }
+      return conversationOptimizer.receive(event.sender, payload);
+    } catch {
+      return { ok: false, observed: false, code: 'storage', error: 'No se pudo registrar la lectura local de Comprensión.' };
+    }
+  });
+
   /* ---------------- EVO MEMORY ---------------- */
   ipcMain.handle('nexo:conversation-snapshot', (event, payload) => {
     const href = event.sender?.getURL?.() || '';
@@ -733,18 +753,7 @@ function registerIpc() {
       (event.senderFrame && event.sender?.mainFrame && event.senderFrame !== event.sender.mainFrame) || !Array.isArray(payload?.turns) || payload.turns.length > 200) {
       return { ok: false, observed: false, skipped: 'snapshot-no-autorizado', hrefMatches: sameDocument };
     }
-    // UUE no depende ni del interruptor ni del resultado de la captura EVO.
-    const observation = isUnderstandingSource(event)
-      ? userUnderstanding?.observeConversation(event.sender,payload.turns,{streaming:payload.streaming===true})
-      : { skipped: 'snapshot-no-autorizado' };
-    const observed = observation?.ok === true || observation?.duplicate === true;
-    if(!isEvoMemoryEnabled(store.settings)) {
-      // La cola confirma entrega a UUE, no una captura EVO que no fue solicitada.
-      return observed
-        ? { ok: true, observed: true, memoryDisabled: true }
-        : { ok: false, observed: false, memoryDisabled: true,
-            skipped: observation?.skipped || 'uue-no-observado', error: observation?.error };
-    }
+    if(!isEvoMemoryEnabled(store.settings))return {ok:true,observed:false,memoryDisabled:true,skipped:'evo-disabled'};
     const url = pageUrl;
     // Nunca confiar en el ID del documento para escribir otra conversación.
     const conversationId = url.pathname.includes('/c/') ? url.pathname
@@ -772,7 +781,7 @@ function registerIpc() {
     writeCaptureTrace('conversation-read', { host: url.hostname, source: 'dom', chars: assistantChars,
       memory: { saved: result.ok === true, persisted: result.ok === true, chars: assistantChars } });
     if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());
-    return { ...result, observed, observationSkipped: observed ? undefined : observation?.skipped, assistantCaptures: undefined };
+    return { ...result, observed:false, assistantCaptures: undefined };
   });
   ipcMain.handle('nexo:memory:conversations', () => isEvoMemoryEnabled(store.settings) ? memory.memory.listConversations() : []);
   ipcMain.handle('nexo:memory:stats', () => ({ ...engine.memoryStats(), file: isEvoMemoryEnabled(store.settings) ? memory?.file || null : null }));
@@ -849,6 +858,8 @@ function registerIpc() {
     // de que el mensaje salió, y hasta ahora el panel sólo veía el caso en el
     // que el motor inyectaba algo.
     if (clean.type === 'outgoing') {
+      // Metadato opcional: no depende de EVO ni afecta conteos o el cuerpo enviado.
+      if(isUnderstandingSource(event)&&isChatGptMemoryUrl(href))conversationOptimizer?.setModel(event.sender,clean.payload.model);
       const host = String(clean.payload.host || clean.payload.site || 'el sitio');
       // Contador de mensajes del usuario: se cuenta acá, no en `prepare()`.
       const counted = engine.onUserMessage(event.sender.id, clean.payload);
@@ -1592,9 +1603,7 @@ app.whenReady().then(async () => {
     episodeEvery: store.settings.memory?.episodeEvery,
   });
   memory = created;
-  userUnderstanding = new UserUnderstandingService({memory:created.memory,
-    file:join(app.getPath('userData'),`nexo-understanding-${createHash('sha256').update(created.memory.projectId).digest('hex').slice(0,16)}.json`),
-    memoryEnabled:()=>isEvoMemoryEnabled(store.settings),notify:broadcast});
+  conversationOptimizer = new ConversationOptimizer({notify:broadcast});
   captureDiagnosticFile = join(app.getPath('documents'), 'NEXO-CAPTURE-DIAGNOSTIC.jsonl');
   captureDiagnostic = createCaptureDiagnostic(captureDiagnosticFile, {
     onError: (code) => console.warn('[nexo] diagnóstico de captura no escrito:', code),
@@ -1730,7 +1739,7 @@ app.whenReady().then(async () => {
   workDossier = installWorkDossier({app, ipcMain, BrowserWindow, dialog, broadcast,
     getWorkspaceIds:()=>advancedBrowser.preferences.workspaces.map(w=>w.id),
     resolveGuest:(owner,id)=>advancedBrowser.resolveGuest(owner,id)});
-  installUnderstandingIPC({service:userUnderstanding,ipcMain,BrowserWindow,dialog,
+  installOptimizationIPC({service:conversationOptimizer,ipcMain,BrowserWindow,
     resolveGuest:(owner,id)=>advancedBrowser.resolveGuest(owner,id)});
   buildMenu({ send: (channel, payload) => broadcast(channel, payload),bindings:advancedBrowser.preferences.shortcuts });
   createWindow();
@@ -1779,6 +1788,7 @@ app.on('window-all-closed', () => {
 // La sesión y el perfil se guardan al salir, incluso si la ventana se cerró de
 // golpe: son datos que el usuario espera recuperar.
 app.on('before-quit', () => {
+  void conversationOptimizer?.close();
   try {
     profile?.saveAll();
     memory?.flush?.();

@@ -1,4 +1,4 @@
-/** Agrupa cambios del motor; una edición/lectura en curso nunca pierde la actualización. */
+/** Agrupa cambios del motor; una lectura en curso nunca pierde la actualización. */
 export function createUnderstandingRefresh({
   refresh,
   isBusy,

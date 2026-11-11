@@ -1,0 +1,113 @@
+{
+  "scope": "Ahorro neto del texto generado, no tokens facturados ni del historial remoto. Corpus sintético representativo.",
+  "cases": [
+    {
+      "case": "prompt-corto",
+      "status": "unnecessary",
+      "original": 13,
+      "optimized": 13,
+      "saved": 0,
+      "percent": 0,
+      "encoding": "o200k_base",
+      "model": "gpt-5",
+      "estimated": false,
+      "exactReconstruction": false
+    },
+    {
+      "case": "prompt-largo-repetitivo",
+      "status": "optimized",
+      "original": 990,
+      "optimized": 463,
+      "saved": 527,
+      "percent": 53.2323,
+      "encoding": "o200k_base",
+      "model": "gpt-5",
+      "estimated": false,
+      "exactReconstruction": true
+    },
+    {
+      "case": "informacion-tecnica",
+      "status": "optimized",
+      "original": 2050,
+      "optimized": 462,
+      "saved": 1588,
+      "percent": 77.4634,
+      "encoding": "o200k_base",
+      "model": "gpt-5",
+      "estimated": false,
+      "exactReconstruction": true
+    },
+    {
+      "case": "contradiccion-correccion",
+      "status": "optimized",
+      "original": 832,
+      "optimized": 431,
+      "saved": 401,
+      "percent": 48.1971,
+      "encoding": "o200k_base",
+      "model": "gpt-5",
+      "estimated": false,
+      "exactReconstruction": true
+    },
+    {
+      "case": "roles-y-propuestas",
+      "status": "optimized",
+      "original": 1404,
+      "optimized": 721,
+      "saved": 683,
+      "percent": 48.6467,
+      "encoding": "o200k_base",
+      "model": "gpt-5",
+      "estimated": false,
+      "exactReconstruction": true
+    },
+    {
+      "case": "conversacion-extensa",
+      "status": "optimized",
+      "original": 8635,
+      "optimized": 5732,
+      "saved": 2903,
+      "percent": 33.619,
+      "encoding": "o200k_base",
+      "model": "gpt-5",
+      "estimated": false,
+      "exactReconstruction": true
+    },
+    {
+      "case": "ya-sin-redundancias",
+      "status": "unnecessary",
+      "original": 1230,
+      "optimized": 1230,
+      "saved": 0,
+      "percent": 0,
+      "encoding": "o200k_base",
+      "model": "gpt-5",
+      "estimated": false,
+      "exactReconstruction": false
+    },
+    {
+      "case": "equivalencia-incierta",
+      "status": "unnecessary",
+      "original": 129,
+      "optimized": 129,
+      "saved": 0,
+      "percent": 0,
+      "encoding": "o200k_base",
+      "model": "gpt-5",
+      "estimated": false,
+      "exactReconstruction": false
+    },
+    {
+      "case": "stream-incompleto",
+      "status": "analyzing",
+      "original": 1161,
+      "optimized": 1161,
+      "saved": 0,
+      "percent": 0,
+      "encoding": "o200k_base",
+      "model": "gpt-5",
+      "estimated": false,
+      "exactReconstruction": false
+    }
+  ]
+}

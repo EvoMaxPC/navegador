@@ -1,3 +1,7 @@
+> **Documento histórico del módulo retirado.** No describe el funcionamiento actual.
+> El reemplazo está documentado en [Comprensión: optimización conversacional](NEXO-COMPRENSION-OPTIMIZACION.md).
+> Los archivos de datos históricos del usuario no se han borrado ni migrado.
+
 # NEXO Comprensión — desarrollo en siete etapas
 
 ## Acuerdo de alcance

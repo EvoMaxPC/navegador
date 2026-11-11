@@ -52,3 +52,11 @@ await build({
   bundle: true, format: 'cjs', platform: 'browser', target: ['chrome120'],
   minify: !dev, charset: 'utf8', legalComments: 'none', logLevel: 'warning',
 });
+
+// Canal UUE independiente: mismo adaptador DOM, bundle/preload propios.
+await build({
+  entryPoints: [resolve(root, 'src/preload/understandingReader.js')],
+  outfile: resolve(root, 'build/understanding-reader.cjs'),
+  bundle: true, format: 'cjs', platform: 'browser', target: ['chrome120'],
+  minify: !dev, charset: 'utf8', legalComments: 'none', logLevel: 'warning',
+});

@@ -681,3 +681,8 @@ button:disabled { cursor:not-allowed; }
 
 /* EVO apagada oculta sólo Memoria, nunca Comprensión o Repetición. */
 #panel-memory.evo-memory-disabled > :not(#memoryDisabledNotice) { display: none !important; }
+
+/* Comprensión: una pantalla automática, mantiene BLACK & ELECTRIC BLUE. */
+.optimization-metrics { display:grid; grid-template-columns: minmax(0,1fr) auto; gap:8px 16px; border:1px solid var(--line, #18345b); padding:16px; border-radius:10px; }
+.optimization-metrics dt { color:var(--muted, #90a4bf); }
+.optimization-metrics dd { margin:0; color:var(--blue, #3b9dff); font-variant-numeric:tabular-nums; font-weight:600; }

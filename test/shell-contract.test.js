@@ -21,7 +21,7 @@ const read = (path) => readFileSync(join(ROOT, path), 'utf8').replace(/\r\n?/g, 
 const html = read('src/ui/shell/index.html');
 const shellApp = read('src/ui/shell/app.js') + '\n' + read('src/ui/shell/browserTools.js') + '\n' + read('src/ui/shell/workDossier.js') + '\n' + read('src/ui/shell/understandingPanel.js');
 const preload = read('src/preload/shell.cjs');
-const main = read('src/main/main.js') + '\n' + read('src/main/advancedBrowser.js') + '\n' + read('src/main/workDossier.js') + '\n' + read('src/main/userUnderstanding.js');
+const main = read('src/main/main.js') + '\n' + read('src/main/advancedBrowser.js') + '\n' + read('src/main/workDossier.js') + '\n' + read('src/main/conversationOptimizer.js');
 const pagePreload = read('src/preload/bridge.cjs');
 
 function unique(values) {
@@ -50,7 +50,6 @@ test('todo canal IPC que invoca el preload está registrado en el principal', ()
   const handled = new Set([...main.matchAll(/ipcMain\.handle\('([^']+)'/g)].map((m) => m[1]));
   // El servicio de expedientes usa un registrador con prefijo fijo y allowlist de nombres.
   for (const match of read('src/main/workDossier.js').matchAll(/register\('([^']+)'/g)) handled.add(`nexo:work:${match[1]}`);
-  for(const match of read('src/main/userUnderstanding.js').matchAll(/handle\('([^']+)'/g))handled.add(`nexo:understanding:${match[1]}`);
   const missing = invoked.filter((channel) => !handled.has(channel));
   assert.deepEqual(missing, [], `canales sin handler: ${missing.join(', ')}`);
 });

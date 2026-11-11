@@ -77,3 +77,26 @@ test('una página no puede elegir canales privilegiados a través del bridge', a
   assert.equal(invoked[0].channel, 'nexo:prepare');
   assert.equal(replies.at(-1).payload.ok, true);
 });
+
+test('bridge arranca UUE antes de EVO aun apagada, restringe subframes y no expone su IPC a la web', async () => {
+  for (const mainFrame of [true, false]) {
+    const starts = [], handlers = new Map(), ipcHandlers = new Map(), invoked = [];
+    const ipcRenderer = { on: (n, f) => ipcHandlers.set(n, f), send() {}, sendSync: () => ({ enabled: false, settings: { enabled: false, memory: { enabled: false } } }), invoke: async c => { invoked.push(c); return { ok: true }; } };
+    const window = { addEventListener: (n, f) => handlers.set(n, f), postMessage() {} };
+    const mocks = {
+      '../../build/understanding-reader.cjs': { startUnderstandingReader() { starts.push('uue'); return { read() { starts.push('uue-read'); } }; } },
+      '../../build/chatgpt-reader.cjs': { startChatGptReader({config}) { starts.push(config.understandingReaderActive ? 'evo-dedicated' : 'evo-shared'); return { read() {}, updateSettings() {} }; } },
+    };
+    vm.runInNewContext(readFileSync(new URL('../src/preload/bridge.cjs', import.meta.url), 'utf8'), {
+      require: n => n === 'electron' ? {ipcRenderer, webFrame: { executeJavaScript: async () => {} }} : mocks[n] || requireBridge(n),
+      __dirname: new URL('../src/preload/', import.meta.url).pathname,
+      document: {}, process: {isMainFrame: mainFrame}, window, location: {protocol:'https:',hostname:'chatgpt.com',href:'https://chatgpt.com/c/test'}, console,
+    });
+    assert.deepEqual(starts, mainFrame ? ['uue','evo-dedicated'] : []);
+    ipcHandlers.get('nexo:understanding-read')();
+    if(mainFrame)assert.equal(starts.at(-1),'uue-read');
+    for(const type of ['nexo:understanding:conversation','understanding:conversation'])await handlers.get('message')({source:window,data:{__nexo:'call',id:'blocked',type}});
+    await handlers.get('message')({source:window,data:{__nexo:'event',type:'understanding-conversation',payload:{turns:[]}}});
+    assert.deepEqual(invoked,[]);
+  }
+});

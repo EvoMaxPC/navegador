@@ -46,9 +46,7 @@ export class Element {
   querySelectorAll(selector) {
     const tags = selector.split(',');
     const match = (n) =>
-      tags.includes(n.tagName) ||
-      (selector === '[data-understanding-draft]' &&
-        n.dataset.understandingDraft);
+      tags.includes(n.tagName);
     return this.children.flatMap((c) => [
       ...(match(c) ? [c] : []),
       ...c.querySelectorAll(selector),

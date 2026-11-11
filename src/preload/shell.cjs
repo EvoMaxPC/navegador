@@ -28,11 +28,6 @@ const ALLOWED_EVENTS = new Set([
 contextBridge.exposeInMainWorld('nexo', {
   understanding: {
     read: p => ipcRenderer.invoke('nexo:understanding:read',p),
-    edit: p => ipcRenderer.invoke('nexo:understanding:edit',p),
-    recall: p => ipcRenderer.invoke('nexo:understanding:recall',p),
-    contexts: p => ipcRenderer.invoke('nexo:understanding:contexts',p),
-    bind: p => ipcRenderer.invoke('nexo:understanding:bind',p),
-    clear: p => ipcRenderer.invoke('nexo:understanding:clear',p),
   },
   work: {
     read: payload => ipcRenderer.invoke('nexo:work:read', payload),

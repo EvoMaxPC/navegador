@@ -1824,7 +1824,7 @@ workPanel = createWorkDossier({nexo,root:document.getElementById('panel-work'),
     const existing=[...state.tabs.values()].find(t=>t.url===url && (t.workspaceId||'main')===workspaceId);
     if(existing)activateTab(existing.id);else createTab(url,{workspaceId});
   }});
-understandingPanel=createUnderstandingPanel({nexo,root:document.getElementById('panel-understanding'),activeTab,notice:pushLocalNotice});
+understandingPanel=createUnderstandingPanel({nexo,root:document.getElementById('panel-understanding'),activeTab});
 document.getElementById('commandsButton').addEventListener('click',()=>runBrowserCommand({type:'command-center'}));
 document.getElementById('keyboardSettings').addEventListener('click',()=>runBrowserCommand({type:'keyboard-settings'}));
 document.getElementById('toolbarSettings').addEventListener('click',()=>runBrowserCommand({type:'toolbar-settings'}));

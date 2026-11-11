@@ -40,7 +40,7 @@ export const COMMAND_DEFS = [
   ['reader', 'Pantalla de lectura', 'Ctrl+Shift+F'],
   ['translate', 'Traducir página (Google, externo)', ''],
   ['split', 'Panel dividido', ''],
-  ['user-understanding', 'Comprensión del usuario · objetivo e instrucciones', ''],
+  ['user-understanding', 'Comprensión · optimización conversacional', ''],
   ['work-dossier', 'Expediente del objetivo · continuar trabajo', ''],
   ['workspaces', 'Espacios de trabajo', 'Ctrl+Shift+E'],
   ['workspace-new', 'Crear espacio de trabajo', ''],

@@ -16,6 +16,19 @@ const INJECT_PATH = join(__dirname, '..', '..', 'build', 'inject.js');
 let injected = false;
 let injectSource = '';
 let conversationReader = null;
+let understandingReader = null;
+function startUnderstandingReader() {
+  if (understandingReader) return;
+  if (typeof document === 'undefined' ||
+    (typeof process !== 'undefined' && process.isMainFrame === false) ||
+    !['chatgpt.com', 'chat.openai.com'].includes(location.hostname) || location.protocol !== 'https:') return;
+  try {
+    const { startUnderstandingReader } = require('../../build/understanding-reader.cjs');
+    understandingReader = startUnderstandingReader({ document, window, ipcRenderer });
+  } catch {
+    console.warn('[nexo] no se pudo iniciar el lector independiente de Comprensión');
+  }
+}
 
 function startConversationReader(config) {
   if (conversationReader) { conversationReader.updateSettings(config); return; }
@@ -24,7 +37,7 @@ function startConversationReader(config) {
     !['chatgpt.com', 'chat.openai.com'].includes(location.hostname) || location.protocol !== 'https:') return;
   try {
     const { startChatGptReader } = require('../../build/chatgpt-reader.cjs');
-    conversationReader = startChatGptReader({ document, window, ipcRenderer, config });
+    conversationReader = startChatGptReader({ document, window, ipcRenderer, config: { ...config, understandingReaderActive: Boolean(understandingReader) } });
   } catch {
     console.warn('[nexo] no se pudo iniciar el lector aislado de ChatGPT');
   }
@@ -103,6 +116,7 @@ function boot() {
   const host = location.hostname;
   const config = readConfigSync(host);
   // La vista RAM puede arrancar aun si la configuración aún no está disponible.
+  startUnderstandingReader();
   startConversationReader(config || { settings: { memory: { enabled: false } } });
   if (config) {
     if (shouldInject(config, host)) inject(config);
@@ -156,7 +170,7 @@ window.addEventListener('message', async (event) => {
   if (data.__nexo === 'event') {
     const { type, payload } = data;
     // Los snapshots privados sólo salen del lector aislado, no de postMessage de la web.
-    if (type === 'conversation-repetition' || type === 'conversation-snapshot') return;
+    if (type === 'conversation-repetition' || type === 'conversation-snapshot' || type === 'understanding-conversation') return;
     if (type === 'turn-result') {
       await ipcRenderer.invoke('nexo:turn-result', payload).catch((error) => console.warn('[nexo] resultado no notificado:', error.message));
       return;
@@ -187,6 +201,8 @@ window.addEventListener('message', async (event) => {
 ipcRenderer.on('nexo:action', (_event, action) => {
   window.postMessage({ __nexo: 'action', ...action }, '*');
 });
+
+ipcRenderer.on('nexo:understanding-read', () => understandingReader?.read());
 
 ipcRenderer.on('nexo:conversation-read', () => conversationReader?.read());
 

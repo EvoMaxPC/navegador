@@ -26,8 +26,8 @@ export function readChatGptConversation(document, { literal = false, selection =
   });
 }
 
-/** Un solo observador, agrupado; funciona aunque ChatGPT no use nuestro fetch. */
-export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => isChatGptStreaming(document), publishLive = null, memoryLiteral = false }) {
+/** Un observador por instancia, agrupado; funciona aunque ChatGPT no use nuestro fetch. */
+export function watchChatGptConversation({ document, window, publish, isEnabled = () => true, isStreaming = () => isChatGptStreaming(document), publishLive = null, memoryLiteral = false, readTurns = null }) {
   if (typeof document?.querySelectorAll !== 'function') return { read() {}, disconnect() {} };
   let timer = null, pollTimer = null, last = '', pending = '', lastLive = '', observer = null, stopped = false, suspended = false, frame = null;
   const session = `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -63,10 +63,11 @@ export function watchChatGptConversation({ document, window, publish, isEnabled 
         }
       }
       if (!isEnabled()) return;
-      const turns = memoryLiteral && literalTurns ? literalTurns : readChatGptConversation(document, { literal: memoryLiteral, selection });
+      const independent = readTurns ? readTurns(document, { selection }) : null;
+      const turns = independent ? independent.turns : memoryLiteral && literalTurns ? literalTurns : readChatGptConversation(document, { literal: memoryLiteral, selection });
       if (!turns.length) return;
       const conversationId = url.pathname.includes('/c/') ? url.pathname : `${url.pathname}#${session}`;
-      const payload = { conversationId, href: window.location.href, turns, streaming: Boolean(isStreaming()) };
+      const payload = { conversationId, href: window.location.href, turns, streaming: Boolean(isStreaming()),...(independent ? { coverage: independent.coverage } : {}) };
       const signature = JSON.stringify(payload);
       if (signature === last || signature === pending) return;
       pending = signature;

@@ -1,3 +1,7 @@
+> **Documento histórico del módulo retirado.** No describe el funcionamiento actual.
+> El reemplazo está documentado en [Comprensión: optimización conversacional](NEXO-COMPRENSION-OPTIMIZACION.md).
+> Los archivos de datos históricos del usuario no se han borrado ni migrado.
+
 # Capa 1 — Validación de NEXO 0.1.33
 
 Rama de trabajo: `arena/4678aef7-navegador`. La validación de implementación se realizó localmente antes de su publicación, sin ejecutar CI. El commit y push posteriores fueron autorizados expresamente por el usuario; su SHA queda registrado en Git. No se inició la segunda capa.
