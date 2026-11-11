@@ -21,6 +21,14 @@ automático o fijo y zoom de interfaz persistente. Se retira sólo la pestaña
 Repetición, conservando el transporte DOM y su lector compartido con EVO Memory.
 [Implementación, pruebas y límites de validación](docs/NEXO-WORMHOLE-IDENTIDAD.md).
 
+**Interacción con la IA 2026 · atajos y siguiente paso:** panel **Atajos**
+(`Ctrl+Shift+P`) con plantillas propias y variables `{{seleccion}}`,
+`{{pestana}}`, `{{sitio}}` y `{{fecha}}` que se insertan en el cuadro del sitio
+sin enviarse solas; quedan sólo en el perfil local. Al cerrar un turno, una
+barra ofrece la continuación o el reintento que el motor local detectó, también
+sin enviar: siempre se revisa y se envía a mano.
+[Uso, validación y límites](docs/NEXO-NAVEGACION-CENTRO.md).
+
 **Navegación 2026 · centro de pestañas y menú:** botón junto a las pestañas
 (con el número de abiertas), **Ctrl+Shift+A** y clic derecho en una pestaña abren
 un buscador local de pestañas abiertas y cerradas (las últimas 25 de la sesión),

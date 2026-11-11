@@ -66,13 +66,12 @@ Electron nueva ni en Windows en esta etapa.
 
 ## Verificación
 
-- Suite completa con este centro de navegación sobre `4540270`: **1671 pruebas,
-  1670 aprobadas, 0 fallos, 1 omitida**.
-- Tras fusionar los commits remotos de contadores de modelo/correlación
-  (`f9db919`), la suite queda en **1672 pruebas, 1658 aprobadas, 13 fallos,
-  1 omitida**. Esos 13 fallos **ya existen en la rama remota sin estos cambios**
-  (captura SSE/NDJSON, correlación DPU y palabras renderizadas) y no se tocaron
-  aquí: requieren su propia corrección, no se declaran resueltos.
+- Suite completa tras la etapa 2: **1688 pruebas, 1687 aprobadas, 0 fallos,
+  1 omitida** (la misma omitida previa).
+- Los 13 fallos que traían los commits remotos de contadores se corrigieron en
+  `23facfa`: el «tokenizer más cercano» inventaba compatibilidad (gpt-6 contado
+  con o200k_base de GPT-5). Ahora un modelo no catalogado queda desconocido y
+  el texto del envío se conserva hasta poder medirlo con el modelo real.
 - Vista de interfaz (`node dev/serve.mjs 3417 --browser`), automatizada con
   Chromium headless: apertura/cierre/reapertura desde el buscador, filtro por
   espacio, búsqueda sin resultados, Escape, menú y cambio a panel Tokenizador,
@@ -80,10 +79,51 @@ Electron nueva ni en Windows en esta etapa.
 - axe-core (WCAG 2 A/AA) sobre la shell cerrada, el buscador y el menú: **0
   violaciones**.
 
+## Etapa 2 · interacción con la IA (2026-11)
+
+### Atajos de conversación
+
+Panel nuevo (**Atajos**, `Ctrl+Shift+P`, menú de la aplicación y del navegador)
+con plantillas propias para conversar con la IA. Variables admitidas:
+`{{seleccion}}` (texto seleccionado en la página), `{{pestana}}`, `{{sitio}}` y
+`{{fecha}}`. Las que no tienen valor **quedan visibles** para completarlas: no
+se reemplazan por vacío ni por texto inventado.
+
+- Inserción con la acción nativa `insert-text` del proceso principal: escribe en
+  el cuadro del sitio en el foco actual y **nunca envía**. La interfaz lo dice
+  explícitamente y la prueba lo verifica (sin `submit` ni clic de envío).
+- El texto no se interpreta como HTML ni como código: se inserta literal.
+- Persistencia atómica sobre `Store` (temporal + fsync + rename). Si el disco
+  falla, el guardado devuelve error y **no** se publica una lista en RAM.
+- Validación y acotado en `src/core/prompts.js` (máximo 40 atajos, 60/4000
+  caracteres, ids acotados); la interfaz no es la frontera de confianza.
+- Sólo la shell puede listar, editar y renderizar: el preload de la página no
+  expone `nexo:prompts:*` ni `insert-text`.
+
+### Siguiente paso tras cada turno
+
+El motor ya calculaba reparaciones, sugerencias de recuperación y la
+continuación cuando una respuesta se corta; se descartaban antes de llegar a la
+interfaz. Ahora el principal publica `nexo:turn-followup` (sólo si hay algo
+útil) y la barra de la pestaña activa ofrece:
+
+- **Escribir en el cuadro**: inserta la continuación o la sugerencia para que la
+  persona la revise y la envíe. No se envía sola.
+- **Descartar**: quita la sugerencia de esa pestaña.
+- Aviso de reparaciones aplicadas (markdown, tokens de plantilla) en Actividad.
+
+Los avisos aparecen sólo en la pestaña activa; las demás quedan marcadas para
+encontrarlas al cambiar. El evento no incluye el texto de la respuesta ni se
+reenvía a la página.
+
 ## Límites explícitos
 
 - No hay sincronización entre dispositivos, perfiles privados/aislados,
   extensiones ni gestor de contraseñas. El menú no ofrece esas entradas.
+- Los atajos de conversación son texto del usuario: no son agentes autónomos ni
+  ejecutan acciones. La sugerencia de continuación tampoco se envía sola.
+- El relleno de `{{seleccion}}` en la vista web no tiene selección real de una
+  página Electron; en la aplicación se toma la selección de la pestaña activa.
 - Un espacio de trabajo **no** aísla cookies ni sesiones: sólo agrupa pestañas.
 - El buscador de pestañas es local; no consulta motores ni historial remoto.
 - La vista web no reproduce Electron: requiere confirmación visual en la
