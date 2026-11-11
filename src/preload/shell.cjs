@@ -27,6 +27,7 @@ const ALLOWED_EVENTS = new Set([
 ]);
 
 contextBridge.exposeInMainWorld('nexo', {
+  tiktoken: { count: (text, model) => ipcRenderer.invoke('nexo:tiktoken:count', { text, model }) },
   understanding: {
     read: p => ipcRenderer.invoke('nexo:understanding:read',p),
   },
