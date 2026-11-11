@@ -139,10 +139,11 @@ test('categorías de input no mezclan BPE, estimación, desconocidos ni facturac
     source: 'network',
     ...inputTokenMeasurement('Hola', '', 'claude'),
   });
-  send(e, 'unknown', 'network', 'u3', 'Hola', 'auto');
+  send(e, 'nearest', 'network', 'u3', 'Hola', 'gpt-6');
+  send(e, 'unknown', 'network', 'u4', 'Hola', 'auto');
   const s = e.stats();
   assert.equal(s.inputTokens, countGptTokens('Hola', 'gpt-5'));
-  assert.ok(s.estimatedInputTokens > 0);
+  assert.ok(s.estimatedInputTokens >= countGptTokens('Hola', 'gpt-5'));
   assert.equal(s.unknownInputMessages, 1);
   assert.equal(s.hiddenContextTokens, null);
   assert.equal(s.providerBilledTokens, null);
