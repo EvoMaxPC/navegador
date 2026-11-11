@@ -21,6 +21,11 @@ automático o fijo y zoom de interfaz persistente. Se retira sólo la pestaña
 Repetición, conservando el transporte DOM y su lector compartido con EVO Memory.
 [Implementación, pruebas y límites de validación](docs/NEXO-WORMHOLE-IDENTIDAD.md).
 
+**Interacción con la IA 2026 · usar el contexto medido:** el panel de
+Comprensión puede escribir el contexto optimizado en el cuadro del sitio o
+copiarlo, siempre con un gesto y sin enviar nada; si no entra en el cuadro, no
+se inserta a medias.
+
 **Interacción con la IA 2026 · atajos y siguiente paso:** panel **Atajos**
 (`Ctrl+Shift+P`) con plantillas propias y variables `{{seleccion}}`,
 `{{pestana}}`, `{{sitio}}` y `{{fecha}}` que se insertan en el cuadro del sitio
