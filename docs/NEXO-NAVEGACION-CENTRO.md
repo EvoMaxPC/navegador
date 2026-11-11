@@ -66,8 +66,13 @@ Electron nueva ni en Windows en esta etapa.
 
 ## Verificación
 
-- Suite completa: **1671 pruebas, 1670 aprobadas, 0 fallos, 1 omitida**
-  (la misma omitida previa).
+- Suite completa con este centro de navegación sobre `4540270`: **1671 pruebas,
+  1670 aprobadas, 0 fallos, 1 omitida**.
+- Tras fusionar los commits remotos de contadores de modelo/correlación
+  (`f9db919`), la suite queda en **1672 pruebas, 1658 aprobadas, 13 fallos,
+  1 omitida**. Esos 13 fallos **ya existen en la rama remota sin estos cambios**
+  (captura SSE/NDJSON, correlación DPU y palabras renderizadas) y no se tocaron
+  aquí: requieren su propia corrección, no se declaran resueltos.
 - Vista de interfaz (`node dev/serve.mjs 3417 --browser`), automatizada con
   Chromium headless: apertura/cierre/reapertura desde el buscador, filtro por
   espacio, búsqueda sin resultados, Escape, menú y cambio a panel Tokenizador,
