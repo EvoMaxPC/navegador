@@ -328,3 +328,23 @@ test('uploadData partido en medio de un emoji UTF-8 se decodifica una sola vez',
     before.inputTokens + countGptTokens(text, 'gpt-5'),
   );
 });
+
+for (const route of ['network', 'cdp']) {
+  test(`${route}: auto no oculta metadata.model_slug GPT-5 ni modifica la solicitud`, async () => {
+    const view=journal.windows[0].attachWebview(`https://chatgpt.com/c/auto-metadata-${route}`);
+    await pause(50);
+    const text='  Hola, mundo.  ',before=stats();
+    const body=JSON.stringify({action:'next',model:'auto',metadata:{model_slug:'gpt-5'},messages:[{id:`auto-${route}`,author:{role:'user'},content:{parts:[text]}}]});
+    if(route==='network'){
+      const bytes=Buffer.from(body),original=Buffer.from(bytes);
+      journal.webRequest.before.get('persist:nexo').listener({id:'auto-net',method:'POST',url:'https://chatgpt.com/backend-api/f/conversation',resourceType:'xhr',webContentsId:view.id,uploadData:[{bytes}]},()=>{});
+      assert.deepEqual(bytes,original);
+    }else{
+      view.debugger.emitEvent('Network.requestWillBeSent',{requestId:'auto-cdp',type:'XHR',request:{url:'https://chatgpt.com/backend-api/f/conversation',method:'POST',postData:body}});
+      await pause(40);
+    }
+    assert.equal(stats().messages,before.messages+1);
+    assert.equal(stats().inputTokens,before.inputTokens+6,'referencia oficial o200k_base sobre el texto con bordes');
+    assert.equal(stats().unknownInputMessages,before.unknownInputMessages);
+  });
+}

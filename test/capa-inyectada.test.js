@@ -161,7 +161,7 @@ test('la capa avisa del envío aunque no haya nada que mediar', { skip: !fuente 
   const payload = envios[0].payload;
   assert.ok(payload.messageId, 'lleva identificador propio');
   assert.equal(payload.chars, 10, 'lleva el tamaño del mensaje');
-  assert.ok(payload.tokens > 0, 'y los tokens estimados');
+  assert.equal(payload.tokens, null, 'la página no estima entrada GPT; BPE se calcula en preload');
   assert.equal(payload.conversationId, 'abc-12345678', 'y la conversación de la URL');
   assert.equal(payload.mediated, false, 'sin intervención');
 
@@ -285,7 +285,7 @@ test('si la petición no aparece, el gesto cuenta el mensaje solo', { skip: !fue
   assert.equal(envios.length, 1, 'el gesto alcanza para contar el mensaje');
   assert.equal(envios[0].payload.source, 'composer');
   assert.equal(envios[0].payload.chars, '¿me ayudás?'.length);
-  assert.ok(envios[0].payload.tokens > 0, 'con sus tokens estimados');
+  assert.equal(envios[0].payload.tokens, null, 'gesto sin modelo: no inventa tokens');
 });
 
 test('un envío sin cuerpo legible se cuenta igual, sin inventar caracteres', { skip: !fuente && 'falta build/inject.js' }, async () => {
@@ -301,7 +301,7 @@ test('un envío sin cuerpo legible se cuenta igual, sin inventar caracteres', { 
   const envios = eventos(mundo, 'outgoing');
   assert.equal(envios.length, 1, 'el mensaje existe aunque no se pueda leer el texto');
   assert.equal(envios[0].payload.chars, 0, 'sin caracteres inventados');
-  assert.equal(envios[0].payload.tokens, 0, 'ni tokens inventados');
+  assert.equal(envios[0].payload.tokens, null, 'sin texto legible no hay conteo verificable');
   assert.equal(envios[0].payload.textFound, false, 'y se dice que no se leyó el texto');
   assert.equal(eventos(mundo, 'stream-end').length, 1, 'la respuesta se captura igual');
 });

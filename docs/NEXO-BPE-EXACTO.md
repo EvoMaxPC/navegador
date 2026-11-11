@@ -1,5 +1,9 @@
 # Corrección del conteo BPE de entrada — NEXO 0.1.33
 
+> Validación inicial del cambio BPE. La revisión posterior de selección de modelo,
+> DPU y comparación independiente del preload está documentada en
+> [Revisión modelo y DPU](NEXO-BPE-REVISION-MODELO-Y-DPU.md).
+
 ## Estado de verificación
 
 **184 comparaciones independientes con OpenAI tiktoken 0.12.0: cero discrepancias**

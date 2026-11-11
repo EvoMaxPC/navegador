@@ -204,7 +204,7 @@ function anunciarEnvio(datos = {}) {
     // Si el texto se pudo leer del cuerpo. Con `false`, `chars` es 0.
     textFound: datos.textFound !== false,
     chars: Math.max(0, Number(datos.chars) || 0),
-    tokens: Math.max(0, Number(datos.tokens) || 0),
+    tokens: Number.isFinite(datos.tokens) ? Math.max(0, datos.tokens) : null,
     model: String(datos.model || ''),
     submissionId: datos.submissionId || '',
     // Sólo llega al preload local; se quita antes del IPC y del registro.
@@ -288,7 +288,7 @@ function gestoDeEnvio(razon) {
     at: ahora,
     chars: texto.length,
     tokenText: texto,
-    tokens: estimateTokens(texto),
+    tokens: legacyProviderInputTokens(texto),
     promptHash: fingerprint(texto),
     razon,
     timer: null,
@@ -304,7 +304,7 @@ function gestoDeEnvio(razon) {
       tokens: nuevo.tokens,
       promptHash: nuevo.promptHash,
     };
-    anunciarEnvio({ ...nuevo, source: 'composer', textFound: true });
+    anunciarEnvio({ ...nuevo, messageId: nuevo.id, source: 'composer', textFound: true });
   }, ESPERA_PETICION_MS);
 
   envio.pendiente = nuevo;
@@ -331,25 +331,36 @@ function tomarEnvioPendiente() {
   return pendiente;
 }
 
-/** Lee el campo `prompt` del formulario del transporte DPU anónimo. */
-async function promptDeChatGptDpu(input, init) {
+/** GPT se cuenta exclusivamente en preload con BPE, nunca en la página con reglas. */
+function legacyProviderInputTokens(text) {
+  return site.id === 'chatgpt' ? null : estimateTokens(text);
+}
+
+/** Lee texto y modelo declarados en el formulario DPU, sin alterar el prompt. */
+async function chatGptDpuRequest(input, init) {
   let body = init?.body;
   if (body === undefined && typeof Request !== 'undefined' && input instanceof Request) {
     try { body = await input.clone().text(); } catch { body = null; }
   }
   try {
-    if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
-      return String(body.get('prompt') || '');
+    const fields = (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) ||
+      (typeof FormData !== 'undefined' && body instanceof FormData) ? body :
+      typeof body === 'string' ? new URLSearchParams(body) : null;
+    if (fields) {
+      const prompt = fields.get('prompt');
+      return {
+        prompt: typeof prompt === 'string' ? prompt : null,
+        model: gptModelFromRequest({
+          model: fields.get('model'), model_slug: fields.get('model_slug'),
+          metadata: safeJson(fields.get('metadata')),
+          conversation_mode: safeJson(fields.get('conversation_mode')),
+        }),
+      };
     }
-    if (typeof FormData !== 'undefined' && body instanceof FormData) {
-      const value = body.get('prompt');
-      return typeof value === 'string' ? value : '';
-    }
-    if (typeof body === 'string') return String(new URLSearchParams(body).get('prompt') || '');
   } catch {
-    /* el texto del gesto de envío sigue siendo una fuente de respaldo */
+    /* El compositor sigue como respaldo; no se inventa modelo ni conteo. */
   }
-  return '';
+  return {prompt:null, model:''};
 }
 
 /* ------------------------------------------------------------------ */
@@ -379,20 +390,21 @@ async function planRequest(input, init) {
   // ChatGPT sin cuenta envía el prompt y la respuesta por /conversation/updates.
   // Es un formulario DPU, no el JSON /conversation que procesa el filtro SSE.
   if (site.id === 'chatgpt' && isResponseRequest(site, url, method)) {
-    const formPrompt = await promptDeChatGptDpu(input, init);
+    const form = await chatGptDpuRequest(input, init);
     const gesture = envio.pendiente || (
       envio.porGesto && Date.now() - envio.porGesto.at <= VENTANA_ENLACE_MS ? envio.porGesto : null
     );
-    const prompt = formPrompt || gesture?.tokenText || '';
+    const prompt = form.prompt ?? gesture?.tokenText ?? '';
     return {
       chat: true,
       send: true,
       dpu: true,
-      promptChars: gesture?.chars || prompt.length,
+      promptChars: prompt.length,
       promptText: prompt,
-      promptTokens: gesture?.tokens ?? estimateTokens(prompt),
-      model: '',
-      promptHash: gesture?.promptHash || (prompt ? fingerprint(prompt) : ''),
+      textFound: form.prompt !== null || typeof gesture?.tokenText === 'string',
+      promptTokens: null,
+      model: form.model,
+      promptHash: prompt ? fingerprint(prompt) : '',
       url,
     };
   }
@@ -430,7 +442,7 @@ async function planRequest(input, init) {
     send: true,
     promptChars: prompt.length,
     promptText: prompt,
-    promptTokens: estimateTokens(prompt),
+    promptTokens: legacyProviderInputTokens(prompt),
     model: gptModelFromRequest(parsed),
     submissionId: userMessageIdentity(parsed),
     promptHash: fingerprint(prompt),
@@ -799,25 +811,25 @@ if (!window.__NEXO_HOOKED__) {
     let messageId = null;
     if (prepared.chat && prepared.send !== false) {
       const gesto = tomarEnvioPendiente();
-      const chars = prepared.promptChars || gesto?.chars || 0;
+      const chars = prepared.promptChars ?? gesto?.chars ?? 0;
       const countedGesture = yaContadoPorGesto(chars);
       if (countedGesture) {
         // Ya lo contó el gesto: la respuesta tiene que usar su identificador.
         messageId = countedGesture;
         anunciarEnvio({messageId, source:'request', chars, tokenText:prepared.promptText ?? '',
-          model:prepared.model || '', submissionId:prepared.submissionId || '', promptHash:prepared.promptHash || '', textFound:typeof prepared.promptText === 'string', url});
+          model:prepared.model || '', submissionId:prepared.submissionId || '', promptHash:prepared.promptHash || '', textFound:prepared.textFound ?? typeof prepared.promptText === 'string', url});
       } else {
         messageId = anunciarEnvio({
           messageId: gesto?.id,
           source: 'request',
           mediated: prepared.mediated,
           chars,
-          tokenText: prepared.promptText || gesto?.tokenText || '',
-          tokens: prepared.promptTokens ?? gesto?.tokens ?? 0,
+          tokenText: prepared.promptText ?? gesto?.tokenText ?? '',
+          tokens: prepared.promptTokens ?? gesto?.tokens ?? null,
           model: prepared.model || '',
           submissionId: prepared.submissionId || '',
           promptHash: prepared.promptHash || gesto?.promptHash || '',
-          textFound: Boolean(prepared.promptChars),
+          textFound: prepared.textFound ?? typeof prepared.promptText === 'string',
           url,
         }).messageId;
       }

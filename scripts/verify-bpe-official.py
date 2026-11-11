@@ -48,8 +48,9 @@ import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 const require=createRequire(process.cwd()+'/package.json');
 const {encodeGptText,countGptTokens,encodingForModel}=require('./src/core/gptTokens.cjs');
+const {outgoingMetadata}=require('./src/preload/token-metadata.cjs');
 const rows=JSON.parse(readFileSync(0,'utf8'));
-process.stdout.write(JSON.stringify(rows.map(r=>({...r,nexoIds:encodeGptText(r.text,r.model),nexo:countGptTokens(r.text,r.model),resolved:encodingForModel(r.model)}))));
+process.stdout.write(JSON.stringify(rows.map(r=>{const p=outgoingMetadata({host:'chatgpt.com',model:r.model,tokenText:r.text});return {...r,nexoIds:encodeGptText(r.text,r.model),nexo:countGptTokens(r.text,r.model),resolved:encodingForModel(r.model),preload:p.tokens,preloadEncoding:p.tokenEncoding};})));
 """
 result = subprocess.run(['node','--input-type=module','-e',js],cwd=ROOT,input=json.dumps(rows),capture_output=True,text=True,check=True)
 rows = json.loads(result.stdout)
@@ -64,9 +65,9 @@ with tempfile.TemporaryDirectory(prefix='nexo-official-tiktoken-') as cache:
         ids = tiktoken.get_encoding(row['encoding']).encode(row['text'],disallowed_special=())
         row['officialIds']=ids
         row['official']=len(ids)
-        row['match']=row['nexo']==len(ids) and row['nexoIds']==ids and row['resolved']==row['encoding']
+        row['match']=row['nexo']==len(ids) and row['nexoIds']==ids and row['resolved']==row['encoding'] and row['preload']==len(ids) and row['preloadEncoding']==row['encoding']
         row['textUtf8Sha256']=hashlib.sha256(row['text'].encode('utf-8')).hexdigest()
-report={'formula':'T = length(encode_Em(S_original))','tiktoken':importlib.metadata.version('tiktoken'),
+report={'comparisonScope':'core IDs and count plus actual preload count, against official tiktoken', 'formula':'T = length(encode_Em(S_original))','tiktoken':importlib.metadata.version('tiktoken'),
  'gpt-tokenizer':json.loads((ROOT/'node_modules/gpt-tokenizer/package.json').read_text())['version'],
  'specialTokenPolicy':'ordinary text; disallowed_special=() / disallowedSpecial=empty Set',
  'rankSha256':HASHES,'models':MODELS,'comparisons':len(rows),'discrepancies':sum(not r['match'] for r in rows),'rows':rows}

@@ -175,7 +175,12 @@ export function gptModelFromRequest(payload) {
     payload.metadata?.model,
     payload.conversation_mode?.model,
   ];
-  return String(candidates.find((value) => typeof value === 'string' && value.trim()) || '');
+  const declared = candidates.filter(value => typeof value === 'string' && value.trim());
+  // Selectores de enrutamiento no identifican un modelo. Un slug concreto del
+  // mismo cuerpo tiene prioridad; si sólo hay selectores, se conserva el dato
+  // para que el contador siga declarándolo desconocido, sin inventar un modelo.
+  const selectors = new Set(['auto', 'automatic', 'default', 'dynamic', 'unknown']);
+  return declared.find(value => !selectors.has(value.trim().toLowerCase())) || declared[0] || '';
 }
 
 /** Diversidad léxica: tipos / tokens. Muy bajo => degeneración. */

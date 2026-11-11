@@ -9,6 +9,7 @@ información para corregir respuestas.
 original, sin recortar espacios ni normalizar Unicode. Encoding por modelo
 verificado; desconocidos y estimaciones separados. Comparación independiente:
 184 casos contra OpenAI tiktoken, sin discrepancias en IDs o longitud.
+[Revisión: selección de modelo, DPU y preload verificado](docs/NEXO-BPE-REVISION-MODELO-Y-DPU.md) ·
 [Informe, causa raíz y límites](docs/NEXO-BPE-EXACTO.md) ·
 [Textos exactos, IDs y resultados oficiales](docs/BPE-OFICIAL-COMPARACION.json).
 

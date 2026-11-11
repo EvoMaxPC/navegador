@@ -717,3 +717,16 @@ test('el contador de salida recalcula en el proceso principal si el preload envÃ
   const fin = await stats();
   assert.ok(fin.outputTokens > antes.outputTokens, 'el proceso principal calcula tokens aunque el preload informe cero');
 });
+
+
+test('selector auto no tapa un modelo concreto del mismo cuerpo; no inventa modelo si falta', () => {
+  for (const concrete of [
+    {model_slug:'gpt-5'}, {metadata:{model_slug:'gpt-5'}},
+    {metadata:{model:'gpt-5'}}, {conversation_mode:{model:'gpt-5'}},
+  ]) assert.equal(gptModelFromRequest({model:'auto',...concrete}), 'gpt-5');
+  assert.equal(gptModelFromRequest({model:'default',model_slug:'auto',metadata:{model:'gpt-4-turbo'}}),'gpt-4-turbo');
+  assert.equal(gptModelFromRequest({model:'gpt-4o',metadata:{model_slug:'gpt-5'}}),'gpt-4o');
+  assert.equal(gptModelFromRequest({model:'auto'}),'auto');
+  assert.equal(gptModelFromRequest({model:'auto',metadata:{model_slug:'auto'}}),'auto');
+  assert.equal(gptModelFromRequest({model:42,metadata:{model_slug:null}}),'');
+});

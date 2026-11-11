@@ -1,0 +1,220 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { outgoingMetadata } = require('../src/preload/token-metadata.cjs');
+const official = JSON.parse(
+  readFileSync(
+    new URL('../docs/BPE-OFICIAL-COMPARACION.json', import.meta.url),
+    'utf8',
+  ),
+);
+const reference = official.rows.find(
+  (row) => row.encoding === 'o200k_base' && row.case === 'bordes',
+);
+function capturePage() {
+  const events = [],
+    listeners = new Map(),
+    windowListeners = [],
+    wire = [];
+  const editor = { tagName: 'TEXTAREA', value: reference.text };
+  const document = {
+    querySelector: () => editor,
+    querySelectorAll: () => [],
+    addEventListener: (n, f) => listeners.set(n, f),
+  };
+  const window = {
+    __NEXO_CONFIG__: { host: 'chatgpt.com', enabled: true, settings: {} },
+    addEventListener: (name, fn) => {
+      if (name === 'message') windowListeners.push(fn);
+    },
+    postMessage(message) {
+      events.push(message);
+      if (message.__nexo === 'call')
+        queueMicrotask(() =>
+          windowListeners.forEach((fn) =>
+            fn({
+              source: window,
+              data: {
+                __nexo: 'reply',
+                id: message.id,
+                payload: { text: message.payload?.prompt },
+              },
+            }),
+          ),
+        );
+    },
+    fetch: async (input, init) => {
+      wire.push({ input, init });
+      return new Response(null, { status: 204 });
+    },
+  };
+  const location = {
+    href: 'https://chatgpt.com/c/input-route',
+    hostname: 'chatgpt.com',
+    protocol: 'https:',
+    pathname: '/c/input-route',
+  };
+  vm.runInNewContext(
+    readFileSync(new URL('../build/inject.js', import.meta.url), 'utf8'),
+    {
+      window,
+      document,
+      location,
+      console,
+      setTimeout,
+      clearTimeout,
+      Response,
+      Request,
+      Headers,
+      URL,
+      URLSearchParams,
+      FormData,
+      TextEncoder,
+      TextDecoder,
+      ReadableStream,
+      TransformStream,
+    },
+  );
+  return {
+    window,
+    events,
+    listeners,
+    wire,
+    editor,
+    outgoing: () => events.filter((e) => e.type === 'outgoing'),
+  };
+}
+function assertExact(raw, text = reference.text) {
+  assert.equal(
+    raw.tokens,
+    null,
+    'la página NO genera estimación de entrada GPT',
+  );
+  assert.equal(raw.tokenText, text);
+  assert.equal(raw.model, 'gpt-5');
+  const metadata = outgoingMetadata(raw);
+  assert.equal(metadata.tokens, reference.official);
+  assert.equal(metadata.tokenEncoding, 'o200k_base');
+  assert.equal(metadata.tokenExact, true);
+}
+test('JSON: model auto con metadata gpt-5 llega al preload con el modelo concreto y texto original', async () => {
+  const p = capturePage();
+  const body = JSON.stringify({
+    action: 'next',
+    model: 'auto',
+    metadata: { model_slug: 'gpt-5' },
+    messages: [
+      {
+        id: 'm1',
+        author: { role: 'user' },
+        content: { parts: [reference.text] },
+      },
+    ],
+  });
+  await p.window.fetch('/backend-api/f/conversation', { method: 'POST', body });
+  assertExact(p.outgoing()[0].payload);
+  assert.equal(p.wire[0].init.body, body);
+});
+for (const format of [
+  'URLSearchParams',
+  'FormData',
+  'urlencoded-string',
+  'Request',
+]) {
+  test(`DPU ${format}: modelo explícito en metadata usa BPE oficial; cuerpo intacto`, async () => {
+    const p = capturePage();
+    const params = {
+      prompt: reference.text,
+      model: 'auto',
+      metadata: JSON.stringify({ model_slug: 'gpt-5' }),
+    };
+    let body = format === 'FormData' ? new FormData() : new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) body.append(key, value);
+    if (format === 'urlencoded-string' || format === 'Request')
+      body = body.toString();
+    if (format === 'Request') {
+      const request = new Request(
+        'https://chatgpt.com/unauth-mweb/conversation/updates',
+        { method: 'POST', body },
+      );
+      await p.window.fetch(request);
+      assert.equal(await p.wire[0].input.clone().text(), body);
+    } else {
+      await p.window.fetch('/unauth-mweb/conversation/updates', {
+        method: 'POST',
+        body,
+      });
+      assert.equal(p.wire[0].init.body, body);
+    }
+    assertExact(p.outgoing()[0].payload);
+  });
+}
+test('DPU sin modelo conserva null antes y después del preload: nunca estima ni inventa GPT-5', async () => {
+  const p = capturePage(),
+    body = new URLSearchParams({ prompt: reference.text });
+  await p.window.fetch('/unauth-mweb/conversation/updates', {
+    method: 'POST',
+    body,
+  });
+  const raw = p.outgoing()[0].payload;
+  assert.equal(raw.tokens, null);
+  assert.equal(raw.tokenText, reference.text);
+  assert.equal(raw.model, '');
+  const result = outgoingMetadata(raw);
+  assert.equal(result.tokens, null);
+  assert.equal(result.tokenExact, false);
+  assert.equal(result.tokenMethod, 'unknown-model');
+});
+test('DPU con texto vacío conocido devuelve 0; prompt ausente no se presenta como vacío conocido', async () => {
+  for (const [present, expected] of [
+    [true, 0],
+    [false, null],
+  ]) {
+    const p = capturePage(),
+      body = new URLSearchParams({ model: 'gpt-5' });
+    if (present) body.set('prompt', '');
+    await p.window.fetch('/unauth-mweb/conversation/updates', {
+      method: 'POST',
+      body,
+    });
+    const raw = p.outgoing()[0].payload;
+    assert.equal(raw.tokenText, '');
+    assert.equal(raw.tokens, null);
+    const result = outgoingMetadata(raw);
+    assert.equal(result.tokens, expected);
+    assert.equal(result.tokenExact, present);
+  }
+});
+test('compositor alternativo sin solicitud no estima; solicitud tardía aporta el modelo y BPE oficial', async () => {
+  const p = capturePage();
+  p.listeners.get('submit')();
+  await new Promise((r) => setTimeout(r, 2700));
+  const gesture = p.outgoing()[0].payload;
+  assert.equal(gesture.tokens, null);
+  assert.equal(gesture.tokenText, reference.text);
+  assert.equal(outgoingMetadata(gesture).tokens, null);
+  const body = JSON.stringify({
+    action: 'next',
+    model: 'auto',
+    metadata: { model_slug: 'gpt-5' },
+    messages: [
+      {
+        id: 'late-1',
+        author: { role: 'user' },
+        content: { parts: [reference.text] },
+      },
+    ],
+  });
+  await p.window.fetch('/backend-api/f/conversation', { method: 'POST', body });
+  const request = p.outgoing().at(-1).payload;
+  assert.equal(
+    request.messageId,
+    gesture.messageId,
+    'el conteo se completa sobre el mismo envío',
+  );
+  assertExact(request);
+  assert.equal(p.editor.value, reference.text);
+});

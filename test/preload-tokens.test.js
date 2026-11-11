@@ -3,28 +3,87 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
-import { countTokens as countO200k } from 'gpt-tokenizer';
-import { countTokens as countCl100k } from 'gpt-tokenizer/encoding/cl100k_base';
+// Referencias generadas independientemente por OpenAI tiktoken, no por la biblioteca JS.
+const official = JSON.parse(
+  readFileSync(
+    new URL('../docs/BPE-OFICIAL-COMPARACION.json', import.meta.url),
+    'utf8',
+  ),
+);
+const cases = [
+  'normal',
+  'bordes',
+  'tabulaciones',
+  'saltos',
+  'CRLF',
+  'emoji',
+  'emoji-combinado',
+  'NFD',
+  'acentos',
+  'vacio',
+];
 
-const requireBridge = createRequire(new URL('../src/preload/bridge.cjs', import.meta.url));
+const requireBridge = createRequire(
+  new URL('../src/preload/bridge.cjs', import.meta.url),
+);
 const { outgoingMetadata } = requireBridge('./token-metadata.cjs');
 
-for (const [model, count] of [['gpt-5', countO200k], ['gpt-4-turbo', countCl100k]]) {
-  test(`el preload conserva BPE para ${model} y no reenvía el texto del envío`, () => {
-    const tokenText = 'Hola, ¿cómo estás?\nUna segunda línea para probar el texto exacto.';
-    const payload = { host: 'chatgpt.com', model, tokenText, tokens: 1, messageId: 'msg-1' };
-    const result = outgoingMetadata(payload);
-    assert.equal(result.tokens, count(tokenText));
-    assert.equal(result.messageId, payload.messageId);
-    assert.ok(!('tokenText' in result));
-    assert.equal(payload.tokenText, tokenText, 'no muta el evento original');
-  });
+for (const [model, encoding] of [
+  ['gpt-5', 'o200k_base'],
+  ['gpt-4-turbo', 'cl100k_base'],
+]) {
+  for (const name of cases) {
+    const reference = official.rows.find(
+      (row) => row.encoding === encoding && row.case === name,
+    );
+    test(`preload frente a OpenAI tiktoken: ${model} / ${name}`, () => {
+      const tokenText = reference.text;
+      const payload = {
+        host: 'chatgpt.com',
+        model,
+        tokenText,
+        tokens: 999,
+        messageId: 'msg-1',
+      };
+      const result = outgoingMetadata(payload);
+      assert.equal(result.tokens, reference.official);
+      assert.equal(result.tokens, reference.officialIds.length);
+      assert.equal(result.tokenEncoding, encoding);
+      assert.equal(result.tokenExact, true);
+      assert.equal(result.messageId, payload.messageId);
+      assert.ok(!('tokenText' in result));
+      assert.equal(payload.tokenText, tokenText, 'no muta el texto original');
+    });
+  }
 }
 
 test('el preload conserva el conteo existente de otros proveedores y del formato viejo', () => {
-  assert.deepEqual(outgoingMetadata({ host: 'claude.ai', tokenText: 'hola', tokens: 8 }), { host: 'claude.ai', tokens: 8,tokenExact:false,tokenEncoding:null,tokenMethod:'legacy-estimate' });
-  assert.deepEqual(outgoingMetadata({ host: 'chatgpt.com', tokens: 7 }), { host: 'chatgpt.com', tokens: 7,tokenExact:false,tokenEncoding:null,tokenMethod:'unverified' });
-  assert.equal(outgoingMetadata({ host: 'chatgpt.com', model:'gpt-5', tokenText: '', tokens: 20 }).tokens, 0);
+  assert.deepEqual(
+    outgoingMetadata({ host: 'claude.ai', tokenText: 'hola', tokens: 8 }),
+    {
+      host: 'claude.ai',
+      tokens: 8,
+      tokenExact: false,
+      tokenEncoding: null,
+      tokenMethod: 'legacy-estimate',
+    },
+  );
+  assert.deepEqual(outgoingMetadata({ host: 'chatgpt.com', tokens: 7 }), {
+    host: 'chatgpt.com',
+    tokens: 7,
+    tokenExact: false,
+    tokenEncoding: null,
+    tokenMethod: 'unverified',
+  });
+  assert.equal(
+    outgoingMetadata({
+      host: 'chatgpt.com',
+      model: 'gpt-5',
+      tokenText: '',
+      tokens: 20,
+    }).tokens,
+    0,
+  );
 });
 
 test('el bridge real convierte el aviso outgoing antes de enviarlo por IPC', async () => {
@@ -35,20 +94,45 @@ test('el bridge real convierte el aviso outgoing antes de enviarlo por IPC', asy
     sendSync: () => ({ enabled: false }),
     send: (channel, payload) => sent.push({ channel, payload }),
   };
-  const window = { addEventListener: (name, handler) => handlers.set(name, handler) };
+  const window = {
+    addEventListener: (name, handler) => handlers.set(name, handler),
+  };
   const context = vm.createContext({
-    require: (name) => name === 'electron' ? { ipcRenderer, webFrame: {} } : requireBridge(name),
+    require: (name) =>
+      name === 'electron' ? { ipcRenderer, webFrame: {} } : requireBridge(name),
     __dirname: new URL('../src/preload/', import.meta.url).pathname,
-    window, location: { protocol: 'https:', hostname: 'chatgpt.com', href: 'https://chatgpt.com/' }, console,
+    window,
+    location: {
+      protocol: 'https:',
+      hostname: 'chatgpt.com',
+      href: 'https://chatgpt.com/',
+    },
+    console,
   });
-  vm.runInContext(readFileSync(new URL('../src/preload/bridge.cjs', import.meta.url), 'utf8'), context);
-  const text = 'Texto de una pregunta enviada sin modificar la petición original.';
-  await handlers.get('message')({ source: window, data: {
-    __nexo: 'event', type: 'outgoing', payload: { host: 'chatgpt.com', model: 'gpt-5', tokenText: text, tokens: 0 },
-  } });
+  vm.runInContext(
+    readFileSync(new URL('../src/preload/bridge.cjs', import.meta.url), 'utf8'),
+    context,
+  );
+  const reference = official.rows.find(
+    (row) => row.encoding === 'o200k_base' && row.case === 'emoji-combinado',
+  );
+  const text = reference.text;
+  await handlers.get('message')({
+    source: window,
+    data: {
+      __nexo: 'event',
+      type: 'outgoing',
+      payload: {
+        host: 'chatgpt.com',
+        model: 'gpt-5',
+        tokenText: text,
+        tokens: 0,
+      },
+    },
+  });
   assert.equal(sent.length, 1);
   assert.equal(sent[0].channel, 'nexo:event');
-  assert.equal(sent[0].payload.payload.tokens, countO200k(text));
+  assert.equal(sent[0].payload.payload.tokens, reference.official);
   assert.ok(!('tokenText' in sent[0].payload.payload));
 });
 
