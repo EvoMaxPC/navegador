@@ -23,22 +23,22 @@ exports.resolveModelForEncoding = function resolveModelForEncoding(model) {
     return { model: key, encoding: models[key], exact: true };
   }
 
-  const gptMatch = key.match(/^gpt-(\\d+(?:\\.\\d+)?)(?:$|-)/);
-  const oMatch = key.match(/^o(\\d+)(?:$|-)/);
+  const gptMatch = key.match(/^gpt-(\d+(?:\.\d+)?)(?:$|-)/);
+  const oMatch = key.match(/^o(\d+)(?:$|-)/);
   if (!gptMatch && !oMatch) return null;
 
   const requested = Number((gptMatch || oMatch)[1]);
   const candidates = Object.keys(models).filter((candidate) =>
     gptMatch
-      ? /^gpt-\\d+(?:\\.\\d+)?(?:$|-)/.test(candidate)
-      : /^o\\d+(?:$|-)/.test(candidate),
+      ? /^gpt-\d+(?:\.\d+)?(?:$|-)/.test(candidate)
+      : /^o\d+(?:$|-)/.test(candidate),
   );
   if (!candidates.length) return null;
 
   const scored = candidates.map((candidate) => {
     const match = candidate.match(gptMatch
-      ? /^gpt-(\\d+(?:\\.\\d+)?)(?:$|-)/ 
-      : /^o(\\d+)(?:$|-)/);
+      ? /^gpt-(\d+(?:\.\d+)?)(?:$|-)/ 
+      : /^o(\d+)(?:$|-)/);
     return { model: candidate, distance: Math.abs(Number(match[1]) - requested) };
   }).sort((a, b) => a.distance - b.distance || a.model.localeCompare(b.model));
   const nearest = scored[0].model;
