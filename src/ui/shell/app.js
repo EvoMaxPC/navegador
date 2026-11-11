@@ -1,4 +1,5 @@
 import { tokenCounterView } from './tokenCounterView.js';
+import { createTiktokenTool } from './tiktokenTool.js';
 import { createWormholeChrome } from './wormholeChrome.js';
 import { createRepetitionView } from './repetition.js';
 import { isEvoMemoryEnabled } from '../../core/settings.js';
@@ -1827,6 +1828,7 @@ visualChrome=createWormholeChrome({browser:els.browser,leftButton:document.getEl
 let uiZoomBusy=false;
 document.querySelectorAll('[data-ui-zoom]').forEach(button=>button.addEventListener('click',async()=>{if(uiZoomBusy)return;uiZoomBusy=true;try{const steps=[.75,.8,.9,1,1.1,1.25,1.5],current=browserTools.uiZoom,index=steps.reduce((best,v,i)=>Math.abs(v-current)<Math.abs(steps[best]-current)?i:best,0);const next=button.dataset.uiZoom==='reset'?1:steps[Math.max(0,Math.min(steps.length-1,index+(button.dataset.uiZoom==='in'?1:-1)))];await browserTools.setUIZoom(next);}finally{uiZoomBusy=false;}}));
 understandingPanel=createUnderstandingPanel({nexo,root:document.getElementById('panel-understanding'),activeTab});
+createTiktokenTool({ nexo, root: document.getElementById('panel-tiktoken') });
 document.getElementById('commandsButton').addEventListener('click',()=>runBrowserCommand({type:'command-center'}));
 document.getElementById('keyboardSettings').addEventListener('click',()=>runBrowserCommand({type:'keyboard-settings'}));
 document.getElementById('toolbarSettings').addEventListener('click',()=>runBrowserCommand({type:'toolbar-settings'}));
