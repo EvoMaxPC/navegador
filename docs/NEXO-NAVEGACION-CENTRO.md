@@ -80,14 +80,16 @@ real de ChatGPT.
 | `src/ui/shell/navigationHub.js` | Sección «Conversar mejor» y diálogo «Continuar la respuesta». |
 | `src/ui/shell/index.html`, `navigationHub.css` | Solapa de atajos y estilos de la barra. |
 | `src/nav/shortcuts.js`, `src/main/menu.js` | Ctrl+Shift+P y entradas de menú. |
+| `src/ui/shell/understandingPanel.js` | Entrega explícita del contexto: cuadro o portapapeles, con límite. |
 | `test/prompt-library.test.js`, `test/turn-followup.test.js` | 16 pruebas del contrato y del siguiente paso. |
+| `test/conversation-optimization-panel.test.js` | 2 pruebas nuevas de la entrega (gesto, error y límite). |
 | `test/probe-scripts.test.js` | 3 pruebas de los guiones de la sonda Electron. |
 | `scripts/probes/repetition-electron.cjs` | Guiones aislados y diagnóstico del paso que falló. |
 | `dev/preview.js` | `nexo.prompts` y gancho de demostración de la barra. |
 
 ## Verificación
 
-- Suite completa tras la etapa 2: **1691 pruebas, 1690 aprobadas, 0 fallos,
+- Suite completa tras la etapa 2: **1693 pruebas, 1692 aprobadas, 0 fallos,
   1 omitida** (la misma omitida previa). `npm run verify` (empaquetado de la capa
   + suite) también pasa.
 - Los 13 fallos que traían los commits remotos de contadores se corrigieron en
@@ -150,6 +152,21 @@ interfaz. Ahora el principal publica `nexo:turn-followup` (sólo si hay algo
 Los avisos aparecen sólo en la pestaña activa; las demás quedan marcadas para
 encontrarlas al cambiar. El evento no incluye el texto de la respuesta ni se
 reenvía a la página.
+
+### Comprensión · entrega del contexto optimizado
+
+El panel de Comprensión sigue siendo de sólo lectura sobre la conversación:
+no reemplaza mensajes ni envía nada. Lo que cambió es que el resultado medido
+ya se puede usar con un gesto:
+
+- **Escribir en el cuadro**: inserta el contexto optimizado en el compositor del
+  sitio para revisarlo y enviarlo a mano.
+- **Copiar el contexto**: lo deja en el portapapeles, con el mismo aviso.
+- Si supera los 20 000 caracteres que admite el cuadro, la escritura se
+  deshabilita y se explica por qué: nunca se inserta una parte como si fuera
+  el total.
+- Un fallo de la pestaña o del portapapeles se informa tal cual, sin presentar
+  la entrega como hecha.
 
 ## Límites explícitos
 
