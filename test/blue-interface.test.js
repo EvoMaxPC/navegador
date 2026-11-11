@@ -7,8 +7,8 @@ const shell = read('src/ui/shell/index.html');
 const start = read('src/ui/start/index.html');
 const css = read('src/ui/shell/styles.css');
 
-test('el espacio conserva las nueve herramientas y sus paneles accesibles', () => {
-  for (const panel of ['activity', 'repetition', 'memory', 'history', 'bookmarks', 'downloads', 'sites', 'settings', 'about']) {
+test('el espacio conserva sus herramientas salvo la pestaña Repetición retirada', () => {
+  for (const panel of ['activity', 'understanding', 'work', 'memory', 'history', 'bookmarks', 'downloads', 'sites', 'settings', 'about']) {
     assert.ok(shell.includes(`id="panel-tab-${panel}"`));
     assert.ok(shell.includes(`id="panel-${panel}"`));
   }
@@ -36,21 +36,19 @@ test('los destinos sin configurar y las extensiones no prometen una función ine
 });
 
 test('los recursos espaciales son locales y públicos sin ampliar la lista permitida', () => {
-  for (const path of ['src/ui/assets/nexo-mark.svg', 'src/ui/assets/orbit.svg']) {
+  for (const path of ['src/ui/assets/identity/nexo-universe.svg']) {
     assert.equal(isPublicAssetPath(path), true);
-    assert.ok(read(path).length < 6000);
+    assert.ok(read(path).length < 40000);
     assert.ok(!read(path).includes('<script'));
     assert.ok(!read(path).includes('<image'));
   }
 });
 
-test('azul oscuro, navegación adaptable y movimiento reducido sin animación permanente', () => {
-  for (const sheet of [css, read('src/ui/start/start.css')]) {
+test('identidad espacial adaptable: movimiento reducido desactiva animaciones orbitales y transiciones', () => {
+  for (const sheet of [css, read('src/ui/start/start.css'),read('src/ui/shell/wormhole.css'),read('src/ui/start/wormhole-start.css')]) {
     assert.match(sheet, /prefers-reduced-motion/);
     assert.match(sheet, /max-width:\s*\d+px/);
-    assert.ok(!sheet.includes('infinite'));
-    assert.ok(!sheet.includes('backdrop-filter'));
-    assert.match(sheet, /#168bff/i);
+    assert.match(sheet, /animation:\s*none\s*!important/);
   }
   assert.match(css, /color-scheme: dark/);
   assert.ok(!css.includes('color-scheme: light'));

@@ -183,6 +183,7 @@ export function createBrowserTools(api) {
       return false;
     }
     prefs = result.prefs;
+    api.onPreferences?.(prefs);
     renderToolbar();
     return true;
   }
@@ -787,6 +788,7 @@ export function createBrowserTools(api) {
   nexo.on('nexo:reading', reading);
   nexo.on('nexo:browser-prefs', (next) => {
     prefs = { ...prefs, ...next };
+    api.onPreferences?.(prefs);
     renderToolbar();
   });
   function rectangularCapture() {
@@ -987,6 +989,9 @@ export function createBrowserTools(api) {
   }
   return {
     handle,
+    setRightMenuMode:mode=>persist({...prefs,rightMenuMode:mode}),
+    setUIZoom:level=>persist({...prefs,uiZoom:level}),
+    get uiZoom(){return prefs.uiZoom||1;},
     tabMenu,
     refreshLayout,
     visibleTabs,
@@ -1026,6 +1031,7 @@ export function createBrowserTools(api) {
       } catch {
         notice('No se pudieron cargar las preferencias de herramientas.');
       }
+      api.onPreferences?.(prefs);
       renderToolbar();
     },
   };

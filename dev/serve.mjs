@@ -51,6 +51,7 @@ const server = createServer(async (req, res) => {
     if (pathname === '/browser/' || pathname === '/browser') {
       let html = await readFile(join(ROOT, 'src/ui/shell/index.html'), 'utf8');
       html = html.replaceAll('../assets/', '/src/ui/assets/').replace('href="./styles.css"', 'href="/src/ui/shell/styles.css"')
+        .replace('href="./workDossier.css"', 'href="/src/ui/shell/workDossier.css"').replace('href="./wormhole.css"', 'href="/src/ui/shell/wormhole.css"')
         .replace('<script type="module" src="./app.js"></script>', '<script type="module" src="/dev/preview.js"></script><script type="module" src="/src/ui/shell/app.js"></script>');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
       res.end(html); return;

@@ -337,6 +337,8 @@ function isAuthPopup(url, fromAiSite = false) {
 
 function createWindow() {
   win = new BrowserWindow({
+    title: 'NEXO AI',
+    icon: join(ROOT, 'src/ui/assets/identity', process.platform === 'win32' ? 'NEXO-Wormhole.ico' : 'NEXO-Wormhole.png'),
     width: 1440,
     height: 920,
     minWidth: 940,
@@ -359,6 +361,7 @@ function createWindow() {
       spellcheck: false,
     },
   });
+  win.webContents.once('did-finish-load', () => win?.webContents.setZoomFactor(advancedBrowser?.preferences.uiZoom || 1));
 
   advancedBrowser?.attachShell(win.webContents);
   workDossier?.attachShell(win.webContents);

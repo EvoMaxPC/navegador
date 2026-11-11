@@ -84,8 +84,8 @@ await mkdir(config.out, { recursive: true });
 
 const win32metadata = {
   CompanyName: 'Nexo',
-  FileDescription: `${APP_NAME} — navegador con capa de mediación`,
-  ProductName: APP_NAME,
+  FileDescription: 'NEXO AI — Tu portal al Mundo de la IA',
+  ProductName: 'NEXO AI',
   InternalName: EXE_NAME,
   OriginalFilename: `${EXE_NAME}.exe`,
 };

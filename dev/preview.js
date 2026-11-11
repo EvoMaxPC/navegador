@@ -1,13 +1,16 @@
+import {browserPreferences} from '/src/nav/browserPreferences.js';
 /** Adaptador de vista web. No se empaqueta ni sustituye Electron en producción. */
 import { DEFAULT_SETTINGS, mergeSettings } from '/src/core/settings.js';
 const listeners = new Map();
 let settings = structuredClone(DEFAULT_SETTINGS);
+let previewPrefs;try{previewPrefs=browserPreferences(JSON.parse(localStorage.getItem('nexo-design-preview')||'{}'));}catch{previewPrefs=browserPreferences();}
+document.documentElement.style.zoom=previewPrefs.uiZoom;
 const empty = async () => [];
 const result = async () => ({ ok: true, removed: 0 });
 window.nexo = {
   understanding: Object.fromEntries(['read','edit','recall','contexts','bind','clear'].map(k=>[k,async()=>({ok:false,error:'La comprensión persistente se ejecuta en Electron; esta vista no la simula.'})])),
   work: Object.fromEntries(['read','mutate','attach','capture','clear','export'].map(k=>[k,async()=>({ok:false,error:'Los expedientes usan el almacenamiento local de Electron. No se simula persistencia en esta vista web.'})])),
-  advanced: {preferences:async()=>null,setPreferences:async()=>({ok:false,error:'Las preferencias se guardan en Electron, no en esta vista UI.'}),action:async()=>({ok:false,error:'Herramienta disponible sólo en la aplicación Electron.'}),context:async()=>({ok:false,error:'No hay un evento de contexto nativo en la vista UI.'})},
+  advanced: {preferences:async()=>previewPrefs,setPreferences:async next=>{previewPrefs=browserPreferences(next);localStorage.setItem('nexo-design-preview',JSON.stringify(previewPrefs));document.documentElement.style.zoom=previewPrefs.uiZoom;listeners.get('nexo:browser-prefs')?.(previewPrefs);return {ok:true,prefs:previewPrefs};},action:async()=>({ok:false,error:'Herramienta disponible sólo en la aplicación Electron.'}),context:async()=>({ok:false,error:'No hay un evento de contexto nativo en la vista UI.'})},
   getConfig: async () => ({ version: '0.1.33 · vista web', pagePreload: null }),
   getSettings: async () => settings,
   setSettings: async (patch) => (settings = mergeSettings(settings, patch)),

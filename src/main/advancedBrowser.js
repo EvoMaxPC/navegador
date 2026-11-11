@@ -651,6 +651,7 @@ export function installAdvancedBrowser({
         });
       await saving;
       prefs = next;
+      for(const window of BrowserWindow.getAllWindows())if(!window.webContents.isDestroyed()&&window.webContents.getURL()===SHELL_URL)window.webContents.setZoomFactor(prefs.uiZoom);
       for (const { contents } of guests.values())
         if (!contents.isDestroyed()) applySpelling(contents);
       onPreferences?.(prefs);

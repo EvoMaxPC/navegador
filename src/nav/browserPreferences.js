@@ -5,6 +5,8 @@ import {
   shortcutConflicts,
 } from './shortcuts.js';
 export const DEFAULT_BROWSER_PREFS = {
+  rightMenuMode: 'auto',
+  uiZoom: 1,
   toolbar: ['downloads', 'memory', 'workspaces'],
   shortcuts: {},
   search: 'duckduckgo',
@@ -38,6 +40,11 @@ export function browserPreferences(input = {}) {
   if (!workspaces.some((w) => w.id === 'main'))
     workspaces.unshift({ id: 'main', name: 'Principal' });
   return {
+    rightMenuMode: input.rightMenuMode === 'fixed' ? 'fixed' : 'auto',
+    uiZoom:
+      typeof input.uiZoom === 'number' && Number.isFinite(input.uiZoom)
+        ? Math.min(1.5, Math.max(0.75, Math.round(input.uiZoom * 100) / 100))
+        : 1,
     toolbar,
     shortcuts,
     search: input.search === 'google' ? 'google' : 'duckduckgo',

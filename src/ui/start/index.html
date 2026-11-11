@@ -6,20 +6,17 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; object-src 'none'; form-action https://duckduckgo.com;" />
   <title>Inicio · Nexo</title>
   <link rel="stylesheet" href="./start.css" />
+  <link rel="stylesheet" href="./wormhole-start.css" />
+  <link rel="icon" href="../assets/identity/NEXO-Wormhole.ico" />
 </head>
 <body>
   <main>
     <section class="welcome" aria-labelledby="welcomeTitle">
-      <p class="eyebrow"><span></span>BLACK & ELECTRIC BLUE</p>
-      <h1 id="welcomeTitle"><img src="../assets/nexo-mark.svg" alt="" />NEXO</h1>
-      <p class="tagline">NAVEGADOR DE NUEVA GENERACIÓN</p>
-      <p class="intro">Tu mundo. Más cerca que nunca.</p>
-      <form id="startSearch" action="https://duckduckgo.com/" method="get" role="search">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
-        <input id="searchInput" type="search" name="q" placeholder="Buscar en la web o escribir una dirección…" aria-label="Buscar en la web o abrir una dirección" autocomplete="off" spellcheck="false" />
-        <button type="submit" aria-label="Buscar o navegar">→</button>
-      </form>
-      <p class="search-hint">Búsqueda privada con DuckDuckGo <span>·</span> <kbd>Ctrl L</kbd> barra de direcciones</p>
+      <div class="hero-orbit" aria-hidden="true"><img src="../assets/identity/NEXO-Wormhole.png" alt="" /></div>
+      <div class="welcome-copy"><p class="eyebrow">Bienvenido a</p>
+      <h1 id="welcomeTitle">NEXO <span>AI</span></h1>
+      <p class="tagline">Tu portal al Mundo de la IA</p>
+      <p class="intro">Explorá · Aprendé · Descubrí</p></div>
     </section>
     <nav class="destination-grid" aria-label="Accesos rápidos">
       <a class="destination" href="https://chatgpt.com"><span class="app-icon gpt"><img src="../assets/services/openai.svg" alt="" /></span><span>ChatGPT</span></a>
@@ -29,6 +26,14 @@
       <button class="destination" disabled title="No hay un destino configurado para PIXELVERSE"><span class="app-icon pixel"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 6h4v4h10V6h4v8h4v14h-5v-6H8v6H3V14h4z"/><path d="M10 15h3m6 0h3"/></svg></span><span>PIXELVERSE</span><small>Sin configurar</small></button>
       <button class="destination" id="moreApps" aria-expanded="false" aria-controls="appsList"><span class="app-icon apps"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h4v4H3zM10 3h4v4h-4zM17 3h4v4h-4zM3 10h4v4H3zM10 10h4v4h-4zM17 10h4v4h-4zM3 17h4v4H3zM10 17h4v4h-4zM17 17h4v4h-4z"/></svg></span><span>Más aplicaciones</span></button>
     </nav>
+    <section class="portal-search" aria-label="Buscar o navegar">
+      <form id="startSearch" action="https://duckduckgo.com/" method="get" role="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+        <input id="searchInput" type="search" name="q" placeholder="Buscar en la web o escribir una dirección…" aria-label="Buscar en la web o abrir una dirección" autocomplete="off" spellcheck="false" />
+        <button type="submit" aria-label="Buscar o navegar">→</button>
+      </form>
+      <p class="search-hint">Búsqueda privada con DuckDuckGo <span>·</span> <kbd>Ctrl L</kbd> barra de direcciones</p>
+    </section>
     <section id="appsList" class="apps-list" hidden aria-label="Más aplicaciones">
       <a href="https://claude.ai">Claude ↗</a><a href="https://gemini.google.com">Gemini ↗</a><a href="https://www.perplexity.ai">Perplexity ↗</a><a href="https://chat.deepseek.com">DeepSeek ↗</a><a href="https://copilot.microsoft.com">Copilot ↗</a><a href="https://chat.mistral.ai">Le Chat ↗</a><a href="http://localhost:11434">Ollama local ↗</a><a href="https://github.com">GitHub ↗</a><a href="https://developer.mozilla.org">MDN ↗</a><a href="https://news.ycombinator.com">Hacker News ↗</a><a href="https://stackoverflow.com">Stack Overflow ↗</a>
     </section>
@@ -37,7 +42,7 @@
       <article class="feature memory-feature"><header><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H6L3 7v4l3 2-3 2v3l4 3h3V3m5 0h3l3 4v4l-3 2 3 2v3l-4 3h-3V3M7 8h3m4 0h3M7 16h3m4 0h3"/></svg><h2>EVO MEMORY</h2><span class="feature-label">LOCAL</span></header><p class="memory-copy">Tus conversaciones.<br><strong>Tu contexto. Tu control.</strong></p><p>Conversación, mensajes e historial local disponibles en el panel lateral.</p><p class="feature-foot"><kbd>Ctrl Shift I</kbd> Abrir panel EVO <span>→</span></p></article>
       <article class="feature"><header><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6zM8 12l3 3 5-6"/></svg><h2>Seguridad</h2></header><div class="feature-body"><svg class="shield-art" viewBox="0 0 72 80" aria-hidden="true"><path d="m36 4 29 11v25c0 18-29 34-29 34S7 58 7 40V15zM22 38l10 10 19-23"/></svg><p>Node desactivado en sitios.<br>Permisos por origen.<br><span>Sin prometer protección total.</span></p></div><p class="feature-foot">Permisos y privacidad en Seguridad <span>↗</span></p></article>
     </section>
-    <footer><span class="footer-line"></span>EXPLORÁ. CONECTÁ. CREÁ.<span class="footer-line"></span></footer>
+    <footer><span class="footer-line"></span>Inteligencia Artificial al alcance de tu mano<span class="footer-line"></span></footer>
   </main>
   <script type="module" src="./start.js"></script>
 </body>

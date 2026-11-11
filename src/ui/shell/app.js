@@ -1,10 +1,11 @@
+import { createWormholeChrome } from './wormholeChrome.js';
+import { createRepetitionView } from './repetition.js';
 import { isEvoMemoryEnabled } from '../../core/settings.js';
 import { createUnderstandingPanel } from './understandingPanel.js';
 import { createWorkDossier } from './workDossier.js';
 import { createBrowserTools } from './browserTools.js';
 import { createMemoryPanel, memoryReadout, setMemoryPanelAvailability } from './memoryPanel.js';
 import { readMemoryConversation, sameConversationSource } from './chatgptDirect.js';
-import { createRepetitionView } from './repetition.js';
 import { isChatGptMemoryUrl } from '../../core/chatgptConversation.js';
 /**
  * Interfaz de navegador de Nexo.
@@ -95,6 +96,7 @@ const SEARCH = 'https://duckduckgo.com/?q=';
 let browserTools = null;
 let workPanel = null;
 let understandingPanel = null;
+let visualChrome = null;
 const state = {
   tabs: new Map(),
   activeId: null,
@@ -214,7 +216,6 @@ function createTab(url = START_URL, { activate = true, workspaceId = browserTool
     if (state.activeId === id) {
       els.omnibox.value = event.url; updateNavigation();
       if (isPanelActive('understanding')) understandingPanel?.changed();
-      if (isPanelActive('repetition')) refreshRepetition();
       if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
     }
   });
@@ -223,7 +224,6 @@ function createTab(url = START_URL, { activate = true, workspaceId = browserTool
     if (state.activeId === id) {
       els.omnibox.value = event.url; updateNavigation();
       if (isPanelActive('understanding')) understandingPanel?.changed();
-      if (isPanelActive('repetition')) refreshRepetition();
       if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
     }
   });
@@ -259,7 +259,6 @@ function createTab(url = START_URL, { activate = true, workspaceId = browserTool
       updateStar();
       if (isPanelActive('sites')) renderSitePanel();
       if (isPanelActive('understanding')) understandingPanel?.changed();
-      if (isPanelActive('repetition')) refreshRepetition();
       if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
     }
     scheduleSessionCapture();
@@ -295,7 +294,6 @@ function activateTab(id) {
   updateStar();
   updateNavigation();
   if (isPanelActive('sites')) renderSitePanel();
-  if (isPanelActive('repetition')) refreshRepetition();
   if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
   browserTools?.activated(tab);
   workPanel?.workspaceChanged();
@@ -398,6 +396,7 @@ els.toggleSidebar.addEventListener('click', () => {
 });
 
 function setSidebar(open) {
+  if (!open && visualChrome?.mode === 'fixed') return;
   els.browser.classList.toggle('with-sidebar', open);
   els.toggleSidebar.setAttribute('aria-expanded', String(open));
   if (open) refreshActivePanel();
@@ -659,15 +658,8 @@ function renderDownloads() {
   });
 }
 
-/* ---------------- repetición literal de la pestaña activa ---------------- */
-const repetitionView = createRepetitionView({
-  list: document.getElementById('repetitionList'), status: document.getElementById('repetitionStatus'),
-  diagnostics: document.getElementById('repetitionDiagnostic'),
-  scroller: document.getElementById('panel-repetition'),
-});
-let repetitionTicket = 0;
+/* ---------------- transporte DOM compartido para EVO Memory ---------------- */
 let memoryRefreshTicket = 0, memoryLiveRevision = 0;
-let repetitionSourceKey = '';
 function repetitionSource() {
   const tab = activeTab();
   if (!tab) return null;
@@ -679,25 +671,6 @@ function repetitionSource() {
     tab.url = href;
     return { webContentsId: tab.view.getWebContentsId(), href };
   } catch { return null; }
-}
-async function refreshRepetition() {
-  const ticket = ++repetitionTicket;
-  const source = repetitionSource();
-  if (!source) {
-    repetitionSourceKey = '';
-    repetitionView.render(null, 'Abrí una conversación de ChatGPT. Esta vista no lee otros sitios ni chats temporales.');
-    return;
-  }
-  const key = `${source.webContentsId}:${source.href}`;
-  if (key !== repetitionSourceKey) repetitionView.render(null, 'Esperando los mensajes cargados de esta conversación…');
-  repetitionSourceKey = key;
-  try {
-    const snapshot = await nexo.repetition.get(source);
-    if (ticket === repetitionTicket && isPanelActive('repetition')) repetitionView.render(snapshot,
-      'Esperando mensajes de ChatGPT. Si abriste Nexo antes de actualizarlo, recargá la pestaña.');
-  } catch {
-    if (ticket === repetitionTicket) repetitionView.render(null, 'No se pudo leer esta pestaña. Recargá ChatGPT para reintentar.');
-  }
 }
 nexo.on('nexo:repetition-changed', (snapshot) => {
   const source = repetitionSource();
@@ -715,14 +688,6 @@ nexo.on('nexo:repetition-changed', (snapshot) => {
   memoryLiveRevision += 1;
   memState.liveSnapshot = isEvoMemoryEnabled(state.settings) && snapshot.href ? { ...snapshot, href: source.href } : null;
   if (isPanelActive('memory')) uiTasks.schedule('chat-capture', renderChatCapture);
-  if (!isPanelActive('repetition')) return;
-  repetitionTicket += 1;
-  uiTasks.schedule('repetition', () => {
-    const current = repetitionSource();
-    if (!isPanelActive('repetition') || !current || current.webContentsId !== source.webContentsId || current.href !== source.href) return;
-    repetitionSourceKey = `${source.webContentsId}:${source.href}`;
-    repetitionView.render(snapshot.href ? snapshot : null, 'Esperando los mensajes de la conversación…');
-  });
 });
 
 /* ---------------- sitio actual: permisos y zoom ---------------- */
@@ -1508,7 +1473,7 @@ new ResizeObserver(([entry]) => {
 function refreshActivePanel() {
   const current = document.querySelector('.stab.active')?.dataset.panel;
   const renders = { activity: () => { renderLog(); refreshStats(); }, memory: refreshMemory,
-    understanding:()=>understandingPanel?.refresh(), work: () => workPanel?.load(), history: renderHistory, bookmarks: renderBookmarks, downloads: renderDownloads, sites: renderSitePanel, repetition: refreshRepetition };
+    understanding:()=>understandingPanel?.refresh(), work: () => workPanel?.load(), history: renderHistory, bookmarks: renderBookmarks, downloads: renderDownloads, sites: renderSitePanel };
   if (els.browser.classList.contains('with-sidebar')) uiTasks.schedule(`panel-${current}`, renders[current] || (() => {}));
 }
 const panelTabs = [...document.querySelectorAll('.stab')];
@@ -1757,7 +1722,7 @@ async function boot() {
   }
   paso('sesion');
 
-  els.browser.classList.add('with-sidebar');
+  setSidebar(visualChrome?.mode === 'fixed');
   els.omnibox.focus();
 
   /**
@@ -1815,7 +1780,7 @@ async function boot() {
   reportarMedidas(marcas);
 }
 
-browserTools = createBrowserTools({nexo,state,activeTab,createTab,activateTab,closeTab,navigate,runCommand:runBrowserCommand,notice:pushLocalNotice,scheduleSessionCapture});
+browserTools = createBrowserTools({nexo,state,activeTab,createTab,activateTab,closeTab,navigate,runCommand:runBrowserCommand,notice:pushLocalNotice,scheduleSessionCapture,onPreferences:p=>{visualChrome?.apply(p.rightMenuMode);document.querySelectorAll('[data-ui-zoom-value]').forEach(e=>e.textContent=`${Math.round((p.uiZoom||1)*100)}%`);}});
 workPanel = createWorkDossier({nexo,root:document.getElementById('panel-work'),
   getWorkspaceId:()=>browserTools.workspace,
   getWorkspaceName:id=>browserTools.workspaceName(id),
@@ -1824,6 +1789,9 @@ workPanel = createWorkDossier({nexo,root:document.getElementById('panel-work'),
     const existing=[...state.tabs.values()].find(t=>t.url===url && (t.workspaceId||'main')===workspaceId);
     if(existing)activateTab(existing.id);else createTab(url,{workspaceId});
   }});
+visualChrome=createWormholeChrome({browser:els.browser,leftButton:document.getElementById('toggleLeftMenu'),leftMenu:document.getElementById('leftMenu'),rightMenu:els.sidebar,modeInput:document.getElementById('rightMenuMode'),closeButton:els.closeSidebar,setSidebar,saveMode:mode=>browserTools.setRightMenuMode(mode)});
+let uiZoomBusy=false;
+document.querySelectorAll('[data-ui-zoom]').forEach(button=>button.addEventListener('click',async()=>{if(uiZoomBusy)return;uiZoomBusy=true;try{const steps=[.75,.8,.9,1,1.1,1.25,1.5],current=browserTools.uiZoom,index=steps.reduce((best,v,i)=>Math.abs(v-current)<Math.abs(steps[best]-current)?i:best,0);const next=button.dataset.uiZoom==='reset'?1:steps[Math.max(0,Math.min(steps.length-1,index+(button.dataset.uiZoom==='in'?1:-1)))];await browserTools.setUIZoom(next);}finally{uiZoomBusy=false;}}));
 understandingPanel=createUnderstandingPanel({nexo,root:document.getElementById('panel-understanding'),activeTab});
 document.getElementById('commandsButton').addEventListener('click',()=>runBrowserCommand({type:'command-center'}));
 document.getElementById('keyboardSettings').addEventListener('click',()=>runBrowserCommand({type:'keyboard-settings'}));

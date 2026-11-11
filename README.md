@@ -5,6 +5,12 @@ con IA, no acumular funciones. Sin cambiar silenciosamente el objetivo ni invent
 información para corregir respuestas.
 [Prioridades y criterios de revisión](docs/NEXO-CRITERIOS-RECTORES.md).
 
+**0.1.33 · NEXO AI / Wormhole:** identidad oficial en ventana e interfaz,
+fondo espacial vectorial, menú izquierdo oculto con botón Wormhole, dock derecho
+automático o fijo y zoom de interfaz persistente. Se retira sólo la pestaña
+Repetición, conservando el transporte DOM y su lector compartido con EVO Memory.
+[Implementación, pruebas y límites de validación](docs/NEXO-WORMHOLE-IDENTIDAD.md).
+
 **0.1.33 · Comprensión reconstruida:** lector DOM independiente de EVO Memory,
 motor local de optimización conversacional, medición BPE y una única pantalla
 con estado, ahorro y comparación del original con el resultado. El motor anterior
