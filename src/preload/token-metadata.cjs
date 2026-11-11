@@ -13,8 +13,8 @@ exports.outgoingMetadata = function outgoingMetadata(payload = {}) {
   if (typeof tokenText === 'string' && openai) {
     const resolved =
       payload.textFound === false ? null : resolveModelForEncoding(payload.model);
-    // Un nombre desconocido puede usar el modelo más cercano de su familia.
-    // Sin familia inequívoca, se conserva null; nunca se inventa GPT-5.
+    // Un nombre desconocido siempre usa un tokenizer de referencia; si no
+    // hay familia reconocible, resolveModelForEncoding elige GPT-5.
     metadata.tokens = resolved ? countGptTokens(tokenText, resolved.model) : null;
     metadata.tokenEncoding = resolved?.encoding || null;
     metadata.tokenExact = Boolean(resolved?.exact);
