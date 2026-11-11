@@ -51,20 +51,26 @@ app.whenReady().then(() => {
   const realSend = shell.send.bind(shell);
   shell.send = (channel, ...args) => { if (channel !== 'nexo:repetition-changed' || !suppressAutomaticSnapshot) realSend(channel, ...args); };
   await until(() => shell.executeJavaScript('Boolean(window.nexo && document.querySelector("webview"))').catch(() => false), 'shell lista');
-  await shell.executeJavaScript(`(async()=>{await nexo.setSettings({enabled:false,memory:{enabled:false}});document.getElementById('omnibox').value='https://chatgpt.com/c/fixture';document.getElementById('omniboxForm').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));document.querySelector('.stab[data-panel="repetition"]').click();})()`);
+  await shell.executeJavaScript(`(async()=>{await nexo.setSettings({enabled:false,memory:{enabled:false}});await nexo.advanced.setPreferences({...await nexo.advanced.preferences(),rightMenuMode:'fixed'});document.getElementById('omnibox').value='https://chatgpt.com/c/fixture';document.getElementById('omniboxForm').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));document.querySelector('.rail-item[data-open-panel="memory"]').click();})()`);
   await until(() => webContents.getAllWebContents().some(w => w.getType() === 'webview' && w.getURL() === 'https://chatgpt.com/c/fixture'), 'webview HTTPS cargada');
   const guest = webContents.getAllWebContents().find(w => w.getType() === 'webview' && w.getURL() === 'https://chatgpt.com/c/fixture');
   try {
-    await until(() => shell.executeJavaScript('document.querySelectorAll("#repetitionList .repeat-message").length===2'), 'dos roles recibidos en panel real');
-    const exact = await shell.executeJavaScript(String.raw`(()=>{const t=[...document.querySelectorAll('#repetitionList .repeat-text')].map(n=>n.textContent);return t[0]==='  Hola\n'&&t[1]==='Respuesta de fixture 😊\n  código\n';})()`);
-    if (!exact) throw Error('Texto no literal en el panel');
-    const diagnostic = await shell.executeJavaScript('document.getElementById("repetitionDiagnostic")?.textContent || ""');
-    if (!diagnostic.includes('print-label') || !diagnostic.includes('Vos: 1 · ChatGPT: 1')) {
-      throw Error('Diagnóstico no confirma una pregunta y una respuesta sin duplicados: ' + diagnostic);
+    // EVO apagada no muestra recuerdos. El lector aislado conserva su canal
+    // RAM independiente: comprobarlo por IPC, no resucitando la pestaña retirada.
+    const readSnapshot = () => shell.executeJavaScript(`nexo.repetition.get(${JSON.stringify({ webContentsId: guest.id, href: guest.getURL() })})`);
+    await until(async () => (await readSnapshot())?.turns?.length === 2, 'lector aislado entrega ambos roles con EVO apagada');
+    const initial = await readSnapshot();
+    const expected = ['  Hola\n', 'Respuesta de fixture 😊\n  código\n'];
+    if (JSON.stringify(initial.turns.map(t => t.content)) !== JSON.stringify(expected)) throw Error('Texto no literal en el snapshot aislado');
+    if (!initial.strategy.includes('print-label') || initial.turns[0].role !== 'user' || initial.turns[1].role !== 'assistant') {
+      throw Error('El lector no confirma una pregunta y una respuesta sin duplicados');
     }
-    report.checks.push('texto literal, ambos roles y deduplicación del DOM real con memoria apagada');
+    await until(() => shell.executeJavaScript(`document.getElementById('memoryPersistence').dataset.state==='disabled' && document.querySelectorAll('#memoryLiveConversation .repeat-message').length===0`), 'EVO apagada oculta recuerdos sin apagar el lector aislado');
+    const disabledConversations = await shell.executeJavaScript('nexo.memory.conversations()');
+    if (disabledConversations.length) throw Error('EVO apagada no debe publicar conversaciones guardadas');
+    report.checks.push('texto literal y ambos roles por IPC sin persistencia EVO habilitada');
     await guest.executeJavaScript(`document.querySelector('.markdown').textContent+='Respuesta final';`);
-    await until(() => shell.executeJavaScript('document.querySelectorAll("#repetitionList .repeat-text")[1]?.textContent.endsWith("Respuesta final")'), 'streaming DOM actualiza panel sin duplicados');
+    await until(async () => (await readSnapshot())?.turns?.[1]?.content.endsWith('Respuesta final'), 'streaming DOM actualiza lector aislado sin duplicados');
     await shell.executeJavaScript(`(async()=>{await nexo.setSettings({enabled:false,memory:{enabled:true}});document.querySelector('.stab[data-panel="memory"]').click();})()`);
     await until(() => shell.executeJavaScript('document.querySelectorAll("#memoryLiveConversation .repeat-text").length===2'), 'Memoria muestra la misma conversación en vivo');
     await guest.executeJavaScript(`window.postMessage({__nexo:'event',type:'outgoing',payload:{host:'chatgpt.com',site:'chatgpt',source:'composer',messageId:'render-fixture-send',tokenText:'pregunta nueva',chars:14}},'*');const u=document.createElement('article');u.setAttribute('data-message-author-role','user');u.setAttribute('data-message-id','u2');u.textContent='pregunta nueva';document.querySelector('main').append(u);`);
@@ -77,17 +83,18 @@ app.whenReady().then(() => {
     }
     await guest.executeJavaScript(`document.getElementById('fixtureStop').remove()`);
     await until(() => shell.executeJavaScript('nexo.getStats().then(s=>s.responses===1 && s.outputTokens===3)'), 'cierre DOM conserva tres palabras y una respuesta');
-    await until(() => shell.executeJavaScript(String.raw`nexo.memory.conversations().then(c=>c.some(e=>e.turns.some(t=>t.id==='a2'&&t.content==='  uno dos tres\n')))`), 'transcripción persistente contiene texto literal final');
+    const finalText = '  uno dos tres\n';
+    await until(() => shell.executeJavaScript(`nexo.memory.conversations().then(c=>c.some(e=>e.turns.some(t=>t.id==='a2'&&t.content===${JSON.stringify(finalText)})))`), 'transcripción persistente contiene texto literal final');
     const memoryFile = await shell.executeJavaScript('nexo.memory.stats().then(s=>s.file)');
     const disk = JSON.parse(readFileSync(memoryFile, 'utf8'));
-    if (!disk.conversations.some(c=>c.turns.some(t=>t.id==='a2' && t.content==='  uno dos tres\n'))) throw Error('El archivo de memoria no contiene el texto literal');
+    if (!disk.conversations.some(c=>c.turns.some(t=>t.id==='a2' && t.content===finalText))) throw Error('El archivo de memoria no contiene el texto literal');
     report.checks.push('texto literal confirmado también leyendo el archivo de memoria');
-    await shell.executeJavaScript(`document.querySelector('.stab[data-panel="repetition"]').click()`);
+    await shell.executeJavaScript(`document.querySelector('.rail-item[data-open-panel="memory"]').click()`);
     // Las APIs del mundo principal no deben controlar el lector aislado.
     await guest.executeJavaScript(`delete window.__nexo; Document.prototype.querySelectorAll=function(){throw Error('API alterada por la página de prueba');};const body=document.createElement('body');body.innerHTML='<article data-turn="assistant"><pre class="markdown">GPT tras reemplazar body</pre></article>';document.body.replaceWith(body);`);
-    await until(() => shell.executeJavaScript('document.querySelectorAll("#repetitionList .repeat-text").length===1 && document.querySelector("#repetitionList .repeat-text").textContent==="GPT tras reemplazar body"'), 'lector aislado sobrevive APIs de página alteradas y body sustituido');
+    await until(() => shell.executeJavaScript('document.querySelectorAll("#memoryLiveConversation .repeat-text").length===1 && document.querySelector("#memoryLiveConversation .repeat-text").textContent==="GPT tras reemplazar body"'), 'lector aislado sobrevive APIs de página alteradas y body sustituido');
     await guest.executeJavaScript(`window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));document.getElementsByTagName('pre')[0].textContent='GPT después de pageshow';window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));`);
-    await until(() => shell.executeJavaScript('document.querySelector("#repetitionList .repeat-text")?.textContent==="GPT después de pageshow"'), 'reanuda tras eventos pagehide/pageshow sintéticos');
+    await until(() => shell.executeJavaScript('document.querySelector("#memoryLiveConversation .repeat-text")?.textContent==="GPT después de pageshow"'), 'reanuda tras eventos pagehide/pageshow sintéticos');
     // Forzar la rama de respaldo de la shell: sin caché consultable ni eventos
     // automáticos visibles, aunque el DOM HTTPS contiene ambos mensajes.
     suppressAutomaticSnapshot = true;
@@ -135,7 +142,7 @@ app.whenReady().then(() => {
     finish();
   } catch (error) {
     report.reader = await guest.executeJavaScript('window.__nexo?.conversationReader?.()').catch(() => null);
-    report.panel = await shell.executeJavaScript('document.getElementById("repetitionDiagnostic")?.textContent').catch(() => null);
+    report.panel = await shell.executeJavaScript('document.getElementById("memoryLiveStatus")?.textContent').catch(() => null);
     throw error;
   }
 })().catch(finish);
