@@ -19,9 +19,13 @@ export function createWormholeChrome({
     leftButton.setAttribute('aria-expanded', String(open));
     leftMenu.inert = !open;
   }
-  function collapse() {
-    if (mode !== 'fixed' && !rightMenu.contains?.(document.activeElement))
-      setSidebar(false);
+  function collapse(fromPointer = false) {
+    if (mode === 'fixed' || (fromPointer && inside)) return;
+    const focused = rightMenu.contains?.(document.activeElement);
+    // Una selección hecha con mouse no debe dejar el modo automático abierto.
+    // Al ocultar su contenido, no dejamos el foco en un control invisible.
+    if (fromPointer && focused) document.activeElement?.blur?.();
+    if (fromPointer || !focused) setSidebar(false);
   }
   function apply(value) {
     mode = value === 'fixed' ? 'fixed' : 'auto';
@@ -57,7 +61,7 @@ export function createWormholeChrome({
   rightMenu.addEventListener('pointerleave', () => {
     inside = false;
     clearTimer(timer);
-    timer = setTimer(collapse, 250);
+    timer = setTimer(() => collapse(true), 250);
   });
   rightMenu.addEventListener('focusin', () => {
     clearTimer(timer);

@@ -129,7 +129,7 @@ test('menú izquierdo cerrado inicialmente; botón abre/cierra y Escape devuelve
     f.leftButton.emit('click');
     assert.equal(f.leftMenu.inert, true);
   }));
-test('menú automático muestra contenido al hover y se contrae al salir; teclado no pierde un formulario enfocado', () =>
+test('menú automático se contrae al retirar mouse incluso tras enfocar un control; teclado expande al enfocar', () =>
   fixture(async (f) => {
     assert.equal(f.opens.at(-1), false);
     f.rightMenu.emit('pointerenter');
@@ -142,6 +142,8 @@ test('menú automático muestra contenido al hover y se contrae al salir; teclad
     document.activeElement = f.rightMenu;
     f.rightMenu.emit('pointerleave');
     f.tick();
+    assert.equal(f.opens.at(-1), false);
+    f.rightMenu.emit('focusin');
     assert.equal(f.opens.at(-1), true);
     document.activeElement = null;
     f.rightMenu.emit('focusout');
@@ -220,4 +222,11 @@ test('se elimina únicamente la pestaña Repetición; su lector compartido sigue
     'activity',
   ])
     assert.ok(html.includes(`data-panel="${name}"`), name);
+});
+
+test('hamburguesa identificable y navegación sin Repetición en ninguno de los menús', () => {
+  const html = readFileSync(new URL('../src/ui/shell/index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="toggleLeftMenu"[^>]*aria-label="Menú hamburguesa:[^"]+"[^>]*aria-controls="leftMenu"[^>]*aria-expanded="false"/);
+  assert.match(html, /<svg class="hamburger-icon"[^>]*aria-hidden="true"[^>]*>[\s\S]*?M4 6h16M4 12h16M4 18h16/);
+  assert.doesNotMatch(html, /data-(?:open-panel|panel)="repetition"|id="panel(?:-tab)?-repetition"|Repetición de (?:la )?conversación/i);
 });

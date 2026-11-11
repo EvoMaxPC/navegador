@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 register('./harness/loader.mjs', import.meta.url);
 const { journal } = await import('./harness/electron-stub.mjs');
@@ -58,4 +60,50 @@ test('sitio y subframe no pueden cambiar modo ni zoom de la interfaz', async () 
     false,
   );
   assert.equal(owner.getZoomFactor(), 1);
+});
+
+test('preferencias de menú y zoom se recuperan tras terminar y arrancar otro proceso principal', () => {
+  const profile = mkdtempSync(join(tmpdir(), 'nexo-menu-restart-'));
+  const loader = new URL('./harness/loader.mjs', import.meta.url).href;
+  const stub = new URL('./harness/electron-stub.mjs', import.meta.url).href;
+  const main = new URL('../src/main/main.js', import.meta.url).href;
+  // Ejecuta el main de producción con Electron simulado, compartiendo sólo el
+  // perfil en disco: la segunda instancia no hereda estado en memoria de la primera.
+  const source = `
+    import {register} from 'node:module';
+    import assert from 'node:assert/strict';
+    register(${JSON.stringify(loader)});
+    const {journal} = await import(${JSON.stringify(stub)});
+    journal.userData = ${JSON.stringify(profile)};
+    await import(${JSON.stringify(main)});
+    await new Promise(r => setTimeout(r, 40));
+    const owner = journal.windows[0].webContents;
+    const event = {sender:owner,senderFrame:owner.mainFrame};
+    const get = journal.ipcHandlers.get('nexo:advanced:prefs');
+    if (process.env.NEXO_MENU_RESTART_PHASE === 'save') {
+      const current = await get(event);
+      const result = await journal.ipcHandlers.get('nexo:advanced:set-prefs')(event, {...current,rightMenuMode:'fixed',uiZoom:1.25});
+      assert.equal(result.ok,true);
+    } else {
+      const prefs = await get(event);
+      assert.equal(prefs.rightMenuMode,'fixed');
+      assert.equal(prefs.uiZoom,1.25);
+      owner.emit('did-finish-load');
+      assert.equal(owner.getZoomFactor(),1.25);
+    }
+    process.exit(0);
+  `;
+  try {
+    for (const phase of ['save', 'restore']) {
+      const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], {
+        encoding: 'utf8',
+        timeout: 15000,
+        env: {...process.env, NEXO_MENU_RESTART_PHASE: phase},
+      });
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, `${phase}: ${result.stderr}\n${result.stdout}`);
+    }
+  } finally {
+    rmSync(profile, {recursive:true, force:true});
+  }
 });

@@ -55,3 +55,6 @@ body{background:#020718 url('../assets/identity/nexo-universe.svg') center/cover
 @media(max-width:780px){.chrome-brand{width:auto}.header-zoom{margin-left:auto}.browser.with-sidebar .floating-zoom{display:none}}
 
 .dock-brand{display:block;width:44px;height:44px;flex:none;align-self:center;margin:2px 0 9px;border-radius:50%;border:1px solid #3b8fff;box-shadow:0 0 12px #358aff55}.dock-brand img{display:block;width:100%;height:100%;border-radius:50%;object-fit:contain}
+
+/* Identificador hamburguesa del control existente, sin alterar la cabecera. */
+.wormhole-button .hamburger-icon{position:absolute;right:-3px;bottom:-1px;width:26px;height:26px;padding:3px;box-sizing:border-box;border:1px solid #7294bc;border-radius:6px;background:#071327ed;color:#edf7ff;pointer-events:none}

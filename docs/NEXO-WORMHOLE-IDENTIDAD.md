@@ -54,8 +54,9 @@ Las opciones restantes de ambos menús mantienen sus paneles originales.
 El panel existente ahora tiene dos presentaciones:
 
 - **Automático** (predeterminado): barra compacta de iconos; al pasar el mouse o
-  enfocar con teclado se expande. Al salir se contrae tras 250 ms, excepto si hay
-  un control del panel enfocado para no interrumpir su edición.
+  enfocar con teclado se expande. Al retirar el mouse se contrae tras 250 ms,
+  incluso después de seleccionar un control. Se retira el foco de los controles
+  que quedarían ocultos. Con teclado, sigue abierto mientras el foco esté dentro.
 - **Fijo**: permanece expandido. El botón Cerrar se desactiva explicando que se
   debe seleccionar Automático para contraerlo; no se cambia silenciosamente la
   preferencia guardada.
