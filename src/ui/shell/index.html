@@ -95,9 +95,10 @@
           <select id="tokenizerModel" disabled aria-describedby="tokenizerNote"><option>Cargando modelos…</option></select>
           <label for="tokenizerText">Texto original</label>
           <textarea id="tokenizerText" rows="10" maxlength="200000" spellcheck="false" placeholder="Pegá tu texto acá…" aria-describedby="tokenizerNote"></textarea>
-          <div class="tokenizer-actions"><button type="submit" class="ghost premium-button" id="tokenizerCount" disabled>Contar tokens</button><button type="button" class="ghost" id="tokenizerClear">Limpiar</button></div>
+          <div class="tokenizer-actions"><button type="submit" class="ghost premium-button" id="tokenizerCount" disabled>Contar tokens</button><button type="button" class="ghost" id="tokenizerCopy" disabled>Copiar resultado</button><button type="button" class="ghost" id="tokenizerClear">Limpiar</button></div>
         </form>
         <div class="tokenizer-total"><output id="tokenizerResult" for="tokenizerText tokenizerModel" aria-live="polite">0</output><span>tokens de entrada del texto</span></div>
+        <p class="note">Palabras: <b id="tokenizerWords">0</b> · Caracteres (UTF-16): <b id="tokenizerChars">0</b>. Estos datos no se usan para estimar tokens.</p>
         <p class="note" id="tokenizerStatus" role="status">Elegí un modelo y contá el texto.</p>
         <p class="note" id="tokenizerNote">Fórmula de tiktoken: T = longitud(encode del modelo(texto original)). Se conservan espacios, saltos y Unicode. Vacío = 0. Máximo: 200000 unidades UTF-16.</p>
         <p class="note">El cálculo usa el tokenizador BPE local verificado contra OpenAI tiktoken. No envía tu texto ni consume tokens de una API. Mide sólo el texto: no incluye instrucciones internas, formato del chat, archivos ni la respuesta futura; no es una factura.</p>

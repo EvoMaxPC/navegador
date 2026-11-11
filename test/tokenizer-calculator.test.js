@@ -38,14 +38,15 @@ test('modelos disponibles contienen sólo encodings verificados y un default vá
 });
 
 function ui(api = { models: async () => tokenizerModels(), count: async payload => calculateTokenizer(payload) }) {
-  const nodes = new Map();
+  const nodes = new Map(), copies = [];
+  let scheduled = null;
   const node = () => ({ textContent: '', value: '', disabled: true, handlers: new Map(), children: [],
     addEventListener(name, fn) { this.handlers.set(name, fn); },
     append(child) { this.children.push(child); }, replaceChildren() { this.children = []; },
     focus() { this.focused = true; }, async emit(name) { return this.handlers.get(name)?.({ preventDefault() {} }); } });
   const root = { querySelector(id) { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); }, ownerDocument: { createElement: node } };
-  const panel = createTokenizerPanel({ root, api });
-  return { panel, get: id => root.querySelector('#tokenizer' + id) };
+  const panel = createTokenizerPanel({ root, api, clipboard: { writeText: async text => copies.push(text) }, setTimer: fn => { scheduled = fn; return 1; }, clearTimer: () => { scheduled = null; } });
+  return { panel, copies, tick: async () => { const fn = scheduled; scheduled = null; return fn?.(); }, get: id => root.querySelector('#tokenizer' + id) };
 }
 
 test('UI muestra resultado numérico usando exactamente el texto introducido', async () => {
@@ -97,6 +98,8 @@ test('pestaña y panel usan contrato accesible y no dependen del estado EVO', ()
   assert.match(html, /data-panel="tokenizer" id="panel-tab-tokenizer" role="tab" aria-controls="panel-tokenizer"/);
   assert.match(html, /id="panel-tokenizer" role="tabpanel" aria-labelledby="panel-tab-tokenizer"/);
   assert.match(html, /<output id="tokenizerResult"[^>]*aria-live="polite"/);
+  assert.doesNotMatch(html, /data-panel="tiktoken"/);
+  for (const id of ['tokenizerCopy', 'tokenizerWords', 'tokenizerChars']) assert.ok(html.includes(`id="${id}"`));
 });
 
 register('./harness/loader.mjs', import.meta.url);
@@ -111,6 +114,7 @@ test('IPC real: sólo shell registrada puede calcular; no cambia actividad ni aj
   const before = structuredClone(call('nexo:stats', event));
   const settings = structuredClone(call('nexo:settings:get', event));
   assert.equal(call('nexo:tokenizer:models', event).ok, true);
+  assert.equal(call('nexo:tiktoken:count', event, { text: '  Hola, mundo.  ', model: 'gpt-4o' }), 6, 'API remota previa conservada');
   assert.equal(call('nexo:tokenizer:count', event, { text: '  Hola, mundo.  ', model: 'gpt-4o' }).tokens, 6);
   assert.deepEqual(call('nexo:stats', event), before);
   assert.deepEqual(call('nexo:settings:get', event), settings);
@@ -118,5 +122,22 @@ test('IPC real: sólo shell registrada puede calcular; no cambia actividad ni aj
   for (const bad of [{ sender: guest, senderFrame: guest.mainFrame }, { sender: shell, senderFrame: {} }, { sender: { getURL: () => shell.getURL(), mainFrame: shell.mainFrame }, senderFrame: shell.mainFrame }, {}]) {
     assert.equal(call('nexo:tokenizer:count', bad, { text: 'secreto', model: 'gpt-4o' }).ok, false);
     assert.equal(call('nexo:tokenizer:models', bad).ok, false);
+    assert.equal(call('nexo:tiktoken:count', bad, { text: 'hola', model: 'gpt-4o' }), null);
   }
+});
+
+test('herramienta unificada conserva conteo automático, palabras/caracteres y copiar resultado', async () => {
+  const u = ui(); await u.panel.refresh();
+  u.get('Text').value = 'hola\tmundo\n';
+  await u.get('Text').emit('input');
+  assert.equal(u.get('Copy').disabled, true);
+  assert.equal(u.get('Words').textContent, '2');
+  assert.equal(u.get('Chars').textContent, String('hola\tmundo\n'.length));
+  await u.tick();
+  const expected = calculateTokenizer({ text: 'hola\tmundo\n', model: 'gpt-4o' }).tokens;
+  assert.equal(u.get('Result').textContent, String(expected));
+  await u.get('Copy').emit('click');
+  assert.deepEqual(u.copies, [`Tokens: ${expected} | Modelo: gpt-4o | Palabras: 2 | Caracteres: ${'hola\tmundo\n'.length}`]);
+  await u.get('Clear').emit('click');
+  assert.equal(u.get('Words').textContent, '0'); assert.equal(u.get('Chars').textContent, '0');
 });
