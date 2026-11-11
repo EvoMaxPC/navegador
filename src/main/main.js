@@ -28,6 +28,7 @@ import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS, isEvoMemoryEnabled } from '../core/settings.js';
 import { fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
 import { inputTokenMeasurement, countOutputTokens } from './tokens.js';
+import gptTokens from '../core/gptTokens.cjs';
 import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
@@ -650,6 +651,14 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle('nexo:stream-stop', (event, payload) => engine.onStreamStop(event.sender.id, payload));
+
+  ipcMain.handle('nexo:tiktoken:count', (event, payload = {}) => {
+    if (!isShellRequest(event)) return null;
+    const text = typeof payload.text === 'string' ? payload.text : '';
+    const model = typeof payload.model === 'string' ? payload.model : 'gpt-4o';
+    if (text.length > 500000) throw new Error('El texto supera el límite de 500.000 caracteres.');
+    return gptTokens.countGptTokens(text, model);
+  });
 
   ipcMain.handle('nexo:settings:get', () => store.settings);
   ipcMain.handle('nexo:storage:status', (event) => {
