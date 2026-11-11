@@ -8,6 +8,7 @@ document.documentElement.style.zoom=previewPrefs.uiZoom;
 const empty = async () => [];
 const result = async () => ({ ok: true, removed: 0 });
 window.nexo = {
+  domTokens: { observe: async () => ({ ok: false }) },
   tokenizer: { models: async () => ({ ok: false, error: 'El tokenizador local se ejecuta en la aplicación Electron; la vista web no simula el conteo.' }), count: async () => ({ ok: false, error: 'Abrí Nexo para contar con el tokenizador local.' }) },
   understanding: Object.fromEntries(['read','edit','recall','contexts','bind','clear'].map(k=>[k,async()=>({ok:false,error:'La comprensión persistente se ejecuta en Electron; esta vista no la simula.'})])),
   work: Object.fromEntries(['read','mutate','attach','capture','clear','export'].map(k=>[k,async()=>({ok:false,error:'Los expedientes usan el almacenamiento local de Electron. No se simula persistencia en esta vista web.'})])),

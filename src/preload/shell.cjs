@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('nexo', {
     context: (payload) => ipcRenderer.invoke('nexo:advanced:context', payload),
   },
 
+  domTokens: { observe: payload => ipcRenderer.invoke('nexo:dom-tokens:snapshot', payload) },
   tokenizer: {
     models: () => ipcRenderer.invoke('nexo:tokenizer:models'),
     count: payload => ipcRenderer.invoke('nexo:tokenizer:count', payload),

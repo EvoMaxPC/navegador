@@ -1,3 +1,4 @@
+import { DomTokenTotals } from './domTokenTotals.js';
 import { tokenizerModels, calculateTokenizer } from './tokenizerCalculator.js';
 import { ConversationOptimizer, installOptimizationIPC } from './conversationOptimizer.js';
 import { installWorkDossier } from './workDossier.js';
@@ -149,6 +150,9 @@ function writeCaptureTrace(stage, data = {}) {
 
 // Vista volátil: nunca escribe conversaciones en logs, diagnóstico ni un archivo nuevo.
 const repetitionSnapshots = new Map();
+// Sólo snapshots del frame principal de un guest perteneciente a nuestra shell.
+const domTokenSnapshots = new Map();
+const domTokenTotals = new DomTokenTotals();
 function publishRepetition(snapshot) {
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.webContents.getURL() === 'nexo://app/src/ui/shell/index.html') {
@@ -158,6 +162,7 @@ function publishRepetition(snapshot) {
 }
 function clearRepetition(id) {
   repetitionSnapshots.delete(id);
+  domTokenSnapshots.delete(id);
   publishRepetition({ webContentsId: id, href: null, turns: [] });
 }
 
@@ -494,7 +499,10 @@ function createWindow() {
     contents.on('dom-ready', requestConversationRead);
     contents.on('did-navigate-in-page', (_event, _url, isMainFrame) => { if (isMainFrame) requestConversationRead(); });
     contents.on('did-start-navigation', (_e, url, _inPage, isMainFrame) => {
-      if (isMainFrame) clearRepetition(contents.id);
+      if (isMainFrame) {
+        clearRepetition(contents.id);
+        domTokenTotals.navigate(contents.id, url);
+      }
       if (!isMainFrame || _inPage) return;
       engine?.onTurnInterrupted(contents.id);
       broadcast('nexo:stats-changed', statsSnapshot());
@@ -511,6 +519,7 @@ function createWindow() {
 
     contents.on('destroyed', () => {
       clearRepetition(contents.id);
+      domTokenTotals.dropTab(contents.id);
       cdp?.release(contents);
       engine?.dropTab(contents.id);
       broadcast('nexo:stats-changed', statsSnapshot());
@@ -525,9 +534,18 @@ function createWindow() {
   return win;
 }
 
+function domTokenModel() {
+  const configured = store?.settings?.tokenCounting?.model;
+  return tokenizerModels().models.some(item => item.id === configured) ? configured : tokenizerModels().defaultModel;
+}
+function observeDomTokens(sender, snapshot, source = 'isolated') {
+  return domTokenTotals.observe({ ...snapshot, source, href: sender.getURL(), webContentsId: sender.id,
+    projectId: store?.settings?.memory?.projectId || 'default' }, domTokenModel());
+}
 function statsSnapshot() {
   return {
     ...engine.stats(),
+    domTokens: domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel()),
     log: store.log.length,
     cdpObserver: cdp?.status() || null,
     captureDiagnosticFile,
@@ -669,10 +687,12 @@ function registerIpc() {
     return { ...store.loadStatus, error: store.lastError || store.loadError?.message || null };
   });
   ipcMain.handle('nexo:settings:set', (_event, patch) => {
+    if (patch?.tokenCounting?.model !== undefined && !tokenizerModels().models.some(item => item.id === patch.tokenCounting.model)) throw new Error('Elegí un modelo de tokenizador verificado.');
     const next = store.setSettings(patch);
     engine.refresh();
     refreshGuestSettings();
     broadcast('nexo:settings-changed', next);
+    broadcast('nexo:stats-changed', statsSnapshot());
     return next;
   });
   ipcMain.handle('nexo:settings:reset', () => {
@@ -680,6 +700,7 @@ function registerIpc() {
     engine.refresh();
     refreshGuestSettings();
     broadcast('nexo:settings-changed', next);
+    broadcast('nexo:stats-changed', statsSnapshot());
     return next;
   });
 
@@ -714,9 +735,29 @@ function registerIpc() {
     const next = { ...snapshot, href, webContentsId: sender.id };
     const previous = repetitionSnapshots.get(sender.id);
     repetitionSnapshots.set(sender.id, next);
+    const ownedMainFrame = isUnderstandingSource(event);
+    if (ownedMainFrame) domTokenSnapshots.set(sender.id, next);
+    const domChanged = ownedMainFrame ? observeDomTokens(sender, next) : false;
     const progress = engine.onRenderedConversation(sender.id, next, previous);
     publishRepetition(next);
-    if (progress?.updated) broadcast('nexo:stats-changed', statsSnapshot());
+    if (domChanged || progress?.updated) broadcast('nexo:stats-changed', statsSnapshot());
+    return { ok: true };
+  });
+  ipcMain.handle('nexo:dom-tokens:snapshot', (event, payload) => {
+    if (!isShellRequest(event)) return { ok: false };
+    const sender = advancedBrowser?.resolveGuest(event.sender, payload?.webContentsId);
+    const href = sender?.getURL?.() || '';
+    if (!sender || !isChatGptMemoryUrl(href)) return { ok: false };
+    try {
+      const current = new URL(href), incoming = new URL(payload?.href);
+      if (current.origin !== incoming.origin || current.pathname !== incoming.pathname) return { ok: false };
+    } catch { return { ok: false }; }
+    const snapshot = repetitionSnapshot(payload);
+    if (!snapshot) return { ok: false };
+    const cached = domTokenSnapshots.get(sender.id);
+    const sameDocument = cached?.href && new URL(cached.href).origin + new URL(cached.href).pathname === new URL(href).origin + new URL(href).pathname;
+    const changed = sameDocument && cached.turns.length ? observeDomTokens(sender, cached) : observeDomTokens(sender, snapshot, 'direct');
+    if (changed) broadcast('nexo:stats-changed', statsSnapshot());
     return { ok: true };
   });
   ipcMain.handle('nexo:repetition:get', (event, payload = {}) => {

@@ -11,6 +11,8 @@ export const DEFAULT_SETTINGS = {
   enabled: true,
   /** Idioma de la interfaz; el de los protocolos se detecta por mensaje. */
   uiLocale: 'es',
+  // Referencia explícita de la calculadora para el texto copiado del DOM.
+  tokenCounting: { model: 'gpt-4o' },
   protocol: {
     level: 'equilibrado', // off | suave | equilibrado | agresivo
     placement: 'prefix', // prefix | suffix | both

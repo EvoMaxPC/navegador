@@ -1,5 +1,7 @@
 # Entrada y respuesta visibles con tokenizador — Nexo 0.1.33
 
+> Actualización de las tarjetas de Actividad: [Contadores DOM → Tokenizador](NEXO-CONTADORES-DOM-TOKENIZADOR.md). Usan texto literal y una referencia seleccionada explícitamente; el resultado histórico de este documento no describe esa presentación nueva.
+
 ## Cambios
 
 - Actividad: «Tokens de entrada de usuario» y «Tokens de respuesta IA». Los contadores de mensajes/respuestas siguen siendo cantidades, no tokens.

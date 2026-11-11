@@ -91,21 +91,26 @@ app.whenReady().then(() => {
     const disabledConversations = await shell.executeJavaScript('nexo.memory.conversations()');
     if (disabledConversations.length) throw Error('EVO apagada no debe publicar conversaciones guardadas');
     report.checks.push('texto literal y ambos roles por IPC sin persistencia EVO habilitada');
+    const initialInput = countGptTokens(expected[0], 'gpt-4o');
+    await until(() => shell.executeJavaScript(`document.getElementById('statInTokens').textContent===${JSON.stringify(String(initialInput))} && document.getElementById('statOutTokens').textContent===${JSON.stringify(String(countGptTokens(expected[1], 'gpt-4o')))}`), 'DOM inicial suma entrada y salida con la misma fórmula del Tokenizador, sin EVO ni modelo detectado');
     await guest.executeJavaScript(`document.querySelector('.markdown').textContent+='Respuesta final';`);
     await until(async () => (await readSnapshot())?.turns?.[1]?.content.endsWith('Respuesta final'), 'streaming DOM actualiza lector aislado sin duplicados');
     await shell.executeJavaScript(`(async()=>{await nexo.setSettings({enabled:true,memory:{enabled:true}});document.querySelector('.stab[data-panel="memory"]').click();})()`);
     await until(() => shell.executeJavaScript('document.querySelectorAll("#memoryLiveConversation .repeat-text").length===2'), 'Memoria muestra la misma conversación en vivo');
     await guest.executeJavaScript(`window.postMessage({__nexo:'event',type:'outgoing',payload:{host:'chatgpt.com',site:'chatgpt',source:'composer',model:'gpt-5',messageId:'render-fixture-send',tokenText:'pregunta nueva',chars:14}},'*');const u=document.createElement('article');u.setAttribute('data-message-author-role','user');u.setAttribute('data-message-id','u2');u.textContent='pregunta nueva';document.querySelector('main').append(u);`);
-    await until(() => shell.executeJavaScript('document.querySelectorAll("#memoryLiveConversation .repeat-text").length===3'), 'envío observado sin contar historial como salida');
+    await until(() => shell.executeJavaScript('document.querySelectorAll("#memoryLiveConversation .repeat-text").length===3'), 'envío observado conserva historial y suma otra entrada');
     await guest.executeJavaScript(`const a=document.createElement('article');a.setAttribute('data-message-author-role','assistant');a.setAttribute('data-message-id','a2');a.innerHTML='<pre id="liveAnswer" class="markdown"></pre>';document.querySelector('main').append(a);const stop=document.createElement('button');stop.id='fixtureStop';stop.setAttribute('data-testid','stop-button');document.body.append(stop);`);
     const expectedInputTokens = countGptTokens('pregunta nueva', 'gpt-5');
     await until(() => shell.executeJavaScript(`nexo.getStats().then(s=>s.inputTokens===${expectedInputTokens})`), 'entrada original contada con BPE en preload real');
+    const previousOutput = countGptTokens(expected[1] + 'Respuesta final', 'gpt-4o');
+    const totalInput = initialInput + countGptTokens('pregunta nueva', 'gpt-4o');
+    await until(() => shell.executeJavaScript(`document.getElementById('statInTokens').textContent===${JSON.stringify(String(totalInput))}`), 'Actividad suma segunda entrada a la primera');
     for (const [text, words] of [['  uno',1],['  uno dos',2],['  uno dos tres\n',3]]) {
       await guest.executeJavaScript(`document.getElementById('liveAnswer').textContent=${JSON.stringify(text)}`);
       await until(() => shell.executeJavaScript(`document.querySelectorAll('#memoryLiveConversation .repeat-text')[3]?.textContent===${JSON.stringify(text)}`), `Memoria refleja parcial ${words} palabra(s)`);
       const expected = countGptTokens(text, 'gpt-5');
       await until(() => shell.executeJavaScript(`nexo.getStats().then(s=>s.outputBpeTokens===${expected} && s.responses===0)`), `contador BPE visible actualiza parcial ${words}`);
-      await until(() => shell.executeJavaScript(`document.getElementById('statOutTokens').textContent===${JSON.stringify(String(expected))}`), 'Actividad imprime BPE de la misma respuesta mostrada en Memoria');
+      await until(() => shell.executeJavaScript(`document.getElementById('statOutTokens').textContent===${JSON.stringify(String(previousOutput + countGptTokens(text, 'gpt-4o')))}`), 'Actividad suma historial y parcial con referencia seleccionada, sin duplicar el parcial');
     }
     await guest.executeJavaScript(`document.getElementById('fixtureStop').remove()`);
     const expectedFinalTokens = countGptTokens('  uno dos tres\n', 'gpt-5');
@@ -116,6 +121,12 @@ app.whenReady().then(() => {
     const disk = JSON.parse(readFileSync(memoryFile, 'utf8'));
     if (!disk.conversations.some(c=>c.turns.some(t=>t.id==='a2' && t.content===finalText))) throw Error('El archivo de memoria no contiene el texto literal');
     report.checks.push('texto literal confirmado también leyendo el archivo de memoria');
+    await guest.executeJavaScript(`const u=document.createElement('article');u.setAttribute('data-message-author-role','user');u.setAttribute('data-message-id','u3');u.textContent='pregunta nueva';document.querySelector('main').append(u);`);
+    await until(() => shell.executeJavaScript(`document.getElementById('statInTokens').textContent===${JSON.stringify(String(totalInput + countGptTokens('pregunta nueva', 'gpt-4o')))}`), 'dos mensajes legítimos idénticos con distinto ID suman dos aportes');
+    await shell.executeJavaScript(`nexo.setSettings({tokenCounting:{model:'gpt-4'}})`);
+    const recountedInput = countGptTokens(expected[0], 'gpt-4') + 2 * countGptTokens('pregunta nueva', 'gpt-4');
+    await until(() => shell.executeJavaScript(`document.getElementById('statInTokens').textContent===${JSON.stringify(String(recountedInput))}`), 'cambiar referencia recalcula el acumulado DOM');
+    await shell.executeJavaScript(`nexo.setSettings({tokenCounting:{model:'gpt-4o'}})`);
     await shell.executeJavaScript(`document.querySelector('.rail-item[data-open-panel="memory"]').click()`);
     // Las APIs del mundo principal no deben controlar el lector aislado.
     await guest.executeJavaScript(`delete window.__nexo; Document.prototype.querySelectorAll=function(){throw Error('API alterada por la página de prueba');};const body=document.createElement('body');body.innerHTML='<article data-turn="assistant"><pre class="markdown">GPT tras reemplazar body</pre></article>';document.body.replaceWith(body);`);

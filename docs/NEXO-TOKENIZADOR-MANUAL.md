@@ -1,5 +1,7 @@
 # Pestaña Tokenizador
 
+> Actualización de las tarjetas de Actividad: [Contadores DOM → Tokenizador](NEXO-CONTADORES-DOM-TOKENIZADOR.md). Usan texto literal y una referencia seleccionada explícitamente; el resultado histórico de este documento no describe esa presentación nueva.
+
 ## Uso
 
 1. Abrir **Tokenizador** en las pestañas del panel derecho de Nexo.
