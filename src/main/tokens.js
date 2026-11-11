@@ -1,5 +1,5 @@
 /** Categorías separadas: BPE visible, estimación heredada y modelo desconocido. */
-import { countGptTokens, encodingForModel } from '../core/gptTokens.cjs';
+import { countGptTokens, resolveModelForEncoding } from '../core/gptTokens.cjs';
 import { estimateTokens, estimateOutputTokens } from '../core/text.js';
 export { countGptTokens };
 
@@ -16,15 +16,16 @@ export function inputTokenMeasurement(text, model = '', provider = '') {
       'api.openai.com',
     ].includes(source)
   ) {
-    const encoding = encodingForModel(model);
-    // Sin un modelo reconocido no se puede afirmar qué encoding usa el
-    // proveedor. Se conserva null hasta recibir metadata verificable.
+    const resolved = resolveModelForEncoding(model);
     return {
-      tokens: encoding ? countGptTokens(text, model) : null,
-      tokenEncoding: encoding || null,
-      tokenExact: Boolean(encoding),
-      tokenMethod: encoding ? 'bpe-original' : 'unknown-model',
+      tokens: resolved ? countGptTokens(text, resolved.model) : null,
+      tokenEncoding: resolved?.encoding || null,
+      tokenExact: Boolean(resolved?.exact),
+      tokenMethod: resolved
+        ? resolved.exact ? 'bpe-original' : 'bpe-nearest-model'
+        : 'unknown-model',
       model: model || '',
+      tokenModel: resolved?.model || null,
     };
   }
   // Compatibilidad con otros proveedores: nunca etiquetar su estimación como BPE.
