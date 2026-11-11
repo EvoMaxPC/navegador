@@ -130,3 +130,124 @@ test('error de IPC no expone un resultado optimizado previo', async () =>
     assert.match(f.root.textContent, /Pestaña cerrada/);
     assert.doesNotMatch(f.root.textContent, /Texto optimizado con referencias/);
   }));
+test('el contexto optimizado se entrega sólo con un gesto: cuadro o portapapeles, nunca envío', async () => {
+  const old = globalThis.document;
+  globalThis.document = { createElement: (t) => new Element(t) };
+  const root = new Element('section');
+  root.className = 'active';
+  const inserted = [];
+  const copied = [];
+  let fail = false;
+  const panel = createUnderstandingPanel({
+    root,
+    activeTab: () => ({ view: { getWebContentsId: () => 7 } }),
+    insertText: async (text) => {
+      if (fail) throw Error('pestaña cerrada');
+      inserted.push(text);
+      return { ok: true };
+    },
+    copyText: async (text) => {
+      copied.push(text);
+      return undefined;
+    },
+    nexo: {
+      on: () => () => {},
+      understanding: {
+        read: async () => ({
+          ok: true,
+          status: 'optimized',
+          reason: 'Reconstrucción literal verificada.',
+          optimized: 'CONTEXTO OPTIMIZADO',
+          original: 'ORIGINAL',
+          metrics: {
+            original: 100,
+            optimized: 40,
+            saved: 60,
+            percent: 60,
+            tokenizer: { estimated: false, encoding: 'o200k_base', model: 'gpt-4o' },
+          },
+        }),
+      },
+    },
+  });
+  try {
+    await panel.refresh();
+    const buttons = root.querySelectorAll('button');
+    const insert = buttons.find((b) => b.textContent === 'Escribir en el cuadro');
+    const copy = buttons.find((b) => b.textContent === 'Copiar el contexto');
+    assert.ok(insert && copy, 'las dos acciones existen');
+    assert.equal(insert.tagName, 'button');
+    // Nada se entrega sin gesto.
+    assert.deepEqual(inserted, []);
+    assert.deepEqual(copied, []);
+
+    await insert.fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(inserted, ['CONTEXTO OPTIMIZADO']);
+    assert.match(root.textContent, /Revisalo y enviá vos: no se envió nada/);
+    // El panel no envía ni reemplaza mensajes: no hay formularios ni texto de envío.
+    assert.equal(root.querySelectorAll('form,textarea,input').length, 0);
+
+    await copy.fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(copied, ['CONTEXTO OPTIMIZADO']);
+    assert.match(root.textContent, /no se envió nada/);
+
+    fail = true;
+    await insert.fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    assert.match(root.textContent, /No se pudo escribir en el cuadro del sitio/);
+    assert.doesNotMatch(root.textContent, /se envió nada\./);
+  } finally {
+    panel.dispose();
+    globalThis.document = old;
+  }
+});
+
+test('el texto que no entra en el cuadro no se inserta a medias', async () => {
+  const old = globalThis.document;
+  globalThis.document = { createElement: (t) => new Element(t) };
+  const root = new Element('section');
+  root.className = 'active';
+  const inserted = [];
+  const panel = createUnderstandingPanel({
+    root,
+    activeTab: () => ({ view: { getWebContentsId: () => 3 } }),
+    insertText: async (t) => {
+      inserted.push(t);
+      return { ok: true };
+    },
+    copyText: async () => {},
+    maxInsert: 5,
+    nexo: {
+      on: () => () => {},
+      understanding: {
+        read: async () => ({
+          ok: true,
+          status: 'optimized',
+          reason: 'ok',
+          optimized: '1234567890',
+          metrics: {
+            original: 10,
+            optimized: 4,
+            saved: 6,
+            percent: 60,
+            tokenizer: { estimated: false, encoding: 'o200k_base', model: 'gpt-4o' },
+          },
+        }),
+      },
+    },
+  });
+  try {
+    await panel.refresh();
+    const insert = root.querySelectorAll('button').find((b) => b.textContent === 'Escribir en el cuadro');
+    assert.equal(insert.disabled, true);
+    await insert.fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(inserted, []);
+    assert.match(root.textContent, /Copialo por partes/);
+  } finally {
+    panel.dispose();
+    globalThis.document = old;
+  }
+});

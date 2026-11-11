@@ -1935,7 +1935,11 @@ workPanel = createWorkDossier({nexo,root:document.getElementById('panel-work'),
 visualChrome=createWormholeChrome({browser:els.browser,leftButton:document.getElementById('toggleLeftMenu'),leftMenu:document.getElementById('leftMenu'),rightMenu:els.sidebar,modeInput:document.getElementById('rightMenuMode'),closeButton:els.closeSidebar,setSidebar,saveMode:mode=>browserTools.setRightMenuMode(mode)});
 let uiZoomBusy=false;
 document.querySelectorAll('[data-ui-zoom]').forEach(button=>button.addEventListener('click',async()=>{if(uiZoomBusy)return;uiZoomBusy=true;try{const steps=[.75,.8,.9,1,1.1,1.25,1.5],current=browserTools.uiZoom,index=steps.reduce((best,v,i)=>Math.abs(v-current)<Math.abs(steps[best]-current)?i:best,0);const next=button.dataset.uiZoom==='reset'?1:steps[Math.max(0,Math.min(steps.length-1,index+(button.dataset.uiZoom==='in'?1:-1)))];await browserTools.setUIZoom(next);}finally{uiZoomBusy=false;}}));
-understandingPanel=createUnderstandingPanel({nexo,root:document.getElementById('panel-understanding'),activeTab});
+understandingPanel=createUnderstandingPanel({nexo,root:document.getElementById('panel-understanding'),activeTab,
+  // Entrega explícita del contexto optimizado: escribe en el cuadro del sitio
+  // sin enviar, o copia. El panel nunca reemplaza mensajes por su cuenta.
+  insertText:text=>nexo.advanced.action({action:'insert-text',webContentsId:activeTab()?.view?.getWebContentsId?.(),text}),
+  copyText:text=>navigator.clipboard.writeText(text)});
 document.getElementById('commandsButton').addEventListener('click',()=>runBrowserCommand({type:'command-center'}));
 document.getElementById('keyboardSettings').addEventListener('click',()=>runBrowserCommand({type:'keyboard-settings'}));
 document.getElementById('toolbarSettings').addEventListener('click',()=>runBrowserCommand({type:'toolbar-settings'}));

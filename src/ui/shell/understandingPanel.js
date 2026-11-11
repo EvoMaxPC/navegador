@@ -11,8 +11,27 @@ const element = (tag, text, cls) => {
   if (cls) e.className = cls;
   return e;
 };
-/** Única pantalla automática; sin formularios, clasificación ni administración. */
-export function createUnderstandingPanel({ nexo, root, activeTab }) {
+/**
+ * Única pantalla automática; sin formularios, clasificación ni administración.
+ *
+ * El panel es de sólo lectura sobre la conversación: no reemplaza mensajes ni
+ * envía nada. Lo único que puede hacer con el resultado es entregarlo al
+ * portapapeles o al cuadro del sitio, siempre con un gesto de la persona.
+ */
+export function createUnderstandingPanel({
+  nexo,
+  root,
+  activeTab,
+  insertText = (text) =>
+    nexo.insertText?.(text) ??
+    nexo.advanced?.action({
+      action: 'insert-text',
+      webContentsId: activeTab()?.view?.getWebContentsId?.(),
+      text,
+    }),
+  copyText = (text) => globalThis.navigator?.clipboard?.writeText(text),
+  maxInsert = 20000,
+}) {
   let ticket = 0,
     busy = false,
     disposed = false,
@@ -33,7 +52,37 @@ export function createUnderstandingPanel({ nexo, root, activeTab }) {
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   const body = element('div', undefined, 'work-content');
+  // Aviso de la acción elegida: dice qué pasó y qué falta hacer, sin fingir
+  // que el contexto ya se envió.
+  const delivery = element('p', '', 'note work-delivery');
+  delivery.setAttribute('role', 'status');
+  delivery.setAttribute('aria-live', 'polite');
   root.replaceChildren(status, body);
+
+  async function deliver(text, mode) {
+    if (typeof text !== 'string' || !text) return;
+    if (text.length > maxInsert) {
+      delivery.textContent = `El contexto optimizado tiene ${text.length} caracteres y el cuadro admite ${maxInsert}. Copialo por partes o reducí la conversación.`;
+      return;
+    }
+    if (mode === 'copy') {
+      try {
+        await copyText(text);
+        delivery.textContent = 'Contexto copiado. Pegalo en el cuadro cuando quieras; no se envió nada.';
+      } catch {
+        delivery.textContent = 'No se pudo usar el portapapeles. Consultá el contenido optimizado y copialo a mano.';
+      }
+      return;
+    }
+    try {
+      const result = await insertText(text);
+      delivery.textContent = result && result.ok === false
+        ? (result.error || 'No se pudo escribir en el cuadro del sitio.')
+        : 'Contexto escrito en el cuadro del sitio. Revisalo y enviá vos: no se envió nada.';
+    } catch {
+      delivery.textContent = 'No se pudo escribir en el cuadro del sitio. Revisá que la pestaña siga abierta.';
+    }
+  }
   async function refresh() {
     const id = target(),
       request = ++ticket;
@@ -125,6 +174,31 @@ export function createUnderstandingPanel({ nexo, root, activeTab }) {
         element(
           'p',
           'Redundancias mediante diccionario y referencias en orden. Reconstrucción literal verificada. No es un resumen libre ni una nueva instrucción.',
+          'note',
+        ),
+      );
+      // Entrega explícita: la persona decide si lo usa y lo envía. El panel
+      // nunca reemplaza ni envía el contexto por su cuenta.
+      const actions = element('div', undefined, 'work-actions');
+      const insert = element('button', 'Escribir en el cuadro', 'ghost work-primary');
+      insert.type = 'button';
+      const overLimit = result.optimized.length > maxInsert;
+      insert.disabled = overLimit;
+      if (overLimit) insert.title = `El cuadro admite ${maxInsert} caracteres`;
+      insert.addEventListener('click', () => {
+        delivery.textContent = 'Escribiendo en el cuadro…';
+        deliver(result.optimized, 'insert');
+      });
+      const copy = element('button', 'Copiar el contexto', 'ghost');
+      copy.type = 'button';
+      copy.addEventListener('click', () => deliver(result.optimized, 'copy'));
+      actions.append(insert, copy);
+      body.append(
+        actions,
+        delivery,
+        element(
+          'p',
+          'Se escribe en el cuadro del sitio para que lo revises: no se envía solo ni reemplaza los mensajes anteriores.',
           'note',
         ),
       );

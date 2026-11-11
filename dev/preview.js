@@ -29,7 +29,25 @@ window.nexo = {
   },
   domTokens: { observe: async () => ({ ok: false }) },
   tokenizer: { models: async () => ({ ok: false, error: 'El tokenizador local se ejecuta en la aplicación Electron; la vista web no simula el conteo.' }), count: async () => ({ ok: false, error: 'Abrí Nexo para contar con el tokenizador local.' }) },
-  understanding: Object.fromEntries(['read','edit','recall','contexts','bind','clear'].map(k=>[k,async()=>({ok:false,error:'La comprensión persistente se ejecuta en Electron; esta vista no la simula.'})])),
+  // Vista de demostración: el panel de Comprensión necesita una lectura real
+  // del webview, que acá no existe. Se devuelve un resultado de ejemplo,
+  // marcado como simulado, para revisar la presentación y la entrega del
+  // contexto sin afirmar que se midió una conversación.
+  understanding: {
+    read: async () => ({
+      ok: true,
+      status: 'optimized',
+      reason: 'Reconstrucción literal verificada.',
+      original: 'Pregunta: ¿cómo resumo este documento?\nRespuesta: con tres pasos.',
+      optimized: 'Pregunta: ¿cómo resumo este documento?\nRespuesta: con tres pasos.',
+      metrics: { original: 92, optimized: 92, saved: 0, percent: 0, tokenizer: { estimated: false, encoding: 'o200k_base', model: 'gpt-4o' } },
+    }),
+    edit: async () => ({ ok: false, error: 'La comprensión persistente se ejecuta en Electron; esta vista no la simula.' }),
+    recall: async () => [],
+    contexts: async () => [],
+    bind: async () => ({ ok: false, error: 'Sólo en Electron.' }),
+    clear: async () => ({ ok: false, error: 'Sólo en Electron.' }),
+  },
   work: Object.fromEntries(['read','mutate','attach','capture','clear','export'].map(k=>[k,async()=>({ok:false,error:'Los expedientes usan el almacenamiento local de Electron. No se simula persistencia en esta vista web.'})])),
   advanced: {preferences:async()=>previewPrefs,setPreferences:async next=>{previewPrefs=browserPreferences(next);localStorage.setItem('nexo-design-preview',JSON.stringify(previewPrefs));document.documentElement.style.zoom=previewPrefs.uiZoom;listeners.get('nexo:browser-prefs')?.(previewPrefs);return {ok:true,prefs:previewPrefs};},action:async()=>({ok:false,error:'Herramienta disponible sólo en la aplicación Electron.'}),context:async()=>({ok:false,error:'No hay un evento de contexto nativo en la vista UI.'})},
   getConfig: async () => ({ version: '0.1.33 · vista web', pagePreload: null }),
