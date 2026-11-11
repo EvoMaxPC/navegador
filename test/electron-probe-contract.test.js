@@ -14,6 +14,7 @@ test('probe Electron usa paneles actuales, sin depender de la pestaña Repetici�
   assert.doesNotMatch(probe, /#repetitionList|repetitionDiagnostic|data-panel="repetition"/);
   assert.match(probe, /nexo\.repetition\.get\(/, 'el lector aislado se sigue comprobando por IPC');
   assert.match(probe, /memoryPersistence.*state==='disabled'/, 'EVO apagada sigue siendo una condición comprobada');
+  assert.match(probe, /setSettings\(\{enabled:true,memory:\{enabled:true\}\}\)/, 'EVO requiere el interruptor global y el de memoria');
   assert.match(probe, /#memoryLiveConversation \.repeat-text/, 'la vista habilitada se comprueba en EVO');
 });
 
