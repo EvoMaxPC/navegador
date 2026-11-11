@@ -378,17 +378,18 @@ export class Engine {
   #inputMeasurement(record, payload) {
     if (typeof payload.tokenText === 'string' && payload.textFound !== false && payload.tokenText.length <= 200_000) record.tokenText = payload.tokenText;
     record.host = payload.host || payload.site || record.host || '';
-    // El gesto del compositor identifica el envío, pero no conoce el modelo.
-    // No ejecutar siquiera el tokenizer de referencia hasta que llegue la
-    // metadata de la petición: ese conteo provisional no es una medición válida.
-    const awaitingModel = payload.source === 'composer' && !String(payload.model || '').trim();
-    if (!awaitingModel && typeof record.tokenText === 'string') {
+    // Si el gesto del compositor no trae modelo, `inputTokenMeasurement` ya
+    // devuelve desconocido: no hay encoding verificado que aplicar. Un conteo
+    // heredado que sí venga del sitio se conserva como estimación y se corrige
+    // cuando aparezca el modelo exacto.
+    if (typeof record.tokenText === 'string') {
       const measured = inputTokenMeasurement(record.tokenText, payload.model || '', record.host);
-      if (Number.isSafeInteger(measured.tokens) && measured.tokens >= 0) payload = { ...payload, ...measured };
+      if (measured.tokenExact && Number.isSafeInteger(measured.tokens) && measured.tokens >= 0)
+        payload = { ...payload, ...measured };
     }
     const valid = Number.isSafeInteger(payload.tokens) && payload.tokens >= 0;
     const exact = valid && payload.tokenExact === true && payload.tokenMethod === 'bpe-original' && payload.tokenEncoding;
-    const category = awaitingModel ? 'unknownInputMessages' : exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified','bpe-default','bpe-nearest-model'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
+    const category = exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
     const priority = category === 'inputTokens' ? 10 + (payload.source === 'composer' ? 0 : 1) : category === 'estimatedInputTokens' ? 1 : 0;
     const previous = record.measurement;
     if (previous && previous.priority >= priority) {
@@ -401,7 +402,10 @@ export class Engine {
     const value = category === 'unknownInputMessages' ? 1 : payload.tokens;
     this.counters[category] += value;
     record.measurement = {category,value,priority};
-    if (category !== 'unknownInputMessages') delete record.tokenText;
+    // El texto se conserva mientras no haya una medición BPE exacta: si el
+    // modelo aparece después (respuesta o metadatos), hay que poder recontar
+    // ese mismo envío en vez de dejarlo para siempre como estimado.
+    if (category === 'inputTokens') delete record.tokenText;
   }
 
   #responseModel(webContentsId, messageId, model, host = '') {

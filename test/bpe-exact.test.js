@@ -27,24 +27,24 @@ for (const row of reference.rows) {
     );
   });
 }
-test('texto original estricto: tipo, cadena vacía, NFC/NFD y fallback de familia más cercana', () => {
+test('texto original estricto: tipo, cadena vacía, NFC/NFD y modelo desconocido sin aproximar', () => {
   for (const value of [null, undefined, 42, {}, ['hola']])
     assert.throws(() => countGptTokens(value, 'gpt-5'), TypeError);
   assert.equal(countGptTokens('', 'gpt-5'), 0);
-  for (const model of ['', 'auto', 'claude-3']) {
-    assert.equal(countGptTokens(' texto ', model), countGptTokens(' texto ', 'gpt-5'));
-    assert.equal(inputTokenMeasurement(' texto ', model, 'chatgpt').tokenExact, false);
-  }
-  for (const [model, expectedModel] of [
-    ['gpt-6', 'gpt-5'],
-    ['gpt-5-desconocido', 'gpt-5'],
-    ['gpt-4.1-inventado', 'gpt-4.1'],
-    ['GPT-5', 'gpt-5'],
-  ]) {
+  // Sin modelo catalogado no hay encoding: ni número ni compatibilidad inventada.
+  for (const model of ['', 'auto', 'claude-3', 'gpt-6', 'gpt-5-desconocido', 'gpt-4.1-inventado', 'gpt-7-preview']) {
+    assert.equal(countGptTokens(' texto ', model), null, model);
+    assert.equal(encodingForModel(model), null, model);
     const result = inputTokenMeasurement(' texto ', model, 'chatgpt');
-    assert.equal(result.tokens, countGptTokens(' texto ', expectedModel));
+    assert.equal(result.tokens, null, model);
+    assert.equal(result.tokenExact, false, model);
+    assert.equal(result.tokenMethod, 'unknown-model', model);
+  }
+  for (const [model, expectedModel] of [['GPT-5', 'gpt-5'], [' gpt-4o ', 'gpt-4o'], ['gpt-5-chat-latest', 'gpt-5-chat-latest']]) {
+    const result = inputTokenMeasurement(' texto ', model, 'chatgpt');
     assert.equal(result.tokenModel, expectedModel);
-    assert.equal(result.tokenMethod, model === 'GPT-5' ? 'bpe-original' : 'bpe-nearest-model');
+    assert.equal(result.tokens, countGptTokens(' texto ', expectedModel));
+    assert.equal(result.tokenMethod, 'bpe-original');
   }
   assert.notDeepEqual(
     encodeGptText('café', 'gpt-5'),
@@ -135,8 +135,10 @@ test('categorías de input no mezclan BPE, estimación, desconocidos ni facturac
   send(e, 'unknown', 'network', 'u4', 'Hola', 'auto');
   const s = e.stats();
   assert.equal(s.inputTokens, countGptTokens('Hola', 'gpt-5'));
-  assert.ok(s.estimatedInputTokens >= 2 * countGptTokens('Hola', 'gpt-5'));
-  assert.equal(s.unknownInputMessages, 0);
+  // 3 = la estimación heredada de Claude (por caracteres) para «Hola»; los dos
+  // modelos no catalogados no aportan ningún número.
+  assert.equal(s.estimatedInputTokens, 3, 'sólo la estimación heredada de Claude');
+  assert.equal(s.unknownInputMessages, 2, 'gpt-6 y auto no se aproximan con otro modelo');
   assert.equal(s.hiddenContextTokens, null);
   assert.equal(s.providerBilledTokens, null);
 });

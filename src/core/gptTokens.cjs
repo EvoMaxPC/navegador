@@ -11,48 +11,17 @@ exports.encodingForModel = function encodingForModel(model) {
 };
 
 /**
- * Resuelve el modelo exacto o el modelo de referencia más cercano.
- * Para nombres ausentes, "auto" o familias desconocidas usa GPT-5 como
- * referencia estable. El identificador original no se modifica.
+ * Modelo conocido de la tabla verificada, o `null`.
+ *
+ * Un nombre ausente, un alias («auto») o una familia no catalogada (gpt-6) NO
+ * se sustituyen por otro modelo: contar con un encoding ajeno sería inventar
+ * una compatibilidad que no está verificada. El nombre se normaliza (espacios
+ * y mayúsculas) porque el identificador de la tabla es único.
  */
 exports.resolveModelForEncoding = function resolveModelForEncoding(model) {
   const key = typeof model === 'string' ? model.trim().toLowerCase() : '';
-  if (!key) {
-    const fallback = Object.hasOwn(models, 'gpt-5') ? 'gpt-5' : Object.keys(models)[0];
-    return fallback ? { model: fallback, encoding: models[fallback], exact: false } : null;
-  }
-  if (Object.hasOwn(models, key)) {
-    return { model: key, encoding: models[key], exact: true };
-  }
-
-  const gptMatch = key.match(/^gpt-(\d+(?:\.\d+)?)(?:$|-)/);
-  const oMatch = key.match(/^o(\d+)(?:$|-)/);
-  // Si no hay familia reconocible (por ejemplo "auto" o un alias nuevo),
-  // elegimos un modelo de referencia estable en vez de devolver null.
-  if (!gptMatch && !oMatch) {
-    const fallback = Object.hasOwn(models, 'gpt-5') ? 'gpt-5' : Object.keys(models)[0];
-    return fallback ? { model: fallback, encoding: models[fallback], exact: false } : null;
-  }
-
-  const requested = Number((gptMatch || oMatch)[1]);
-  const candidates = Object.keys(models).filter((candidate) =>
-    gptMatch
-      ? /^gpt-\d+(?:\.\d+)?(?:$|-)/.test(candidate)
-      : /^o\d+(?:$|-)/.test(candidate),
-  );
-  if (!candidates.length) {
-    const fallback = Object.hasOwn(models, 'gpt-5') ? 'gpt-5' : Object.keys(models)[0];
-    return fallback ? { model: fallback, encoding: models[fallback], exact: false } : null;
-  }
-
-  const scored = candidates.map((candidate) => {
-    const match = candidate.match(gptMatch
-      ? /^gpt-(\d+(?:\.\d+)?)(?:$|-)/ 
-      : /^o(\d+)(?:$|-)/);
-    return { model: candidate, distance: Math.abs(Number(match[1]) - requested) };
-  }).sort((a, b) => a.distance - b.distance || a.model.localeCompare(b.model));
-  const nearest = scored[0].model;
-  return { model: nearest, encoding: models[nearest], exact: false };
+  if (!key || !Object.hasOwn(models, key)) return null;
+  return { model: key, encoding: models[key], exact: true };
 };
 exports.encodeGptText = function encodeGptText(text, model) {
   if (typeof text !== 'string')

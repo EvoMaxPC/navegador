@@ -16,14 +16,14 @@ export function inputTokenMeasurement(text, model = '', provider = '') {
       'api.openai.com',
     ].includes(source)
   ) {
+    // Sin modelo catalogado no hay encoding verificado: se informa desconocido
+    // con `tokens: null`. Nunca se aproxima con el BPE de otro modelo.
     const resolved = resolveModelForEncoding(model);
     return {
       tokens: resolved ? countGptTokens(text, resolved.model) : null,
       tokenEncoding: resolved?.encoding || null,
-      tokenExact: Boolean(resolved?.exact),
-      tokenMethod: resolved
-        ? resolved.exact ? 'bpe-original' : 'bpe-nearest-model'
-        : 'unknown-model',
+      tokenExact: Boolean(resolved),
+      tokenMethod: resolved ? 'bpe-original' : 'unknown-model',
       model: model || '',
       tokenModel: resolved?.model || null,
     };
