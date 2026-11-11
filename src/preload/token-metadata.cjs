@@ -11,8 +11,11 @@ exports.outgoingMetadata = function outgoingMetadata(payload = {}) {
     'api.openai.com',
   ].includes(provider);
   if (typeof tokenText === 'string' && openai) {
+    // El compositor sólo prueba que hubo un gesto; no prueba qué modelo
+    // atenderá la petición. Esperar a la metadata de red antes de aplicar BPE.
+    const awaitingModel = payload.source === 'composer' && !String(payload.model || '').trim();
     const resolved =
-      payload.textFound === false ? null : resolveModelForEncoding(payload.model);
+      payload.textFound === false || awaitingModel ? null : resolveModelForEncoding(payload.model);
     // Un nombre desconocido siempre usa un tokenizer de referencia; si no
     // hay familia reconocible, resolveModelForEncoding elige GPT-5.
     metadata.tokens = resolved ? countGptTokens(tokenText, resolved.model) : null;
@@ -21,9 +24,11 @@ exports.outgoingMetadata = function outgoingMetadata(payload = {}) {
     metadata.tokenMethod =
       payload.textFound === false
         ? 'unreadable'
-        : resolved
-          ? resolved.exact ? 'bpe-original' : 'bpe-nearest-model'
-          : 'unknown-model';
+        : awaitingModel
+          ? 'unverified'
+          : resolved
+            ? resolved.exact ? 'bpe-original' : 'bpe-nearest-model'
+            : 'unknown-model';
     metadata.tokenModel = resolved?.model || null;
   } else {
     metadata.tokenExact = false;
