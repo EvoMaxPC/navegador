@@ -25,7 +25,12 @@ exports.resolveModelForEncoding = function resolveModelForEncoding(model) {
 
   const gptMatch = key.match(/^gpt-(\d+(?:\.\d+)?)(?:$|-)/);
   const oMatch = key.match(/^o(\d+)(?:$|-)/);
-  if (!gptMatch && !oMatch) return null;
+  // Si no hay familia reconocible (por ejemplo "auto" o un alias nuevo),
+  // elegimos un modelo de referencia estable en vez de devolver null.
+  if (!gptMatch && !oMatch) {
+    const fallback = Object.hasOwn(models, 'gpt-5') ? 'gpt-5' : Object.keys(models)[0];
+    return fallback ? { model: fallback, encoding: models[fallback], exact: false } : null;
+  }
 
   const requested = Number((gptMatch || oMatch)[1]);
   const candidates = Object.keys(models).filter((candidate) =>
@@ -33,7 +38,10 @@ exports.resolveModelForEncoding = function resolveModelForEncoding(model) {
       ? /^gpt-\d+(?:\.\d+)?(?:$|-)/.test(candidate)
       : /^o\d+(?:$|-)/.test(candidate),
   );
-  if (!candidates.length) return null;
+  if (!candidates.length) {
+    const fallback = Object.hasOwn(models, 'gpt-5') ? 'gpt-5' : Object.keys(models)[0];
+    return fallback ? { model: fallback, encoding: models[fallback], exact: false } : null;
+  }
 
   const scored = candidates.map((candidate) => {
     const match = candidate.match(gptMatch
@@ -47,8 +55,9 @@ exports.resolveModelForEncoding = function resolveModelForEncoding(model) {
 exports.encodeGptText = function encodeGptText(text, model) {
   if (typeof text !== 'string')
     throw new TypeError('El texto debe ser una cadena');
-  const encoding = exports.encodingForModel(model);
-  if (!encoding) return null;
+  const resolved = exports.resolveModelForEncoding(model);
+  if (!resolved) return null;
+  const encoding = resolved.encoding;
   // Tabla cerrada y verificada: model nunca forma parte de una ruta require.
   const tokenizer = require(`gpt-tokenizer/encoding/${encoding}`);
   return tokenizer.encode(text, OPTIONS);
@@ -56,11 +65,12 @@ exports.encodeGptText = function encodeGptText(text, model) {
 exports.countGptTokens = function countGptTokens(text, model = '') {
   if (typeof text !== 'string')
     throw new TypeError('El texto debe ser una cadena');
-  const encoding = exports.encodingForModel(model);
-  if (!encoding) return null;
+  const resolved = exports.resolveModelForEncoding(model);
+  if (!resolved) return null;
+  const encoding = resolved.encoding;
   const key = encoding + '\0' + text;
   if (cache.has(key)) return cache.get(key);
-  const count = exports.encodeGptText(text, model).length; // T = |E_m(S)|
+  const count = exports.encodeGptText(text, resolved.model).length; // T = |E_m(S)|
   // Caché local acotada; no se persiste el texto. No deduplica envíos.
   if (text.length <= 65536) {
     cache.set(key, count);
