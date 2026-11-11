@@ -34,6 +34,8 @@ export function buildMenu({ send, bindings = {} }) {
         { label: 'Reabrir pestaña cerrada', accelerator: acc('reopen-tab'), click: run('reopen-tab') },
         { label:'Buscar pestañas…',accelerator:acc('tab-search'),click:run('tab-search') },
         { label:'Menú del navegador',accelerator:acc('browser-menu'),click:run('browser-menu') },
+        { label:'Atajos de conversación…',accelerator:acc('prompt-list'),click:run('prompt-list') },
+        { label:'Insertar un atajo en el cuadro',click:run('prompt-bar') },
         { label:'Centro de comandos',accelerator:acc('command-center'),click:run('command-center') },
         { label:'Guardar página…',accelerator:acc('save-page'),click:run('save-page') },
         { label:'Imprimir…',accelerator:acc('print'),click:run('print') },

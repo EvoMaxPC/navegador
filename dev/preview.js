@@ -8,6 +8,25 @@ document.documentElement.style.zoom=previewPrefs.uiZoom;
 const empty = async () => [];
 const result = async () => ({ ok: true, removed: 0 });
 window.nexo = {
+  // Atajos de conversación simulados en localStorage: la vista web no envía
+  // texto a ningún sitio real ni conserva nada fuera del navegador.
+  prompts: {
+    list: async () => ({ ok: true, items: JSON.parse(localStorage.getItem('nexo-preview-prompts') || '[]') }),
+    save: async (payload = {}) => {
+      const items = JSON.parse(localStorage.getItem('nexo-preview-prompts') || '[]');
+      const row = { id: payload.id || `p-${Date.now().toString(36)}`, title: String(payload.title || '').slice(0, 60), text: String(payload.text || '') };
+      const at = items.findIndex((item) => item.id === row.id);
+      if (at >= 0) items[at] = row; else items.push(row);
+      localStorage.setItem('nexo-preview-prompts', JSON.stringify(items));
+      return { ok: true, items };
+    },
+    remove: async (id) => {
+      const items = JSON.parse(localStorage.getItem('nexo-preview-prompts') || '[]').filter((item) => item.id !== id);
+      localStorage.setItem('nexo-preview-prompts', JSON.stringify(items));
+      return { ok: true, items };
+    },
+    render: async () => ({ ok: true, text: '', missing: [] }),
+  },
   domTokens: { observe: async () => ({ ok: false }) },
   tokenizer: { models: async () => ({ ok: false, error: 'El tokenizador local se ejecuta en la aplicación Electron; la vista web no simula el conteo.' }), count: async () => ({ ok: false, error: 'Abrí Nexo para contar con el tokenizador local.' }) },
   understanding: Object.fromEntries(['read','edit','recall','contexts','bind','clear'].map(k=>[k,async()=>({ok:false,error:'La comprensión persistente se ejecuta en Electron; esta vista no la simula.'})])),
@@ -31,6 +50,14 @@ window.nexo = {
   permissions: { for: empty, set: result },
   profile: { stats: async () => ({ history: { total: 0 }, bookmarks: 0, downloads: { total: 0 }, permissionSites: 0 }), clear: result }, data: { clear: result },
   on(name, handler) { listeners.set(name, handler); return () => listeners.delete(name); },
+  // Vista de interfaz: permite ver la barra de continuación sin motor real.
+  onTurnFollowUp(handler) { listeners.set('nexo:turn-followup', handler); return () => listeners.delete('nexo:turn-followup'); },
+  // Gancho de demostración (sólo esta vista): simula un cierre con reparación
+  // y continuación para comprobar la barra, sin enviar ni insertar nada.
+  demoFollowUp() {
+    const frame = [...document.querySelectorAll('.viewport iframe')].at(-1);
+    listeners.get('nexo:turn-followup')?.({ webContentsId: frame?.getWebContentsId?.(), fixes: ['Markdown reparado'], next: { type: 'continue', label: 'Continuar la respuesta', prompt: 'Continuá exactamente donde se cortó.' }, suggestions: [] });
+  },
 };
 const create = document.createElement.bind(document);
 document.createElement = function (tag, ...args) {
@@ -44,6 +71,9 @@ document.createElement = function (tag, ...args) {
     if (name === 'src') value = '/src/ui/start/index.html';
     set(name, value);
   };
+  // Identificador estable para la vista de interfaz: el código real compara
+  // `getWebContentsId()` de cada pestaña con el evento del proceso principal.
+  frame.getWebContentsId = () => (frame.__nexoId ||= 1000 + Math.floor(Math.random() * 100000));
   frame.loadURL = () => { frame.src = '/src/ui/start/index.html'; };
   frame.reload = () => frame.contentWindow?.location.reload();
   frame.canGoBack = frame.canGoForward = () => false;

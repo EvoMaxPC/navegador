@@ -7,6 +7,7 @@ import { createUnderstandingPanel } from './understandingPanel.js';
 import { createWorkDossier } from './workDossier.js';
 import { createBrowserTools } from './browserTools.js';
 import { createNavigationHub } from './navigationHub.js';
+import { createPromptLibrary } from './promptLibrary.js';
 import { adjacentNavigationTab, workspaceScopedTabs } from './navigationModel.js';
 import { createMemoryPanel, memoryReadout, setMemoryPanelAvailability } from './memoryPanel.js';
 import { readMemoryConversation, sameConversationSource } from './chatgptDirect.js';
@@ -104,6 +105,7 @@ let workPanel = null;
 let understandingPanel = null;
 let visualChrome = null;
 let navigationHub = null;
+let promptLibrary = null;
 const state = {
   tabs: new Map(),
   activeId: null,
@@ -303,6 +305,7 @@ function activateTab(id) {
   hideSuggestions();
   updateStar();
   updateNavigation();
+  refreshFollowUp?.();
   if (isPanelActive('sites')) renderSitePanel();
   if (isPanelActive('memory')) uiTasks.schedule('memory', refreshMemory);
   browserTools?.activated(tab);
@@ -1520,7 +1523,7 @@ const tokenizerPanel = createTokenizerPanel({ root: document.getElementById('pan
 
 function refreshActivePanel() {
   const current = document.querySelector('.stab.active')?.dataset.panel;
-  const renders = { tokenizer: () => tokenizerPanel.refresh(), activity: () => { renderLog(); refreshStats(); }, memory: refreshMemory,
+  const renders = { tokenizer: () => tokenizerPanel.refresh(), prompts: () => promptLibrary?.load(), activity: () => { renderLog(); refreshStats(); }, memory: refreshMemory,
     understanding:()=>understandingPanel?.refresh(), work: () => workPanel?.load(), history: renderHistory, bookmarks: renderBookmarks, downloads: renderDownloads, sites: renderSitePanel };
   if (els.browser.classList.contains('with-sidebar')) uiTasks.schedule(`panel-${current}`, renders[current] || (() => {}));
 }
@@ -1579,6 +1582,71 @@ nexo.on('nexo:settings-changed', (settings) => {
   if(isEvoMemoryEnabled(settings)&&isPanelActive('memory'))uiTasks.schedule('memory',refreshMemory);
 });
 
+/**
+ * Siguiente paso tras cerrar un turno: reparaciones aplicadas, continuación
+ * disponible y reintentos con otro enfoque. Todo se inserta en el cuadro del
+ * sitio para revisarlo; nada se envía solo.
+ */
+nexo.onTurnFollowUp?.((payload) => {
+  const id = Number(payload?.webContentsId);
+  const tab = [...state.tabs.values()].find((t) => {
+    try { return t.view.getWebContentsId() === id; } catch { return false; }
+  });
+  if (!tab) return;
+  const touchesActive = tab.id === state.activeId;
+  const fixes = Array.isArray(payload.fixes) ? payload.fixes : [];
+  if (fixes.length) {
+    tab.tabEl.classList.add('follow-up');
+    tab.tabEl.title = `${tab.title} · respuesta reparada (${fixes.length})`;
+  }
+  if (!touchesActive) return;
+  if (fixes.length) pushLocalNotice(`Respuesta reparada al vuelo: ${fixes.join(', ')}.`);
+  if (payload.next?.prompt) {
+    tab.followUp = { kind: 'continue', label: payload.next.label || 'Continuar la respuesta', prompt: payload.next.prompt };
+    pushLocalNotice(`La respuesta quedó cortada. Menú del navegador → Continuar la respuesta para seguir donde terminó.`);
+  } else if (Array.isArray(payload.suggestions) && payload.suggestions.length) {
+    tab.followUp = { kind: 'suggestion', ...payload.suggestions[0] };
+  }
+  refreshFollowUp();
+});
+
+/** Muestra u oculta la acción de continuación de la pestaña activa. */
+function refreshFollowUp() {
+  const bar = document.getElementById('followUpBar');
+  if (!bar) return;
+  const tab = activeTab();
+  const follow = tab?.followUp;
+  bar.hidden = !follow;
+  if (!follow) return;
+  bar.querySelector('[data-follow-label]').textContent = follow.label || 'Continuar';
+  bar.querySelector('[data-follow-help]').textContent = follow.kind === 'continue'
+    ? 'Se escribe en el cuadro del sitio; revisalo y enviá vos.'
+    : 'Sugerencia del motor local; se escribe en el cuadro del sitio.';
+}
+
+document.getElementById('followUpInsert')?.addEventListener('click', () => {
+  const tab = activeTab();
+  if (!tab?.followUp) return;
+  // Escribe en el cuadro del sitio sin enviar: la persona revisa y decide.
+  nexo.advanced
+    .action({ action: 'insert-text', webContentsId: tab.view.getWebContentsId?.(), text: tab.followUp.prompt })
+    .then((result) => pushLocalNotice(result?.ok
+      ? 'Texto escrito en el cuadro del sitio. Revisalo y enviá vos.'
+      : (result?.error || 'No se pudo escribir en el cuadro del sitio.')))
+    .catch(() => pushLocalNotice('No se pudo escribir en el cuadro del sitio.'));
+  delete tab.followUp;
+  refreshFollowUp();
+});
+document.getElementById('followUpDismiss')?.addEventListener('click', () => {
+  const tab = activeTab();
+  if (tab) {
+    delete tab.followUp;
+    tab.tabEl.classList.remove('follow-up');
+    tab.tabEl.title = tab.title;
+  }
+  refreshFollowUp();
+});
+
 nexo.on('nexo:open-tab', ({ url }) => {
   if (url) createTab(url);
 });
@@ -1593,6 +1661,20 @@ function runBrowserCommand(command) {
       break;
     case 'new-tab':
       createTab(START_URL);
+      break;
+    // Atajos de conversación: abrir la biblioteca o ejecutar uno por id
+    // (el id lo aporta la propia lista del perfil, nunca una URL).
+    case 'prompt-list':
+      showPanel('prompts');
+      break;
+    case 'continue-response':
+      navigationHub?.open('followup');
+      break;
+    case 'prompt-insert':
+      promptLibrary?.runById(String(command.id || ''));
+      break;
+    case 'followup-insert':
+      document.getElementById('followUpInsert')?.click();
       break;
     case 'close-tab':
       if (state.activeId) closeTab(state.activeId);
@@ -1833,11 +1915,15 @@ async function boot() {
   reportarMedidas(marcas);
 }
 
-navigationHub = createNavigationHub({state,createTab,activateTab,closeTab,runCommand:runBrowserCommand,openPanel:showPanel,searchTabs:()=>navigationHub.open('tabs'),
+navigationHub = createNavigationHub({state,createTab,activateTab,closeTab,runCommand:runBrowserCommand,openPanel:showPanel,searchTabs:()=>navigationHub.open('tabs'),insertPrompt:id=>promptLibrary?.runById(id),continueResponse:()=>navigationHub?.open('followup'),listPrompts:()=>nexo.prompts.list().then(r=>r?.ok?r.items:[]).catch(()=>[]),
   getWorkspace:()=>browserTools?.workspace || 'main',workspaceName:id=>browserTools?.workspaceName(id) || id,
   shortcut:id=>acceleratorFor(id,navigator.platform.includes('Mac')?'darwin':'linux'),
   scheduleSessionCapture});
 browserTools = createBrowserTools({nexo,state,activeTab,createTab,activateTab,closeTab,navigate,runCommand:runBrowserCommand,notice:pushLocalNotice,scheduleSessionCapture,searchTabs:()=>navigationHub.open('tabs'),onPreferences:p=>{visualChrome?.apply(p.rightMenuMode);document.querySelectorAll('[data-ui-zoom-value]').forEach(e=>e.textContent=`${Math.round((p.uiZoom||1)*100)}%`);}});
+promptLibrary = createPromptLibrary({root:document.getElementById('promptRoot'),nexo,activeTab,
+  // Insertar es la acción nativa que escribe en el cuadro del sitio; nunca envía.
+  insertText:text=>nexo.advanced.action({action:'insert-text',webContentsId:activeTab()?.view?.getWebContentsId?.(),text}),
+  notice:pushLocalNotice,onChanged:()=>{}});
 workPanel = createWorkDossier({nexo,root:document.getElementById('panel-work'),
   getWorkspaceId:()=>browserTools.workspace,
   getWorkspaceName:id=>browserTools.workspaceName(id),

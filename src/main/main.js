@@ -3,6 +3,8 @@ import { tokenizerModels, calculateTokenizer } from './tokenizerCalculator.js';
 import { ConversationOptimizer, installOptimizationIPC } from './conversationOptimizer.js';
 import { installWorkDossier } from './workDossier.js';
 import { installAdvancedBrowser } from './advancedBrowser.js';
+import { PromptStore } from './promptStore.js';
+import { MAX_PROMPTS, PROMPT_VARIABLES } from '../core/prompts.js';
 import { repetitionSnapshot } from '../core/conversationRepetition.js';
 import { isPublicAssetPath } from './internalAssets.js';
 import { createCaptureDiagnostic } from './captureDiagnostic.js';
@@ -117,6 +119,7 @@ let win = null;
 let advancedBrowser = null;
 let workDossier = null;
 let conversationOptimizer = null;
+let promptStore = null;
 let store = null;
 let engine = null;
 /**
@@ -565,6 +568,29 @@ function refreshGuestSettings() {
 }
 
 
+/**
+ * Resumen accionable del cierre de un turno, sólo si hay algo que ofrecer.
+ * No incluye el texto de la respuesta ni datos del sitio: etiquetas, conteos
+ * y el prompt sugerido por el motor local.
+ */
+function turnFollowUp(result) {
+  if (!result || typeof result !== 'object') return null;
+  const repaired = result.repaired || {};
+  const fixes = Array.isArray(repaired.fixes) ? repaired.fixes.filter((x) => typeof x === 'string').slice(0, 8) : [];
+  const suggestions = Array.isArray(result.suggestions)
+    ? result.suggestions
+      .filter((s) => s && typeof s.label === 'string' && typeof s.prompt === 'string' && s.prompt.trim() && s.prompt.length <= 2000)
+      .slice(0, 4)
+      .map((s) => ({ id: String(s.id || '').slice(0, 40), label: s.label.slice(0, 160), prompt: s.prompt }))
+    : [];
+  const next = result.nextAction && typeof result.nextAction.prompt === 'string'
+    ? { type: String(result.nextAction.type || '').slice(0, 40),
+        label: String(result.nextAction.label || '').slice(0, 160),
+        prompt: result.nextAction.prompt.slice(0, 2000) } : null;
+  if (!fixes.length && !suggestions.length && !next && !repaired.truncated && !repaired.refusal) return null;
+  return { fixes, suggestions, next, truncated: Boolean(repaired.truncated), refusal: Boolean(repaired.refusal) };
+}
+
 function isShellRequest(event) {
   return Boolean(event?.sender && event.senderFrame===event.sender.mainFrame &&
     event.sender.getURL()==='nexo://app/src/ui/shell/index.html' &&
@@ -669,6 +695,11 @@ function registerIpc() {
       broadcast('nexo:event', { type: 'intervention', payload: entry });
     }
     broadcast('nexo:stats-changed', statsSnapshot());
+    // Lo que el motor detectó al cerrar el turno (reparaciones, sugerencias y
+    // continuación) se publica como evento: antes se calculaba y se descartaba
+    // en la interfaz, que no tenía forma de ofrecer el siguiente paso.
+    const followUp = turnFollowUp(result);
+    if (followUp) broadcast('nexo:turn-followup', { webContentsId: event.sender.id, ...followUp });
     return result;
   });
   ipcMain.handle('nexo:stream-stop', (event, payload) => engine.onStreamStop(event.sender.id, payload));
@@ -679,6 +710,36 @@ function registerIpc() {
     const model = typeof payload.model === 'string' ? payload.model : 'gpt-4o';
     if (text.length > 500000) throw new Error('El texto supera el límite de 500.000 caracteres.');
     return gptTokens.countGptTokens(text, model);
+  });
+
+  /* ---------------- Atajos de conversación (locales) ---------------- */
+  // Sólo la shell puede listar y editar. Insertar el texto en el cuadro lo hace
+  // la interfaz con la acción `insert-text`, que el preload valida.
+  ipcMain.handle('nexo:prompts:list', (event) =>
+    isShellRequest(event)
+      ? { ok: true, items: promptStore.list, max: MAX_PROMPTS, variables: PROMPT_VARIABLES }
+      : { ok: false, error: 'No autorizado.' });
+  ipcMain.handle('nexo:prompts:save', (event, payload) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
+    try {
+      // La shell recibe la lista actualizada en la misma respuesta; no hace
+      // falta un evento global (y no se emite un canal sin consumidor).
+      return promptStore.save(payload || {});
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+  ipcMain.handle('nexo:prompts:remove', (event, id) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
+    try {
+      return promptStore.remove(id);
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+  ipcMain.handle('nexo:prompts:render', (event, payload = {}) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
+    return promptStore.render(payload.id, payload.values || {});
   });
 
   ipcMain.handle('nexo:settings:get', () => store.settings);
@@ -1805,6 +1866,7 @@ app.whenReady().then(async () => {
     } · contadores en la sesión.`,
     meta: { version: app.getVersion(), netwatch: process.env.NEXO_NETWATCH !== '0', cdp: process.env.NEXO_CDP !== '0' },
   });
+  promptStore = new PromptStore({ store });
   advancedBrowser = installAdvancedBrowser({getProfile:()=>profile,downloadItems,broadcast,
     onCaptureEvidence:(owner,contents,params)=>workDossier?.captureSelection(owner,contents,params),
     onPreferences:(prefs)=>buildMenu({send:(channel,payload)=>broadcast(channel,payload),bindings:prefs.shortcuts})});

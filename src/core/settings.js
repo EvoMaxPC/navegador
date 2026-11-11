@@ -33,6 +33,12 @@ export const DEFAULT_SETTINGS = {
     budgetTokens: 6000,
     keepRecentTurns: 6,
   },
+  /**
+   * Atajos de texto del usuario para conversar con la IA. Son plantillas
+   * locales: se insertan en el cuadro del sitio, nunca se envían solas ni se
+   * sincronizan. El texto puede llevar `{{seleccion}}` o `{{pestana}}`.
+   */
+  prompts: { items: [] },
   memory: {
     // EVO MEMORY: memoria persistente y expansión de contexto.
     enabled: true,

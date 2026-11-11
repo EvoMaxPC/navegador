@@ -3,7 +3,8 @@ import { navigationTabs, navigationMatches, navigationLocation } from './navigat
 const MENU_SECTIONS = [
   ['NAVEGAR', [['new-tab', 'Nueva pestaña', 'Un nuevo lugar para explorar'], ['tab-search', 'Buscar pestañas', 'Encontrá cualquier página abierta'], ['reopen-tab', 'Reabrir pestaña cerrada', 'Volvé a donde estabas']]],
   ['TU BIBLIOTECA', [['bookmarks', 'Favoritos', 'Las páginas que querés conservar'], ['history', 'Historial', 'Retomá una visita anterior'], ['downloads', 'Descargas', 'Archivos, progreso y ubicación']]],
-  ['TRABAJAR MEJOR', [['workspaces', 'Espacios de trabajo', 'Separá tus proyectos'], ['split', 'Vista dividida', 'Consultá dos pestañas a la vez'], ['reader', 'Modo lectura', 'Concentrate en el texto'], ['screenshot', 'Capturar página', 'Guardá el área visible']]],
+  ['TRABAJAR MEJOR', [['workspaces', 'Espacios de trabajo', 'Separá tus proyectos'], ['split', 'Vista dividida', 'Consultá dos pestañas a la vez'], ['screenshot', 'Capturar página', 'Guardá el área visible']]],
+  ['CONVERSAR MEJOR', [['prompt-list', 'Atajos de conversación', 'Plantillas propias, revisadas antes de enviar'], ['prompt-bar', 'Insertar un atajo', 'Elegí uno y lo escribo en el cuadro'], ['continue-response', 'Continuar la respuesta', 'Retomar donde se cortó, sin enviar solo'], ['reader', 'Modo lectura', 'Concentrate en el texto']]],
   ['NEXO Y PREFERENCIAS', [['memory', 'EVO Memory', 'Tu memoria de conversación'], ['tokenizer', 'Tokenizador', 'Contá el texto localmente', 'panel'], ['command-center', 'Todos los comandos', 'Buscá herramientas y atajos'], ['settings', 'Ajustes', 'Personalizá tu navegador', 'panel']]],
 ];
 
@@ -21,7 +22,7 @@ function action(label, className, callback) {
 }
 
 /** Centro de navegación de la shell: usa las pestañas/acciones reales existentes. */
-export function createNavigationHub({ state, createTab, activateTab, closeTab, runCommand, openPanel = () => {}, getWorkspace, workspaceName, shortcut, scheduleSessionCapture }) {
+export function createNavigationHub({ state, createTab, activateTab, closeTab, runCommand, openPanel = () => {}, insertPrompt = () => {}, listPrompts = async () => [], getWorkspace, workspaceName, shortcut, scheduleSessionCapture }) {
   const modal = element('dialog', 'navigation-hub');
   modal.id = 'navigationHub';
   modal.setAttribute('aria-labelledby', 'navigationHubTitle');
@@ -177,6 +178,68 @@ export function createNavigationHub({ state, createTab, activateTab, closeTab, r
     modal.append(controls, search, status, results, footer);
     select(false);
   }
+  /**
+   * Elegir un atajo desde el menú: lista los guardados y lo inserta en el
+   * cuadro del sitio. Si no hay ninguno, lleva a crearlos. No envía nada.
+   */
+  async function showPrompts() {
+    modal.replaceChildren();
+    header('Insertar un atajo', 'Se escribe en el cuadro del sitio; vos decidís cuándo enviar.');
+    const list = element('div', 'hub-results');
+    const items = await listPrompts();
+    if (!items.length) {
+      const empty = element('div', 'hub-empty');
+      empty.append(element('strong', '', 'Todavía no hay atajos'), element('p', '', 'Creá plantillas propias para no repetir instrucciones en cada conversación.'));
+      list.append(empty);
+    }
+    for (const item of items) {
+      const pick = action('', 'hub-menu-action', async () => {
+        close();
+        await insertPrompt(item.id);
+      });
+      pick.dataset.result = '';
+      const copy = element('span');
+      copy.append(element('strong', '', item.title), element('small', '', String(item.text || '').replace(/\s+/g, ' ').slice(0, 90)));
+      pick.append(copy);
+      list.append(pick);
+    }
+    const footer = element('footer', 'hub-footer');
+    footer.append(element('span', '', 'Se insertan sin enviar · quedan en tu perfil local'),
+      action('Administrar atajos', 'hub-primary', () => { close(); openPanel('prompts'); }));
+    modal.append(list, footer);
+    (list.querySelector('[data-result]') || footer.querySelector('button')).focus();
+  }
+  /** La acción pendiente de la pestaña activa, si el motor ofreció una. */
+  function activeFollowUp() {
+    const tab = state.tabs.get(state.activeId);
+    return tab?.followUp || null;
+  }
+  function insertFollowUp() {
+    const follow = activeFollowUp();
+    if (!follow?.prompt) return;
+    close();
+    runCommand({ type: 'followup-insert' });
+  }
+  function showFollowUp() {
+    header('Continuar la respuesta', 'El motor local detectó dónde retomar. El texto se escribe en el cuadro del sitio; nunca se envía solo.');
+    const follow = activeFollowUp();
+    const body = element('div', 'hub-results');
+    if (!follow) {
+      const empty = element('div', 'hub-empty');
+      empty.append(element('strong', '', 'No hay una continuación pendiente'), element('p', '', 'Aparece cuando una respuesta se corta o cuando el motor sugiere otro enfoque.'));
+      body.append(empty);
+    } else {
+      const row = element('div', 'hub-empty');
+      row.append(element('strong', '', follow.label || 'Continuar'), element('p', '', follow.kind === 'continue'
+        ? 'Se escribirá en el cuadro del sitio para revisarlo y enviarlo vos.'
+        : 'Sugerencia del motor local: se escribe en el cuadro para que la edites.'));
+      body.append(row);
+    }
+    const footer = element('footer', 'hub-footer');
+    footer.append(element('span', '', 'Nada se envía automáticamente'),
+      action(follow ? 'Escribir en el cuadro' : 'Cerrar', 'hub-primary', follow ? insertFollowUp : close));
+    modal.append(body, footer);
+  }
   function showMenu() {
     header('Tu navegador, a mano', 'Las herramientas esenciales, sin buscar entre paneles.');
     search = null;
@@ -202,7 +265,7 @@ export function createNavigationHub({ state, createTab, activateTab, closeTab, r
         const binding = shortcut(type);
         if (binding) item.append(element('kbd', '', binding.replace('Command', '⌘')));
         if (type === 'reopen-tab') item.disabled = !state.closed.length;
-        if (['reader', 'screenshot'].includes(type)) item.disabled = !state.tabs.size;
+        if (['reader', 'screenshot', 'prompt-bar'].includes(type)) item.disabled = !state.tabs.size;
         section.append(item);
       }
       results.append(section);
@@ -210,6 +273,30 @@ export function createNavigationHub({ state, createTab, activateTab, closeTab, r
     modal.append(results, element('footer', 'hub-footer', 'Las funciones usan este perfil local. Un espacio de trabajo no es una sesión privada.'));
   }
   function open(nextMode) {
+    if (nextMode === 'followup') {
+      for (const other of document.querySelectorAll('dialog[open]')) if (other !== modal) other.close();
+      if (modal.open) modal.close();
+      returnFocus = document.activeElement;
+      mode = 'followup';
+      modal.replaceChildren();
+      modal.showModal();
+      trigger.setAttribute('aria-expanded', 'false');
+      menuTrigger.setAttribute('aria-expanded', 'false');
+      showFollowUp();
+      return;
+    }
+    if (nextMode === 'prompts') {
+      for (const other of document.querySelectorAll('dialog[open]')) if (other !== modal) other.close();
+      if (modal.open) modal.close();
+      returnFocus = document.activeElement;
+      mode = 'prompts';
+      modal.replaceChildren();
+      modal.showModal();
+      trigger.setAttribute('aria-expanded', 'false');
+      menuTrigger.setAttribute('aria-expanded', 'false');
+      showPrompts();
+      return;
+    }
     for (const other of document.querySelectorAll('dialog[open]')) if (other !== modal) other.close();
     if (modal.open) modal.close();
     returnFocus = document.activeElement;
@@ -237,6 +324,9 @@ export function createNavigationHub({ state, createTab, activateTab, closeTab, r
     handle(command) {
       if (command.type === 'tab-search') { open('tabs'); return true; }
       if (command.type === 'browser-menu') { open('menu'); return true; }
+      if (command.type === 'prompt-bar') { open('prompts'); return true; }
+      if (command.type === 'continue-response') { open('followup'); return true; }
+      if (command.type === 'suggestion-insert') { insertFollowUp(); return true; }
       if (command.type === 'escape' && modal.open) { close(); return true; }
       // Los demás diálogos no deben quedar encima de este.
       if (modal.open && ['command-center', 'workspaces', 'workspace-new', 'toolbar-settings', 'keyboard-settings', 'reader', 'split'].includes(command.type)) close();

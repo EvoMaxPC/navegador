@@ -993,6 +993,15 @@ export function createBrowserTools(api) {
         }
         return true;
       }
+      case 'prompt-list':
+        api.openPanel?.('prompts');
+        return true;
+      case 'continue-response':
+        api.continueResponse?.();
+        return true;
+      case 'prompt-insert':
+        api.insertPrompt?.(String(command.id || ''));
+        return true;
       case 'split': {
         if (splitId) {
           splitId = null;

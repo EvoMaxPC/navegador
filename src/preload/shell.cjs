@@ -28,6 +28,14 @@ const ALLOWED_EVENTS = new Set([
 
 contextBridge.exposeInMainWorld('nexo', {
   tiktoken: { count: (text, model) => ipcRenderer.invoke('nexo:tiktoken:count', { text, model }) },
+  // Atajos de conversación: plantillas locales del usuario. Nunca se envían
+  // solas; la shell las inserta en el cuadro con `advanced.action('insert-text')`.
+  prompts: {
+    list: () => ipcRenderer.invoke('nexo:prompts:list'),
+    save: (payload) => ipcRenderer.invoke('nexo:prompts:save', payload),
+    remove: (id) => ipcRenderer.invoke('nexo:prompts:remove', id),
+    render: (payload) => ipcRenderer.invoke('nexo:prompts:render', payload),
+  },
   understanding: {
     read: p => ipcRenderer.invoke('nexo:understanding:read',p),
   },
@@ -46,6 +54,9 @@ contextBridge.exposeInMainWorld('nexo', {
     context: (payload) => ipcRenderer.invoke('nexo:advanced:context', payload),
   },
 
+  // Siguiente paso sugerido al cerrar un turno (reparaciones, reintento,
+  // continuación). Llega por evento; el texto nunca se envía solo.
+  onTurnFollowUp: (handler) => ipcRenderer.on('nexo:turn-followup', (_event, payload) => handler(payload)),
   domTokens: { observe: payload => ipcRenderer.invoke('nexo:dom-tokens:snapshot', payload) },
   tokenizer: {
     models: () => ipcRenderer.invoke('nexo:tokenizer:models'),

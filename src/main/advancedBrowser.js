@@ -348,6 +348,20 @@ export function installAdvancedBrowser({
       case 'copy-url':
         clipboard.writeText(contents.getURL().slice(0, 8192));
         return { ok: true };
+      /*
+       * Insertar texto en el cuadro del sitio (atajos de conversación y
+       * reutilización de fragmentos). Sólo el shell puede pedirlo —el preload
+       * de la página no expone este canal—; se escribe en el foco real y se
+       * reemplaza la selección como haría el portapapeles. Nunca envía: la
+       * persona revisa y pulsa Enviar.
+       */
+      case 'insert-text': {
+        const text = bounded(payload.text).slice(0, 20000);
+        if (!text) throw Error('No hay texto para insertar');
+        contents.focus();
+        contents.insertText(text);
+        return { ok: true, chars: text.length };
+      }
       case 'fullscreen': {
         const w = BrowserWindow.fromWebContents(owner);
         w.setFullScreen(!w.isFullScreen());
@@ -462,6 +476,17 @@ export function installAdvancedBrowser({
         params.inputFieldType === 'password'
           ? ''
           : bounded(params.selectionText);
+    // Un texto seleccionado en una página se puede reutilizar sin copiarlo a
+    // mano. Con campos de contraseña no se ofrece: no se lee ni se copia.
+    if (selection && !params.isEditable) {
+      add('Copiar selección', () => clipboard.writeText(selection));
+      add('Buscar la selección en la web', () =>
+        emit(owner, 'open', {
+          url: `https://duckduckgo.com/?q=${encodeURIComponent(selection.slice(0, 400))}`,
+        }),
+      );
+      sep();
+    }
     if (link) {
       add('Abrir enlace en pestaña nueva', () => open(link));
       add('Abrir enlace en ventana nueva', () => newWindow(link));
