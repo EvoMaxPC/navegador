@@ -8,6 +8,7 @@ document.documentElement.style.zoom=previewPrefs.uiZoom;
 const empty = async () => [];
 const result = async () => ({ ok: true, removed: 0 });
 window.nexo = {
+  tokenizer: { models: async () => ({ ok: false, error: 'El tokenizador local se ejecuta en la aplicación Electron; la vista web no simula el conteo.' }), count: async () => ({ ok: false, error: 'Abrí Nexo para contar con el tokenizador local.' }) },
   understanding: Object.fromEntries(['read','edit','recall','contexts','bind','clear'].map(k=>[k,async()=>({ok:false,error:'La comprensión persistente se ejecuta en Electron; esta vista no la simula.'})])),
   work: Object.fromEntries(['read','mutate','attach','capture','clear','export'].map(k=>[k,async()=>({ok:false,error:'Los expedientes usan el almacenamiento local de Electron. No se simula persistencia en esta vista web.'})])),
   advanced: {preferences:async()=>previewPrefs,setPreferences:async next=>{previewPrefs=browserPreferences(next);localStorage.setItem('nexo-design-preview',JSON.stringify(previewPrefs));document.documentElement.style.zoom=previewPrefs.uiZoom;listeners.get('nexo:browser-prefs')?.(previewPrefs);return {ok:true,prefs:previewPrefs};},action:async()=>({ok:false,error:'Herramienta disponible sólo en la aplicación Electron.'}),context:async()=>({ok:false,error:'No hay un evento de contexto nativo en la vista UI.'})},

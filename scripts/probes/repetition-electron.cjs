@@ -52,6 +52,22 @@ app.whenReady().then(() => {
   const realSend = shell.send.bind(shell);
   shell.send = (channel, ...args) => { if (channel !== 'nexo:repetition-changed' || !suppressAutomaticSnapshot) realSend(channel, ...args); };
   await until(() => shell.executeJavaScript('Boolean(window.nexo && document.querySelector("webview"))').catch(() => false), 'shell lista');
+  // Calculadora manual: funciona sin depender de EVO ni alterar los contadores.
+  const beforeCalculator = await shell.executeJavaScript('nexo.getStats()');
+  await shell.executeJavaScript(`if(!document.querySelector('.browser').classList.contains('with-sidebar'))document.getElementById('toggleSidebar').click();document.querySelector('.stab[data-panel="tokenizer"]').click()`);
+  await until(() => shell.executeJavaScript(`!document.getElementById('tokenizerCount').disabled && document.getElementById('tokenizerModel').value==='gpt-4o'`), 'Tokenizador carga modelos reales por IPC');
+  await shell.executeJavaScript(`document.getElementById('tokenizerText').value=${JSON.stringify('  Hola, mundo.  ')};document.getElementById('tokenizerText').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('tokenizerForm').requestSubmit()`);
+  await until(() => shell.executeJavaScript(`document.getElementById('tokenizerResult').textContent==='6' && document.getElementById('tokenizerStatus').textContent.includes('o200k_base')`), 'Tokenizador imprime 6 tokens con espacios originales y gpt-4o');
+  const calculatorOriginal = await shell.executeJavaScript(`document.getElementById('tokenizerText').value`);
+  if(calculatorOriginal !== '  Hola, mundo.  ') throw Error('La calculadora cambió el texto original');
+  await shell.executeJavaScript(`document.getElementById('tokenizerModel').value='gpt-4';document.getElementById('tokenizerModel').dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('tokenizerForm').requestSubmit()`);
+  await until(() => shell.executeJavaScript(`document.getElementById('tokenizerResult').textContent==='7' && document.getElementById('tokenizerStatus').textContent.includes('cl100k_base')`), 'Tokenizador cambia a 7 tokens con gpt-4');
+  await shell.executeJavaScript(`document.getElementById('tokenizerClear').click()`);
+  const calculatorCleared = await shell.executeJavaScript(`document.getElementById('tokenizerText').value==='' && document.getElementById('tokenizerResult').textContent==='0'`);
+  if(!calculatorCleared) throw Error('Limpiar debe dejar texto vacío y cero tokens');
+  const afterCalculator = await shell.executeJavaScript('nexo.getStats()');
+  for(const key of ['messages','responses','inputTokens','outputBpeTokens'])if(beforeCalculator[key]!==afterCalculator[key])throw Error('La calculadora alteró actividad: '+key);
+  report.checks.push('Tokenizador local cuenta y limpia sin modificar la actividad');
   await shell.executeJavaScript(`(async()=>{await nexo.setSettings({enabled:false,memory:{enabled:false}});await nexo.advanced.setPreferences({...await nexo.advanced.preferences(),rightMenuMode:'fixed'});document.getElementById('omnibox').value='https://chatgpt.com/c/fixture';document.getElementById('omniboxForm').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));document.querySelector('.rail-item[data-open-panel="memory"]').click();})()`);
   await until(() => webContents.getAllWebContents().some(w => w.getType() === 'webview' && w.getURL() === 'https://chatgpt.com/c/fixture'), 'webview HTTPS cargada');
   const guest = webContents.getAllWebContents().find(w => w.getType() === 'webview' && w.getURL() === 'https://chatgpt.com/c/fixture');

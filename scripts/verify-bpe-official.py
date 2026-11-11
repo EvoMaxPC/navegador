@@ -50,8 +50,9 @@ const require=createRequire(process.cwd()+'/package.json');
 const {encodeGptText,countGptTokens,encodingForModel}=require('./src/core/gptTokens.cjs');
 const {outgoingMetadata}=require('./src/preload/token-metadata.cjs');
 const {VisibleOutputTokens}=await import('./src/main/visibleOutputTokens.js');
+const {calculateTokenizer}=await import('./src/main/tokenizerCalculator.js');
 const rows=JSON.parse(readFileSync(0,'utf8'));
-process.stdout.write(JSON.stringify(rows.map(r=>{const p=outgoingMetadata({host:'chatgpt.com',model:r.model,tokenText:r.text});const output=new VisibleOutputTokens(),record={};output.set(record,r.text,r.model,'chatgpt.com');return {...r,outputBpe:output.totals.outputBpeTokens,outputEncoding:record.visibleMeasurement.encoding,nexoIds:encodeGptText(r.text,r.model),nexo:countGptTokens(r.text,r.model),resolved:encodingForModel(r.model),preload:p.tokens,preloadEncoding:p.tokenEncoding};})));
+process.stdout.write(JSON.stringify(rows.map(r=>{const p=outgoingMetadata({host:'chatgpt.com',model:r.model,tokenText:r.text});const output=new VisibleOutputTokens(),record={};output.set(record,r.text,r.model,'chatgpt.com');const calculator=calculateTokenizer({text:r.text,model:r.model});return {...r,calculatorTokens:calculator.tokens,calculatorEncoding:calculator.encoding,outputBpe:output.totals.outputBpeTokens,outputEncoding:record.visibleMeasurement.encoding,nexoIds:encodeGptText(r.text,r.model),nexo:countGptTokens(r.text,r.model),resolved:encodingForModel(r.model),preload:p.tokens,preloadEncoding:p.tokenEncoding};})));
 """
 result = subprocess.run(['node','--input-type=module','-e',js],cwd=ROOT,input=json.dumps(rows),capture_output=True,text=True,check=True)
 rows = json.loads(result.stdout)
@@ -66,9 +67,9 @@ with tempfile.TemporaryDirectory(prefix='nexo-official-tiktoken-') as cache:
         ids = tiktoken.get_encoding(row['encoding']).encode(row['text'],disallowed_special=())
         row['officialIds']=ids
         row['official']=len(ids)
-        row['match']=row['nexo']==len(ids) and row['nexoIds']==ids and row['resolved']==row['encoding'] and row['preload']==len(ids) and row['preloadEncoding']==row['encoding'] and row['outputBpe']==len(ids) and row['outputEncoding']==row['encoding']
+        row['match']=row['nexo']==len(ids) and row['nexoIds']==ids and row['resolved']==row['encoding'] and row['preload']==len(ids) and row['preloadEncoding']==row['encoding'] and row['outputBpe']==len(ids) and row['outputEncoding']==row['encoding'] and row['calculatorTokens']==len(ids) and row['calculatorEncoding']==row['encoding']
         row['textUtf8Sha256']=hashlib.sha256(row['text'].encode('utf-8')).hexdigest()
-report={'comparisonScope':'core IDs, preload input and visible output ledger, against official tiktoken', 'formula':'T = length(encode_Em(S_original))','tiktoken':importlib.metadata.version('tiktoken'),
+report={'comparisonScope':'core IDs, preload input, visible output ledger and manual calculator, against official tiktoken', 'formula':'T = length(encode_Em(S_original))','tiktoken':importlib.metadata.version('tiktoken'),
  'gpt-tokenizer':json.loads((ROOT/'node_modules/gpt-tokenizer/package.json').read_text())['version'],
  'specialTokenPolicy':'ordinary text; disallowed_special=() / disallowedSpecial=empty Set',
  'rankSha256':HASHES,'models':MODELS,'comparisons':len(rows),'discrepancies':sum(not r['match'] for r in rows),'rows':rows}

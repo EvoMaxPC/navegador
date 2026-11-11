@@ -76,6 +76,7 @@
       <div class="sidebar-tabs" role="tablist" aria-label="Herramientas de Nexo" aria-orientation="vertical">
         <span class="dock-brand" aria-hidden="true"><img src="../assets/identity/NEXO-Wormhole.png" alt="" /></span>
         <button class="stab" data-panel="activity" id="panel-tab-activity" role="tab" aria-controls="panel-activity" aria-selected="false" tabindex="-1" title="Actividad" aria-label="Actividad"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Actividad</span></button>
+        <button class="stab" data-panel="tokenizer" id="panel-tab-tokenizer" role="tab" aria-controls="panel-tokenizer" aria-selected="false" tabindex="-1" title="Tokenizador" aria-label="Tokenizador"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 12h2m4 0h2M8 16h2m4 0h2"/></svg><span class="stab-label">Tokenizador</span></button>
         <button class="stab" data-panel="understanding" id="panel-tab-understanding" role="tab" aria-controls="panel-understanding" aria-selected="false" tabindex="-1" title="Comprensión · ahorro de tokens" aria-label="Comprensión · ahorro de tokens"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1v3m0 16v3M1 12h3m16 0h3"/></svg><span class="stab-label">Comprensión</span></button>
         <button class="stab" data-panel="work" id="panel-tab-work" role="tab" aria-controls="panel-work" aria-selected="false" tabindex="-1" title="Expediente del objetivo" aria-label="Expediente del objetivo"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 3h16v18H4ZM8 7h8M8 12h8M8 17h5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span class="stab-label">Objetivo</span></button>
         <button class="stab active" data-panel="memory" id="panel-tab-memory" role="tab" aria-controls="panel-memory" aria-selected="true" tabindex="0" title="EVO MEMORY" aria-label="EVO MEMORY"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M8 3H5v18h14V3h-3M8 3v6h8V3M8 15h8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Memoria</span></button>
@@ -86,6 +87,21 @@
         <button class="stab" data-panel="settings" id="panel-tab-settings" role="tab" aria-controls="panel-settings" aria-selected="false" tabindex="-1" title="Ajustes" aria-label="Ajustes"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 7h16M4 17h16M8 3v8M16 13v8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Ajustes</span></button>
         <button class="stab" data-panel="about" id="panel-tab-about" role="tab" aria-controls="panel-about" aria-selected="false" tabindex="-1" title="Acerca" aria-label="Acerca"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M12 11v6M12 7h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="stab-label">Acerca</span></button>
       </div>
+
+      <section class="panel-view tokenizer-panel" data-panel="tokenizer" id="panel-tokenizer" role="tabpanel" aria-labelledby="panel-tab-tokenizer" tabindex="0">
+        <div class="panel-intro"><p class="eyebrow">CÁLCULO LOCAL</p><h2>Tokenizador</h2><p>Escribí o pegá un texto para saber cuántos tokens de entrada representa.</p></div>
+        <form id="tokenizerForm">
+          <label for="tokenizerModel">Modelo</label>
+          <select id="tokenizerModel" disabled aria-describedby="tokenizerNote"><option>Cargando modelos…</option></select>
+          <label for="tokenizerText">Texto original</label>
+          <textarea id="tokenizerText" rows="10" maxlength="200000" spellcheck="false" placeholder="Pegá tu texto acá…" aria-describedby="tokenizerNote"></textarea>
+          <div class="tokenizer-actions"><button type="submit" class="ghost premium-button" id="tokenizerCount" disabled>Contar tokens</button><button type="button" class="ghost" id="tokenizerClear">Limpiar</button></div>
+        </form>
+        <div class="tokenizer-total"><output id="tokenizerResult" for="tokenizerText tokenizerModel" aria-live="polite">0</output><span>tokens de entrada del texto</span></div>
+        <p class="note" id="tokenizerStatus" role="status">Elegí un modelo y contá el texto.</p>
+        <p class="note" id="tokenizerNote">Fórmula de tiktoken: T = longitud(encode del modelo(texto original)). Se conservan espacios, saltos y Unicode. Vacío = 0. Máximo: 200000 unidades UTF-16.</p>
+        <p class="note">El cálculo usa el tokenizador BPE local verificado contra OpenAI tiktoken. No envía tu texto ni consume tokens de una API. Mide sólo el texto: no incluye instrucciones internas, formato del chat, archivos ni la respuesta futura; no es una factura.</p>
+      </section>
 
       <section class="panel-view understanding-panel" data-panel="understanding" id="panel-understanding" role="tabpanel" aria-labelledby="panel-tab-understanding" tabindex="0"></section>
 

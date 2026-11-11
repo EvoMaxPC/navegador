@@ -45,6 +45,11 @@ contextBridge.exposeInMainWorld('nexo', {
     context: (payload) => ipcRenderer.invoke('nexo:advanced:context', payload),
   },
 
+  tokenizer: {
+    models: () => ipcRenderer.invoke('nexo:tokenizer:models'),
+    count: payload => ipcRenderer.invoke('nexo:tokenizer:count', payload),
+  },
+
   getConfig: () => ipcRenderer.invoke('nexo:shell:config'),
 
   getStorageStatus: () => ipcRenderer.invoke('nexo:storage:status'),

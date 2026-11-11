@@ -5,6 +5,8 @@ con IA, no acumular funciones. Sin cambiar silenciosamente el objetivo ni invent
 información para corregir respuestas.
 [Prioridades y criterios de revisión](docs/NEXO-CRITERIOS-RECTORES.md).
 
+**Tokenizador manual:** pestaña del panel derecho para pegar texto, elegir un modelo verificado y obtener un número de tokens BPE compatible con tiktoken, sin llamadas de API. [Uso y pruebas](docs/NEXO-TOKENIZADOR-MANUAL.md).
+
 **Conteo BPE de entrada corregido:** longitud de `encode` aplicada al texto
 original, sin recortar espacios ni normalizar Unicode. Encoding por modelo
 verificado; desconocidos y estimaciones separados. Comparación independiente:

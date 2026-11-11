@@ -71,6 +71,8 @@ export const requiredAsarEntries = [
   'src/main/store.js',
   'src/main/engine.js',
   'src/main/tokens.js',
+  'src/main/tokenizerCalculator.js',
+  'src/ui/shell/tokenizerPanel.js',
   'src/main/visibleOutputTokens.js',
   'src/ui/shell/tokenCounterView.js',
   'src/core/gptTokens.cjs',

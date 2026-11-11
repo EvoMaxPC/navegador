@@ -1,3 +1,4 @@
+import { createTokenizerPanel } from './tokenizerPanel.js';
 import { tokenCounterView } from './tokenCounterView.js';
 import { createWormholeChrome } from './wormholeChrome.js';
 import { createRepetitionView } from './repetition.js';
@@ -1500,9 +1501,11 @@ new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty('--chrome-height', `${entry.target.getBoundingClientRect().height}px`);
 }).observe(document.querySelector('.chrome'));
 
+const tokenizerPanel = createTokenizerPanel({ root: document.getElementById('panel-tokenizer'), api: nexo.tokenizer });
+
 function refreshActivePanel() {
   const current = document.querySelector('.stab.active')?.dataset.panel;
-  const renders = { activity: () => { renderLog(); refreshStats(); }, memory: refreshMemory,
+  const renders = { tokenizer: () => tokenizerPanel.refresh(), activity: () => { renderLog(); refreshStats(); }, memory: refreshMemory,
     understanding:()=>understandingPanel?.refresh(), work: () => workPanel?.load(), history: renderHistory, bookmarks: renderBookmarks, downloads: renderDownloads, sites: renderSitePanel };
   if (els.browser.classList.contains('with-sidebar')) uiTasks.schedule(`panel-${current}`, renders[current] || (() => {}));
 }

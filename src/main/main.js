@@ -1,3 +1,4 @@
+import { tokenizerModels, calculateTokenizer } from './tokenizerCalculator.js';
 import { ConversationOptimizer, installOptimizationIPC } from './conversationOptimizer.js';
 import { installWorkDossier } from './workDossier.js';
 import { installAdvancedBrowser } from './advancedBrowser.js';
@@ -552,6 +553,8 @@ function isShellRequest(event) {
 }
 
 function registerIpc() {
+  ipcMain.handle('nexo:tokenizer:models', event => isShellRequest(event) ? tokenizerModels() : { ok: false, error: 'No autorizado.' });
+  ipcMain.handle('nexo:tokenizer:count', (event, payload) => isShellRequest(event) ? calculateTokenizer(payload) : { ok: false, error: 'No autorizado.' });
   ipcMain.handle('nexo:config', (_event, payload = {}) => engine.configFor(payload.host || ''));
 
   // La misma configuración, pero síncrona: el preload de cada pestaña la

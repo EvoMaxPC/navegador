@@ -61,3 +61,14 @@ body{background:#020718 url('../assets/identity/nexo-universe.svg') center/cover
 
 /* Zoom sólo en Ajustes: no ocupa la cabecera ni se superpone al sitio. */
 .settings-zoom{justify-content:center;flex-wrap:wrap;max-width:100%}
+
+/* Calculadora manual de tokens: no se superpone al sitio. */
+.tokenizer-panel form{display:flex;flex-direction:column;gap:10px}
+.tokenizer-panel label{font-size:12px;color:#b9d9f6}
+.tokenizer-panel select,.tokenizer-panel textarea{width:100%;box-sizing:border-box;background:#071327;color:#e6f3ff;border:1px solid #315a8e;border-radius:10px;padding:10px;font:inherit}
+.tokenizer-panel textarea{resize:vertical;min-height:150px;white-space:pre-wrap;overflow-wrap:anywhere}
+.tokenizer-panel :is(select,textarea,button):focus-visible{outline:2px solid #64d9ff;outline-offset:2px}
+.tokenizer-actions{display:flex;flex-wrap:wrap;gap:8px}
+.tokenizer-total{margin:18px 0 10px;padding:20px 12px;border:1px solid #315a8e;border-radius:14px;background:#071327;text-align:center;display:flex;flex-direction:column;gap:6px}
+.tokenizer-total output{font-size:36px;color:#d8f6ff;font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tokenizer-total span{font-size:12px;color:#b9d9f6}
