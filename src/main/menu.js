@@ -32,6 +32,8 @@ export function buildMenu({ send, bindings = {} }) {
       submenu: [
         { label: 'Pestaña nueva', accelerator: acc('new-tab'), click: run('new-tab') },
         { label: 'Reabrir pestaña cerrada', accelerator: acc('reopen-tab'), click: run('reopen-tab') },
+        { label:'Buscar pestañas…',accelerator:acc('tab-search'),click:run('tab-search') },
+        { label:'Menú del navegador',accelerator:acc('browser-menu'),click:run('browser-menu') },
         { label:'Centro de comandos',accelerator:acc('command-center'),click:run('command-center') },
         { label:'Guardar página…',accelerator:acc('save-page'),click:run('save-page') },
         { label:'Imprimir…',accelerator:acc('print'),click:run('print') },

@@ -21,6 +21,17 @@ automático o fijo y zoom de interfaz persistente. Se retira sólo la pestaña
 Repetición, conservando el transporte DOM y su lector compartido con EVO Memory.
 [Implementación, pruebas y límites de validación](docs/NEXO-WORMHOLE-IDENTIDAD.md).
 
+**Navegación 2026 · centro de pestañas y menú:** botón junto a las pestañas
+(con el número de abiertas), **Ctrl+Shift+A** y clic derecho en una pestaña abren
+un buscador local de pestañas abiertas y cerradas (las últimas 25 de la sesión),
+con filtro por espacio, reapertura y cierre sin cambiar de contexto. **Alt+F** o
+el botón de menú reúnen favoritos, historial, descargas, espacios, vista dividida,
+lectura, capturas, EVO Memory, tokenizador y ajustes con sus atajos. El recorrido
+con flechas de pestañas usa el orden visible del espacio activo y los diálogos
+cierran con Escape devolviendo el foco. Sin sincronización, perfiles privados ni
+extensiones: un espacio de trabajo no aísla cookies.
+[Uso y límites](docs/NEXO-NAVEGACION-CENTRO.md).
+
 **0.1.33 · Comprensión reconstruida:** lector DOM independiente de EVO Memory,
 motor local de optimización conversacional, medición BPE y una única pantalla
 con estado, ahorro y comparación del original con el resultado. El motor anterior

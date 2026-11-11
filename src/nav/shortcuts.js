@@ -15,6 +15,8 @@ export const COMMAND_DEFS = [
   ['forward', 'Adelante', 'Alt+Right'],
   ['reload', 'Recargar', 'Ctrl+R'],
   ['hard-reload', 'Recarga forzada', 'Ctrl+Shift+R'],
+  ['tab-search', 'Buscar en las pestañas abiertas y cerradas', 'Ctrl+Shift+A'],
+  ['browser-menu', 'Menú del navegador', 'Alt+F'],
   ['command-center', 'Centro de comandos', 'Ctrl+K'],
   ['history', 'Historial', 'Ctrl+H'],
   ['downloads', 'Descargas', 'Ctrl+J'],
@@ -146,8 +148,12 @@ export function normalizeBinding(value) {
     (modifiers.has('ctrl') && key === 'Escape')
   )
     return null;
+  // Ctrl+Shift+A busca pestañas (igual que Chrome) y no edita texto: la
+  // reserva de Ctrl+A se mantiene intacta para «seleccionar todo».
+  const tabSearch = modifiers.has('ctrl') && modifiers.has('shift') && key === 'A';
   if (
     modifiers.has('ctrl') &&
+    !tabSearch &&
     ['C', 'V', 'X', 'A', 'Z', 'Y', 'Q'].includes(key)
   )
     return null;

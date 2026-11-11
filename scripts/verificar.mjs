@@ -31,6 +31,7 @@ const testsOk = buildOk && run('Pruebas automatizadas', process.execPath, ['--te
 const checklist = [
   'Navegar a 3 sitios distintos y comprobar que renderizan.',
   'Abrir 6 pestañas, cambiar con Ctrl+Tab y reabrir una cerrada con Ctrl+Shift+T.',
+  'Ctrl+Shift+A: buscar entre pestañas abiertas y cerradas; Alt+F: menú del navegador.',
   'Buscar en el historial y volver a una página desde el resultado.',
   'Cerrar y reabrir la aplicación: pestañas e historial siguen ahí.',
   'Marcar con la estrella y verlo en el panel de marcadores.',

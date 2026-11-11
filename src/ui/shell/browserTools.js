@@ -140,30 +140,28 @@ export function createBrowserTools(api) {
         tab.id !== state.activeId && tab.id !== splitId,
       );
     }
-    toolbar
-      .querySelectorAll('[data-command]')
-      .forEach((b) =>
-        b.setAttribute(
-          'aria-pressed',
-          String(
-            (b.dataset.command === 'split' && Boolean(splitId)) ||
-              ([
-                'memory',
-                'user-understanding',
-              'work-dossier',
-                'downloads',
-                'history',
-                'bookmarks',
-                'settings',
-              ].includes(b.dataset.command) &&
-                document.querySelector('.browser.with-sidebar') &&
-                document.querySelector('.stab.active')?.dataset.panel ===
-                  (b.dataset.command === 'work-dossier'
-                    ? 'work'
-                    : b.dataset.command)),
-          ),
-        ),
-      );
+    // Boolean explícito: sin barra lateral, la comparación devolvía null y el
+    // botón quedaba con aria-pressed="null", que no es un valor válido.
+    const panelOpen = (command) =>
+      document.querySelector('.browser.with-sidebar') &&
+      document.querySelector('.stab.active')?.dataset.panel ===
+        (command === 'work-dossier' ? 'work' : command);
+    toolbar.querySelectorAll('[data-command]').forEach((b) => {
+      const command = b.dataset.command;
+      const pressed =
+        (command === 'split' && Boolean(splitId)) ||
+        ([
+          'memory',
+          'user-understanding',
+          'work-dossier',
+          'downloads',
+          'history',
+          'bookmarks',
+          'settings',
+        ].includes(command) &&
+          Boolean(panelOpen(command)));
+      b.setAttribute('aria-pressed', String(Boolean(pressed)));
+    });
     document.getElementById('workspaceLabel').textContent =
       prefs.workspaces.find((w) => w.id === workspace)?.name || 'Principal';
   }
@@ -401,6 +399,11 @@ export function createBrowserTools(api) {
           refreshLayout();
         },
       },
+      // Mismo diálogo que el botón de la cabecera: una sola forma de buscar
+      // pestañas, también desde el menú contextual.
+      ...(api.searchTabs
+        ? [{ label: 'Buscar pestañas…', run: () => api.searchTabs() }]
+        : []),
       { label: 'Cerrar pestaña', run: () => closeTab(tab.id) },
     ];
     const others = list.filter((t) => t !== tab && !t.pinned);
@@ -669,14 +672,31 @@ export function createBrowserTools(api) {
     note(
       'Para descargar una imagen original: clic derecho sobre la imagen. Las acciones contextuales disponibles durante 30 segundos también aparecen aquí.',
     );
+    // Navegación de teclado completa: flechas recorren resultados, Inicio/Fin
+    // van a los extremos y Escape vuelve al buscador antes de cerrar.
+    let cursor = -1;
+    const focusResult = (index) => {
+      const buttons = [...list.querySelectorAll('button:not(:disabled)')];
+      if (!buttons.length) return;
+      cursor = (index + buttons.length) % buttons.length;
+      buttons[cursor].focus();
+    };
     const render = () => {
       list.replaceChildren();
+      cursor = -1;
       let commands = COMMAND_DEFS.filter(
         (c) => c.id !== 'escape' && c.id !== 'command-center',
       );
-      for (const c of commands.filter((c) =>
-        c.label.toLocaleLowerCase().includes(input.value.toLocaleLowerCase()),
-      )) {
+      const query = input.value.toLocaleLowerCase();
+      // Coincide por nombre o por atajo escrito («shift a», «ctrl j»).
+      const matches = (c) => {
+        if (!query.trim()) return true;
+        if (c.label.toLocaleLowerCase().includes(query)) return true;
+        // «ctrl j», «ctrl+j» y «ctrlj» encuentran el mismo atajo.
+        const compact = (text) => text.toLocaleLowerCase().replace(/[\s+]/g, '');
+        return compact(acceleratorFor(c.id, platform, prefs.shortcuts)).includes(compact(query));
+      };
+      for (const c of commands.filter(matches)) {
         const b = button(
           `${c.label}   ${acceleratorFor(c.id, platform, prefs.shortcuts)}`,
           () => {
@@ -747,11 +767,23 @@ export function createBrowserTools(api) {
     };
     input.oninput = render;
     input.onkeydown = (e) => {
-      if (e.key === 'ArrowDown') {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        list.querySelector('button')?.focus();
-      } else if (e.key === 'Enter') list.querySelector('button')?.click();
+        focusResult(e.key === 'ArrowDown' ? 0 : -1);
+      } else if (e.key === 'Enter') list.querySelector('button:not(:disabled)')?.click();
     };
+    list.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        focusResult(cursor + (e.key === 'ArrowDown' ? 1 : -1));
+      } else if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        focusResult(e.key === 'Home' ? 0 : -1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
     render();
     input.focus();
   }

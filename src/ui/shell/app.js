@@ -6,6 +6,8 @@ import { isEvoMemoryEnabled } from '../../core/settings.js';
 import { createUnderstandingPanel } from './understandingPanel.js';
 import { createWorkDossier } from './workDossier.js';
 import { createBrowserTools } from './browserTools.js';
+import { createNavigationHub } from './navigationHub.js';
+import { adjacentNavigationTab, workspaceScopedTabs } from './navigationModel.js';
 import { createMemoryPanel, memoryReadout, setMemoryPanelAvailability } from './memoryPanel.js';
 import { readMemoryConversation, sameConversationSource } from './chatgptDirect.js';
 import { isChatGptMemoryUrl } from '../../core/chatgptConversation.js';
@@ -22,6 +24,7 @@ import { navigationStatus, safeFaviconUrl } from './security.js';
 import { SITES } from '../../core/sites.js';
 import { displayUrl, hostOf, resolveInput } from '../../nav/url.js';
 import { ZOOM_STEPS, clampZoom, zoomLabel } from '../../nav/zoom.js';
+import { acceleratorFor } from '../../nav/shortcuts.js';
 
 const nexo = window.nexo;
 const uiTasks = createFrameQueue();
@@ -100,6 +103,7 @@ let browserTools = null;
 let workPanel = null;
 let understandingPanel = null;
 let visualChrome = null;
+let navigationHub = null;
 const state = {
   tabs: new Map(),
   activeId: null,
@@ -185,10 +189,11 @@ function createTab(url = START_URL, { activate = true, workspaceId = browserTool
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     if (event.target.classList.contains('close')) return;
     event.preventDefault();
-    const ids = [...state.tabs.keys()];
-    const index = ids.indexOf(id);
-    const next = event.key === 'Home' ? ids[0] : event.key === 'End' ? ids.at(-1)
-      : ids[(index + (event.key === 'ArrowRight' ? 1 : -1) + ids.length) % ids.length];
+    // Recorre sólo las pestañas del espacio visible y en el orden que se ve,
+    // no el orden de creación con pestañas de otros espacios mezcladas.
+    const ids = (browserTools ? browserTools.visibleTabs() : workspaceScopedTabs(state.tabs.values())).map(t => t.id);
+    const next = adjacentNavigationTab(ids, id, event.key);
+    if (!next || !state.tabs.has(next)) return;
     activateTab(next);
     state.tabs.get(next)?.tabEl.focus();
   });
@@ -204,6 +209,7 @@ function createTab(url = START_URL, { activate = true, workspaceId = browserTool
     tab.title = text || 'Sin título';
     titleEl.textContent = tab.title;
     titleEl.title = tab.title;
+    navigationHub?.refresh();
   };
 
   view.addEventListener('page-title-updated', (event) => setTitle(event.title));
@@ -272,6 +278,7 @@ function createTab(url = START_URL, { activate = true, workspaceId = browserTool
 
   if (activate) activateTab(id);
   browserTools?.refreshLayout();
+  navigationHub?.refresh();
   updateWelcome();
   return tab;
 }
@@ -319,6 +326,7 @@ function closeTab(id) {
     else state.activeId = null;
   }
   browserTools?.refreshLayout();
+  navigationHub?.refresh();
   updateWelcome();
   scheduleSessionCapture();
 }
@@ -1075,6 +1083,10 @@ async function refreshMemory() {
       });
       if (ticket !== memoryRefreshTicket || !isEvoMemoryEnabled(state.settings)) return;
       if (live !== undefined) memState.liveSnapshot = live;
+      if (live?.strategy === 'direct-console-injection' && source) {
+        await nexo.domTokens?.observe({ ...live, webContentsId: source.webContentsId, href: source.href });
+        if (ticket !== memoryRefreshTicket || !isEvoMemoryEnabled(state.settings)) return;
+      }
       renderChatCapture();
       if (MEM.conversations?.closest('details')?.open) {
         MEM.conversations.innerHTML = memState.conversations.length ? memState.conversations.map((entry) =>
@@ -1188,12 +1200,14 @@ const S = {
   budget: document.getElementById('setBudget'),
   keepRecent: document.getElementById('setKeepRecent'),
   reset: document.getElementById('resetSettings'),
+  tokenModel: document.getElementById('setTokenModel'),
   sitesList: document.getElementById('sitesList'),
   clearLog: document.getElementById('clearLog'),
 };
 
 function fillSettings(settings) {
   state.settings = settings;
+  S.tokenModel.value = settings.tokenCounting?.model || 'gpt-4o';
   S.enabled.checked = settings.enabled !== false;
   S.protocol.value = settings.protocol?.level || 'equilibrado';
   S.threshold.value = settings.receiving?.severityThreshold || 'medium';
@@ -1230,6 +1244,7 @@ async function patchSettings(patch) {
 }
 
 S.enabled.addEventListener('change', () => patchSettings({ enabled: S.enabled.checked }));
+S.tokenModel.addEventListener('change', () => patchSettings({ tokenCounting: { model: S.tokenModel.value } }));
 S.protocol.addEventListener('change', () => patchSettings({ protocol: { level: S.protocol.value } }));
 S.threshold.addEventListener('change', () => patchSettings({ receiving: { severityThreshold: S.threshold.value } }));
 S.autoContinue.addEventListener('change', () =>
@@ -1570,6 +1585,7 @@ nexo.on('nexo:open-tab', ({ url }) => {
 
 function runBrowserCommand(command) {
   if(command?.webContentsId){const tab=[...state.tabs.values()].find(t=>{try{return t.view.getWebContentsId()===command.webContentsId;}catch{return false;}});if(tab&&tab.id!==state.activeId)activateTab(tab.id);}
+  if(navigationHub?.handle(command||{}))return;
   if(browserTools?.handle(command||{}))return;
   switch (command?.type) {
     case 'home':
@@ -1817,7 +1833,11 @@ async function boot() {
   reportarMedidas(marcas);
 }
 
-browserTools = createBrowserTools({nexo,state,activeTab,createTab,activateTab,closeTab,navigate,runCommand:runBrowserCommand,notice:pushLocalNotice,scheduleSessionCapture,onPreferences:p=>{visualChrome?.apply(p.rightMenuMode);document.querySelectorAll('[data-ui-zoom-value]').forEach(e=>e.textContent=`${Math.round((p.uiZoom||1)*100)}%`);}});
+navigationHub = createNavigationHub({state,createTab,activateTab,closeTab,runCommand:runBrowserCommand,openPanel:showPanel,searchTabs:()=>navigationHub.open('tabs'),
+  getWorkspace:()=>browserTools?.workspace || 'main',workspaceName:id=>browserTools?.workspaceName(id) || id,
+  shortcut:id=>acceleratorFor(id,navigator.platform.includes('Mac')?'darwin':'linux'),
+  scheduleSessionCapture});
+browserTools = createBrowserTools({nexo,state,activeTab,createTab,activateTab,closeTab,navigate,runCommand:runBrowserCommand,notice:pushLocalNotice,scheduleSessionCapture,searchTabs:()=>navigationHub.open('tabs'),onPreferences:p=>{visualChrome?.apply(p.rightMenuMode);document.querySelectorAll('[data-ui-zoom-value]').forEach(e=>e.textContent=`${Math.round((p.uiZoom||1)*100)}%`);}});
 workPanel = createWorkDossier({nexo,root:document.getElementById('panel-work'),
   getWorkspaceId:()=>browserTools.workspace,
   getWorkspaceName:id=>browserTools.workspaceName(id),
