@@ -48,7 +48,9 @@ export class Store {
       const backup = `${this.file}.corrupt-${randomUUID()}.bak`;
       try {
         this.fs.copyFileSync(this.file, backup, fs.constants.COPYFILE_EXCL);
-        const fd = this.fs.openSync(backup, 'r');
+        // FlushFileBuffers de Windows exige un descriptor con permiso de escritura.
+        // r+ no trunca ni modifica los bytes copiados; sólo permite sincronizarlos.
+        const fd = this.fs.openSync(backup, 'r+');
         try { this.fs.fsyncSync(fd); } finally { this.fs.closeSync(fd); }
         this.loadStatus = { state: 'recovered', backup };
       } catch (backupError) {

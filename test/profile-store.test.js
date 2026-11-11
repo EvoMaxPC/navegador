@@ -133,3 +133,23 @@ test('UI: rechazo de setSettings conserva ajustes confirmados y muestra el error
   assert.deepEqual(filled, [settings]);
   assert.match(notices[0], /No se guardaron.*ENOSPC/);
 });
+
+test('Store: sincroniza el respaldo con descriptor escribible, requerido por Windows', t => {
+  const descriptors = new Map(), modes = [], f = fixture(t);
+  fs.writeFileSync(f.file, '{perfil-corrupto');
+  const store = f.open({ fs: { ...fs,
+    openSync(path, mode, ...args) {
+      const fd = fs.openSync(path, mode, ...args);
+      descriptors.set(fd, mode); modes.push(mode); return fd;
+    },
+    fsyncSync(fd) {
+      if (descriptors.get(fd) === 'r') throw ioError('EPERM');
+      return fs.fsyncSync(fd);
+    },
+  } });
+  assert.equal(store.loadStatus.state, 'recovered');
+  assert.deepEqual(modes, ['r+']);
+  assert.equal(fs.readFileSync(store.loadStatus.backup, 'utf8'), '{perfil-corrupto');
+  store.setSettings({ enabled: false });
+  assert.equal(f.open().settings.enabled, false);
+});
