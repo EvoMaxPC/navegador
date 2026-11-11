@@ -1,4 +1,4 @@
-/** BPE del texto original. Sin encoding identificado NO se inventa un conteo. */
+/** BPE del texto original; siempre elige un tokenizer de referencia. */
 const { models } = require('./bpe-models.json');
 const cache = new Map();
 const MAX_CACHE = 64;
@@ -11,14 +11,16 @@ exports.encodingForModel = function encodingForModel(model) {
 };
 
 /**
- * Resuelve nombres no catalogados sólo dentro de una familia OpenAI conocida.
- * Devuelve el modelo de referencia cuya codificación se usará; no altera el
- * identificador original recibido. "auto", proveedores ajenos y nombres sin
- * familia inequívoca permanecen sin resolver.
+ * Resuelve el modelo exacto o el modelo de referencia más cercano.
+ * Para nombres ausentes, "auto" o familias desconocidas usa GPT-5 como
+ * referencia estable. El identificador original no se modifica.
  */
 exports.resolveModelForEncoding = function resolveModelForEncoding(model) {
-  if (typeof model !== 'string' || !model.trim()) return null;
-  const key = model.trim().toLowerCase();
+  const key = typeof model === 'string' ? model.trim().toLowerCase() : '';
+  if (!key) {
+    const fallback = Object.hasOwn(models, 'gpt-5') ? 'gpt-5' : Object.keys(models)[0];
+    return fallback ? { model: fallback, encoding: models[fallback], exact: false } : null;
+  }
   if (Object.hasOwn(models, key)) {
     return { model: key, encoding: models[key], exact: true };
   }
