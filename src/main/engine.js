@@ -384,7 +384,7 @@ export class Engine {
     }
     const valid = Number.isSafeInteger(payload.tokens) && payload.tokens >= 0;
     const exact = valid && payload.tokenExact === true && payload.tokenMethod === 'bpe-original' && payload.tokenEncoding;
-    const category = exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified','bpe-default'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
+    const category = exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified','bpe-default','bpe-nearest-model'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
     const priority = category === 'inputTokens' ? 10 + (payload.source === 'composer' ? 0 : 1) : category === 'estimatedInputTokens' ? 1 : 0;
     const previous = record.measurement;
     if (previous && previous.priority >= priority) {
