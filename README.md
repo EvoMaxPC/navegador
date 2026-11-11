@@ -123,9 +123,9 @@ con deduplicación y actualización automática. Se retiraron las métricas de b
 sin quitar la protección contra repeticiones.
 [Implementación, archivos y pruebas](docs/CONTADORES-TURNOS.md).
 
-**[Descargar la compilación corregida 0.1.13 para Windows](https://github.com/EvoMaxPC/navegador/actions/runs/42651499665/artifacts/13689642278)**
+**Referencia histórica (no corresponde a la fuente 0.1.33): [compilación 0.1.13 para Windows](https://github.com/EvoMaxPC/navegador/actions/runs/42651499665/artifacts/13689642278)**
 — artefacto `Nexo-win32-x64` de GitHub Actions (requiere iniciar sesión; retención de 30 días).
-Extraé el ZIP interno `Nexo-0.1.13-win32-x64.zip` y ejecutá `nexo.exe`.
+Ese artefacto histórico puede haber caducado. No es una entrega ni una validación de Windows de 0.1.33. Si está disponible, extraé el ZIP interno `Nexo-0.1.13-win32-x64.zip` y ejecutá `nexo.exe`.
 Sin firmar: Windows muestra SmartScreen la primera vez. Detalles
 en [`docs/EMPAQUETADO.md`](docs/EMPAQUETADO.md).
 
@@ -174,8 +174,10 @@ texto que generó el modelo (con su bucle infinito), a la derecha lo que Nexo
 entregó. El modelo está simulado; la mediación es la de verdad — es el mismo
 código que corre dentro del navegador.
 
+Desarrollo y empaquetado: **Node >=22.12.0**, mínimo exigido por las herramientas fijadas en el lockfile. El ejecutable distribuido incluye su propio runtime de Electron.
+
 ```bash
-npm test                # 593 pruebas, con dependencias instaladas
+npm test                # node:test, con dependencias instaladas; total actual en el resumen de ejecución
 npm run bench           # rendimiento medido: tabla antes/después
 npm run verify          # pruebas + bundle + checklist manual
 npm run dist:win        # aplicación de Windows + ZIP (ver docs/EMPAQUETADO.md)
@@ -355,7 +357,7 @@ cómo añadir uno.
 ```
 src/nav/         historial, marcadores, descargas, sesión, permisos, zoom, atajos
 src/memory/      EVO MEMORY: destilado, índice, recuperación, contexto, paquete
-src/core/        motor isomorfo, sin dependencias (Node y navegador)
+src/core/        motor isomorfo (Node y navegador); BPE GPT usa gpt-tokenizer
   analysis.js      periodicidad, tartamudeo, truncamiento
   streamSentinel.js búfer + sonda + corte
   streamFilter.js  reescritura de SSE
@@ -371,7 +373,7 @@ src/ui/shell/    interfaz del navegador
 src/ui/start/    página de pestaña nueva
 demo/            sala de pruebas (mismo motor, modelo simulado)
 scripts/         verificación, icono, empaquetado para Windows y prueba de humo
-test/            593 pruebas con node:test (incluye un Electron falso para el arranque)
+test/            pruebas con node:test (incluye un Electron falso para el arranque)
 docs/            arquitectura, navegador, adaptadores, privacidad, memoria, empaquetado y auditoría
 .github/         flujo que compila la aplicación de Windows
 ```

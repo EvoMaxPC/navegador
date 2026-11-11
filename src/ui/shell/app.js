@@ -1206,9 +1206,23 @@ function updateEnginePill() {
   els.enginePillText.textContent = on ? 'Mediación activa' : 'Mediación desactivada';
 }
 
+function settingsStorageNotice(message = '') {
+  const status = document.getElementById('settingsStorageStatus');
+  status.textContent = message;
+  status.hidden = !message;
+  if (message) pushLocalNotice(message);
+}
+
 async function patchSettings(patch) {
-  const next = await nexo.setSettings(patch);
-  fillSettings(next);
+  try {
+    const next = await nexo.setSettings(patch);
+    settingsStorageNotice();
+    fillSettings(next);
+  } catch (error) {
+    fillSettings(state.settings);
+    renderSitesList();
+    settingsStorageNotice(`No se guardaron los ajustes: ${error.message}`);
+  }
 }
 
 S.enabled.addEventListener('change', () => patchSettings({ enabled: S.enabled.checked }));
@@ -1222,12 +1236,22 @@ S.keepRecent.addEventListener('change', () =>
   patchSettings({ context: { keepRecentTurns: Number(S.keepRecent.value) || 6 } }),
 );
 S.reset.addEventListener('click', async () => {
-  const next = await nexo.resetSettings();
-  fillSettings(next);
+  try {
+    const next = await nexo.resetSettings();
+    settingsStorageNotice();
+    fillSettings(next);
+    renderSitesList();
+  } catch (error) {
+    settingsStorageNotice(`No se restablecieron los ajustes: ${error.message}`);
+  }
 });
 S.clearLog.addEventListener('click', async () => {
-  state.logs = await nexo.clearLog();
-  renderLog();
+  try {
+    state.logs = await nexo.clearLog();
+    renderLog();
+  } catch (error) {
+    pushLocalNotice(`No se pudo limpiar el historial de intervenciones: ${error.message}`);
+  }
 });
 
 function renderSitesList() {
@@ -1776,6 +1800,10 @@ async function boot() {
   state.logs = logs;
   renderLog();
 
+  const storageStatus = await nexo.getStorageStatus();
+  if (storageStatus.state === 'recovered') settingsStorageNotice(`Perfil dañado: se conservaron sus bytes originales en ${storageStatus.backup}. Se cargaron ajustes predeterminados.`);
+  if (['unreadable', 'recovery-blocked'].includes(storageStatus.state) || storageStatus.error) settingsStorageNotice(`Perfil no guardado: ${storageStatus.error || 'no se pudo preservar el original'}.`);
+
   await refreshStats();
   // Los paneles secundarios se cargan sólo cuando el usuario los abre.
   refreshActivePanel();
@@ -1800,3 +1828,6 @@ document.getElementById('commandsButton').addEventListener('click',()=>runBrowse
 document.getElementById('keyboardSettings').addEventListener('click',()=>runBrowserCommand({type:'keyboard-settings'}));
 document.getElementById('toolbarSettings').addEventListener('click',()=>runBrowserCommand({type:'toolbar-settings'}));
 boot();
+
+// No registrar este aviso en Store: un fallo de disco no debe generar recursión.
+nexo.on('nexo:storage-error', ({ message }) => settingsStorageNotice(message));

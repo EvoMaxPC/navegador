@@ -10,10 +10,10 @@ metadatos del ejecutable y el código de la aplicación dentro de `resources/app
 
 Cada etiqueta `v*` compila en un runner de Windows y adjunta el ZIP a la release.
 
-La compilación corregida **0.1.13** está disponible como
+Referencia histórica: la compilación **0.1.13** se publicó como
 [artefacto Nexo-win32-x64](https://github.com/EvoMaxPC/navegador/actions/runs/42651499665/artifacts/13689642278),
 con empaquetado y prueba de humo Windows aprobados. Requiere sesión en GitHub y
-se conserva 30 días. Las releases anteriores siguen listadas abajo.
+su retención era de 30 días y puede haber caducado. No corresponde al código actual **0.1.33** ni prueba su funcionamiento en Windows. Las releases anteriores siguen listadas abajo.
 
 | Versión | Archivo | Tamaño | sha256 |
 |---|---|---|---|
@@ -128,6 +128,8 @@ código con el apagado de Chromium y puede no ser 0 aunque todo haya ido bien.
 
 ---
 
+Requisito mínimo de la toolchain actual: **Node >=22.12.0** (packager y sus dependencias en `package-lock.json`). No es necesario instalar Node para ejecutar el paquete de Windows.
+
 ## 4. Qué entra en el paquete
 
 La lista vive en `scripts/packaging-config.mjs`, en un solo lugar, y
@@ -135,9 +137,8 @@ La lista vive en `scripts/packaging-config.mjs`, en un solo lugar, y
 
 - **Entra:** `src/` (proceso principal, preloads, interfaz, núcleo, memoria),
   `demo/` (la sala de pruebas se abre desde la barra), `build/inject.js` y
-  `package.json`.
-- **No entra:** `test/`, `docs/`, `scripts/`, `dev/`, `.github/`, `node_modules/`
-  (no hay dependencias de ejecución), el ZIP ni los registros.
+  `package.json` y las dependencias de producción de `node_modules/` (incluido `gpt-tokenizer`).
+- **No entra:** `test/`, `docs/`, `scripts/`, `dev/`, `.github/`, las dependencias de desarrollo, el ZIP ni los registros. Las dependencias de producción sí se incluyen (`prune: true`).
 
 La prueba del empaquetado falla si se agrega una exclusión que tumbe un archivo
 necesario en ejecución —el error clásico es dejar afuera `build/inject.js`: el .exe
@@ -169,7 +170,7 @@ Tampoco hay actualizaciones automáticas: es una distribución manual.
 
 ---
 
-## 7. Qué se probó y dónde
+## 7. Registro histórico de empaquetado (no validación de 0.1.33)
 
 - **En el servidor de desarrollo (Linux, sin display ni binario de Electron):** la
   cadena de empaquetado completa, con una distribución de Electron simulada
@@ -178,9 +179,11 @@ Tampoco hay actualizaciones automáticas: es una distribución manual.
   con los 62 archivos correctos y un ZIP que lectores independientes abren sin
   errores. Esto prueba el empaquetador, **no** el binario real.
 - **En GitHub Actions (Windows Server 2022, Electron 45.2.3 real):** instalación,
-  `npm run verify` (440 pruebas), empaquetado, la prueba de humo sobre el `.exe`
+  `npm run verify` (440 pruebas en aquella revisión histórica, no el total actual), empaquetado, la prueba de humo sobre el `.exe`
   empaquetado y publicación del ZIP de 161 MB. Ese es el archivo de la sección 1:
   el que se descarga y se ejecuta.
+
+Para las pruebas actuales se debe consultar el resumen de ejecución y el informe de la revisión correspondiente. Esta sesión no ejecutó Windows.
 
 Ver también [`NAVEGADOR.md`](NAVEGADOR.md) para el checklist manual del navegador y
 [`AUDITORIA.md`](AUDITORIA.md) para lo que se revisó en esta pasada.

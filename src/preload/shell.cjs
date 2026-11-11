@@ -7,6 +7,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const ALLOWED_EVENTS = new Set([
   'nexo:event',
+  'nexo:storage-error',
   'nexo:understanding-changed',
   'nexo:work-changed',
   'nexo:work-capture',
@@ -46,6 +47,7 @@ contextBridge.exposeInMainWorld('nexo', {
 
   getConfig: () => ipcRenderer.invoke('nexo:shell:config'),
 
+  getStorageStatus: () => ipcRenderer.invoke('nexo:storage:status'),
   getSettings: () => ipcRenderer.invoke('nexo:settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('nexo:settings:set', patch),
   resetSettings: () => ipcRenderer.invoke('nexo:settings:reset'),

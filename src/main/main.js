@@ -652,6 +652,10 @@ function registerIpc() {
   ipcMain.handle('nexo:stream-stop', (event, payload) => engine.onStreamStop(event.sender.id, payload));
 
   ipcMain.handle('nexo:settings:get', () => store.settings);
+  ipcMain.handle('nexo:storage:status', (event) => {
+    if (!isShellRequest(event)) return { state: 'unauthorized' };
+    return { ...store.loadStatus, error: store.lastError || store.loadError?.message || null };
+  });
   ipcMain.handle('nexo:settings:set', (_event, patch) => {
     const next = store.setSettings(patch);
     engine.refresh();
@@ -1601,7 +1605,10 @@ function configureSession() {
 
 app.whenReady().then(async () => {
   mark('ready');
-  store = new Store();
+  store = new Store({ onLogError: (error) => {
+    console.error('[nexo]', error.message);
+    broadcast('nexo:storage-error', { message: error.message });
+  } });
   mark('ajustes');
   const created = createMemory({
     dir: app.getPath('userData'),

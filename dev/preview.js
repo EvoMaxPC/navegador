@@ -12,6 +12,7 @@ window.nexo = {
   work: Object.fromEntries(['read','mutate','attach','capture','clear','export'].map(k=>[k,async()=>({ok:false,error:'Los expedientes usan el almacenamiento local de Electron. No se simula persistencia en esta vista web.'})])),
   advanced: {preferences:async()=>previewPrefs,setPreferences:async next=>{previewPrefs=browserPreferences(next);localStorage.setItem('nexo-design-preview',JSON.stringify(previewPrefs));document.documentElement.style.zoom=previewPrefs.uiZoom;listeners.get('nexo:browser-prefs')?.(previewPrefs);return {ok:true,prefs:previewPrefs};},action:async()=>({ok:false,error:'Herramienta disponible sólo en la aplicación Electron.'}),context:async()=>({ok:false,error:'No hay un evento de contexto nativo en la vista UI.'})},
   getConfig: async () => ({ version: '0.1.33 · vista web', pagePreload: null }),
+  getStorageStatus: async () => ({ state: 'preview', backup: null, error: null }),
   getSettings: async () => settings,
   setSettings: async (patch) => (settings = mergeSettings(settings, patch)),
   resetSettings: async () => (settings = structuredClone(DEFAULT_SETTINGS)),
