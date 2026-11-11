@@ -152,7 +152,7 @@ for (const format of [
     assertExact(p.outgoing()[0].payload);
   });
 }
-test('DPU sin modelo conserva null antes y después del preload: nunca estima ni inventa GPT-5', async () => {
+test('DPU sin modelo usa tokenizer de referencia GPT-5 y lo marca como aproximado', async () => {
   const p = capturePage(),
     body = new URLSearchParams({ prompt: reference.text });
   await p.window.fetch('/unauth-mweb/conversation/updates', {
@@ -164,9 +164,10 @@ test('DPU sin modelo conserva null antes y después del preload: nunca estima ni
   assert.equal(raw.tokenText, reference.text);
   assert.equal(raw.model, '');
   const result = outgoingMetadata(raw);
-  assert.equal(result.tokens, null);
+  assert.equal(result.tokens, reference.official);
   assert.equal(result.tokenExact, false);
-  assert.equal(result.tokenMethod, 'unknown-model');
+  assert.equal(result.tokenMethod, 'bpe-nearest-model');
+  assert.equal(result.tokenModel, 'gpt-5');
 });
 test('DPU con texto vacío conocido devuelve 0; prompt ausente no se presenta como vacío conocido', async () => {
   for (const [present, expected] of [
@@ -304,4 +305,19 @@ test('regresión correlación: un enlace consume el gesto una vez; otra petició
   const first=p.outgoing()[0].payload;
   assert.equal((await sendText(p,'hola','same-text-1')).messageId,first.messageId);
   assert.notEqual((await sendText(p,'hola','same-text-2')).messageId,first.messageId);
+});
+
+
+test('DPU con variante de modelo no catalogada usa el tokenizer de la familia más cercana', () => {
+  const raw = {
+    host: 'chatgpt.com',
+    model: 'gpt-6-preview',
+    tokenText: reference.text,
+  };
+  const result = outgoingMetadata(raw);
+  assert.equal(result.tokens, reference.official);
+  assert.equal(result.tokenEncoding, 'o200k_base');
+  assert.equal(result.tokenExact, false);
+  assert.equal(result.tokenMethod, 'bpe-nearest-model');
+  assert.equal(result.tokenModel, 'gpt-5');
 });

@@ -814,7 +814,7 @@ if (!window.__NEXO_HOOKED__) {
       if (prepared.send === false) bridge.event('turn-result', { phase: 'started', messageId, site: site.id,
         host: CONFIG.host || location.hostname, model: prepared.model || '' });
     }
-    const reportResult = (outcome) => bridge.event('turn-result', { messageId, host: CONFIG.host || location.hostname,
+    const reportResult = (outcome) => bridge.request('turn-result', { messageId, host: CONFIG.host || location.hostname,
       site: site.id, url, outcome, stoppedByUser: Boolean(generation?.stoppedByUser) });
     state.active += 1;
     let response;
@@ -822,7 +822,8 @@ if (!window.__NEXO_HOOKED__) {
       response = await nativeFetch(target.input, target.init);
     } catch (error) {
       if (generation) {
-        reportResult(generation.stoppedByUser ? 'cancelled' : error?.name === 'AbortError' ? 'unknown' : 'failed');
+        await reportResult(generation.stoppedByUser ? 'cancelled' : error?.name === 'AbortError' ? 'unknown' : 'failed')
+          .catch((reportError) => bridge.event('error', { stage: 'turn-result', message: String(reportError?.message || reportError) }));
         if (state.response === generation) state.response = null;
       }
       throw error;
@@ -834,7 +835,8 @@ if (!window.__NEXO_HOOKED__) {
     // que explica «no se pudo conectar» sin abrir las herramientas del sitio.
     if (response.ok === false) {
       if (generation) {
-        reportResult('failed');
+        await reportResult('failed')
+          .catch((reportError) => bridge.event('error', { stage: 'turn-result', message: String(reportError?.message || reportError) }));
         if (state.response === generation) state.response = null;
       }
       bridge.event('error', {

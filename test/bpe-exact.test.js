@@ -27,24 +27,24 @@ for (const row of reference.rows) {
     );
   });
 }
-test('texto original estricto: tipo, cadena vacía, NFC/NFD y modelo desconocido sin fallback', () => {
+test('texto original estricto: tipo, cadena vacía, NFC/NFD y fallback de familia más cercana', () => {
   for (const value of [null, undefined, 42, {}, ['hola']])
     assert.throws(() => countGptTokens(value, 'gpt-5'), TypeError);
   assert.equal(countGptTokens('', 'gpt-5'), 0);
-  for (const model of [
-    '',
-    'auto',
-    'gpt-6',
-    'gpt-5-desconocido',
-    'gpt-4.1-inventado',
-    'claude-3',
-    'GPT-5',
+  for (const model of ['', 'auto', 'claude-3']) {
+    assert.equal(countGptTokens(' texto ', model), countGptTokens(' texto ', 'gpt-5'));
+    assert.equal(inputTokenMeasurement(' texto ', model, 'chatgpt').tokenExact, false);
+  }
+  for (const [model, expectedModel] of [
+    ['gpt-6', 'gpt-5'],
+    ['gpt-5-desconocido', 'gpt-5'],
+    ['gpt-4.1-inventado', 'gpt-4.1'],
+    ['GPT-5', 'gpt-5'],
   ]) {
-    assert.equal(countGptTokens(' texto ', model), null);
-    assert.equal(
-      inputTokenMeasurement(' texto ', model, 'chatgpt').tokenExact,
-      false,
-    );
+    const result = inputTokenMeasurement(' texto ', model, 'chatgpt');
+    assert.equal(result.tokens, countGptTokens(' texto ', expectedModel));
+    assert.equal(result.tokenModel, expectedModel);
+    assert.equal(result.tokenMethod, model === 'GPT-5' ? 'bpe-original' : 'bpe-nearest-model');
   }
   assert.notDeepEqual(
     encodeGptText('café', 'gpt-5'),
@@ -131,11 +131,12 @@ test('categorías de input no mezclan BPE, estimación, desconocidos ni facturac
     source: 'network',
     ...inputTokenMeasurement('Hola', '', 'claude'),
   });
-  send(e, 'unknown', 'network', 'u3', 'Hola', 'auto');
+  send(e, 'nearest', 'network', 'u3', 'Hola', 'gpt-6');
+  send(e, 'unknown', 'network', 'u4', 'Hola', 'auto');
   const s = e.stats();
   assert.equal(s.inputTokens, countGptTokens('Hola', 'gpt-5'));
-  assert.ok(s.estimatedInputTokens > 0);
-  assert.equal(s.unknownInputMessages, 1);
+  assert.ok(s.estimatedInputTokens >= 2 * countGptTokens('Hola', 'gpt-5'));
+  assert.equal(s.unknownInputMessages, 0);
   assert.equal(s.hiddenContextTokens, null);
   assert.equal(s.providerBilledTokens, null);
 });

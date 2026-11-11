@@ -147,12 +147,14 @@ window.addEventListener('message', async (event) => {
     const { id, type, payload } = data;
     // Una página sólo puede solicitar mediación: no elegir un canal privilegiado
     // de la shell (borrar datos, leer memoria, modificar ajustes, etc.).
-    if (type !== 'prepare') {
+    if (type !== 'prepare' && type !== 'turn-result') {
       window.postMessage({ __nexo: 'reply', id, error: 'canal-no-permitido' }, '*');
       return;
     }
     try {
-      const result = await ipcRenderer.invoke('nexo:prepare', payload || {});
+      // Confirmar el resultado antes de que fetch resuelva/rechace hacia la página.
+      const channel = type === 'turn-result' ? 'nexo:turn-result' : 'nexo:prepare';
+      const result = await ipcRenderer.invoke(channel, payload || {});
       window.postMessage({ __nexo: 'reply', id, payload: result }, '*');
     } catch (error) {
       window.postMessage({ __nexo: 'reply', id, error: String(error?.message || error) }, '*');

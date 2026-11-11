@@ -378,13 +378,17 @@ export class Engine {
   #inputMeasurement(record, payload) {
     if (typeof payload.tokenText === 'string' && payload.textFound !== false && payload.tokenText.length <= 200_000) record.tokenText = payload.tokenText;
     record.host = payload.host || payload.site || record.host || '';
-    if (typeof record.tokenText === 'string') {
+    // El gesto del compositor identifica el envío, pero no conoce el modelo.
+    // No ejecutar siquiera el tokenizer de referencia hasta que llegue la
+    // metadata de la petición: ese conteo provisional no es una medición válida.
+    const awaitingModel = payload.source === 'composer' && !String(payload.model || '').trim();
+    if (!awaitingModel && typeof record.tokenText === 'string') {
       const measured = inputTokenMeasurement(record.tokenText, payload.model || '', record.host);
-      if (measured.tokenExact) payload = { ...payload, ...measured };
+      if (Number.isSafeInteger(measured.tokens) && measured.tokens >= 0) payload = { ...payload, ...measured };
     }
     const valid = Number.isSafeInteger(payload.tokens) && payload.tokens >= 0;
     const exact = valid && payload.tokenExact === true && payload.tokenMethod === 'bpe-original' && payload.tokenEncoding;
-    const category = exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
+    const category = awaitingModel ? 'unknownInputMessages' : exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified','bpe-default','bpe-nearest-model'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
     const priority = category === 'inputTokens' ? 10 + (payload.source === 'composer' ? 0 : 1) : category === 'estimatedInputTokens' ? 1 : 0;
     const previous = record.measurement;
     if (previous && previous.priority >= priority) {
