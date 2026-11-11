@@ -31,16 +31,9 @@ test('texto original estricto: tipo, cadena vacía, NFC/NFD y fallback de famili
   for (const value of [null, undefined, 42, {}, ['hola']])
     assert.throws(() => countGptTokens(value, 'gpt-5'), TypeError);
   assert.equal(countGptTokens('', 'gpt-5'), 0);
-  for (const model of [
-    '',
-    'auto',
-    'claude-3',
-  ]) {
-    assert.equal(countGptTokens(' texto ', model), null);
-    assert.equal(
-      inputTokenMeasurement(' texto ', model, 'chatgpt').tokenExact,
-      false,
-    );
+  for (const model of ['', 'auto', 'claude-3']) {
+    assert.equal(countGptTokens(' texto ', model), countGptTokens(' texto ', 'gpt-5'));
+    assert.equal(inputTokenMeasurement(' texto ', model, 'chatgpt').tokenExact, false);
   }
   for (const [model, expectedModel] of [
     ['gpt-6', 'gpt-5'],
@@ -142,8 +135,8 @@ test('categorías de input no mezclan BPE, estimación, desconocidos ni facturac
   send(e, 'unknown', 'network', 'u4', 'Hola', 'auto');
   const s = e.stats();
   assert.equal(s.inputTokens, countGptTokens('Hola', 'gpt-5'));
-  assert.ok(s.estimatedInputTokens >= countGptTokens('Hola', 'gpt-5'));
-  assert.equal(s.unknownInputMessages, 1);
+  assert.ok(s.estimatedInputTokens >= 2 * countGptTokens('Hola', 'gpt-5'));
+  assert.equal(s.unknownInputMessages, 0);
   assert.equal(s.hiddenContextTokens, null);
   assert.equal(s.providerBilledTokens, null);
 });
