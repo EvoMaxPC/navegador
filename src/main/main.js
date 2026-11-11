@@ -26,8 +26,8 @@ import { detectSite, isAuthRequest, isMediable, isPreparationRequest, isResponse
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS, isEvoMemoryEnabled } from '../core/settings.js';
-import { fingerprint, gptModelFromRequest } from '../core/text.js';
-import { countTokensForProvider, countOutputTokens } from './tokens.js';
+import { fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
+import { inputTokenMeasurement, countOutputTokens } from './tokens.js';
 import { hostOf, isInternal } from '../nav/url.js';
 import { commandFor } from '../nav/shortcuts.js';
 import { sanitizeFilename } from '../nav/downloads.js';
@@ -866,6 +866,7 @@ function registerIpc() {
       const host = String(clean.payload.host || clean.payload.site || 'el sitio');
       // Contador de mensajes del usuario: se cuenta acá, no en `prepare()`.
       const counted = engine.onUserMessage(event.sender.id, clean.payload);
+      if (counted?.duplicate) { broadcast('nexo:stats-changed', statsSnapshot()); return; }
       writeCaptureTrace('request-detected', { ...clean.payload, duplicate: Boolean(counted?.duplicate) });
       const entry = {
         kind: 'sending',
@@ -889,7 +890,10 @@ function registerIpc() {
           textFound: clean.payload.textFound !== false,
           mediated: Boolean(clean.payload.mediated),
           chars: Number(clean.payload.chars) || 0,
-          tokens: Number(clean.payload.tokens) || 0,
+          tokens: clean.payload.tokens ?? null,
+          tokenExact: clean.payload.tokenExact === true,
+          tokenEncoding: clean.payload.tokenEncoding || null,
+          tokenMethod: clean.payload.tokenMethod || 'unverified',
           duplicate: Boolean(counted?.duplicate),
         },
         ts: Date.now(),
@@ -1152,15 +1156,11 @@ function uploadText(uploadData) {
   if (!Array.isArray(uploadData) || !uploadData.length) return '';
   const partes = [];
   for (const trozo of uploadData) {
-    const bytes = trozo?.bytes;
-    if (!bytes) continue;
-    try {
-      partes.push(Buffer.from(bytes).toString('utf8'));
-    } catch {
-      /* un trozo ilegible no invalida el resto */
-    }
+    if (!trozo?.bytes) return ''; // No presentar un cuerpo parcial como texto completo.
+    try { partes.push(Buffer.from(trozo.bytes)); } catch { return ''; }
   }
-  return partes.join('');
+  // Decodificar UNA vez: un trozo puede terminar en medio de un emoji UTF-8.
+  return Buffer.concat(partes).toString('utf8');
 }
 
 /**
@@ -1209,7 +1209,7 @@ function noteUserMessageFromNetwork(details = {}) {
   // cuerpo manda; la ruta se anota como evidencia.
   const rutaConocida = isMediable(site, url, method);
   const located = json ? locateUserText(json, site) : null;
-  const textoCuerpo = located && typeof located.value === 'string' ? located.value.trim() : '';
+  const textoCuerpo = located && typeof located.value === 'string' ? located.value : '';
   if (!rutaConocida) {
     if (!textoCuerpo || isPreparationRequest(site, url)) {
       // Un POST al proveedor que no es la ruta que conocemos y cuyo cuerpo no
@@ -1282,19 +1282,24 @@ function noteUserMessageFromNetwork(details = {}) {
     broadcast('nexo:event', { type: 'intervention', payload: entry });
   }
 
+  const measurement = located ? inputTokenMeasurement(text, model, site.id) : {tokens:null,tokenExact:false,tokenMethod:'unreadable',tokenEncoding:null,model};
   const counted = engine.onUserMessage(tabId, {
-    messageId: `net-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    messageId: `net-${details.id ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`}`,
+    submissionId: userMessageIdentity(json),
     source: 'network',
     site: site.id,
     host,
     url,
     chars: text.length,
-    tokens: text ? countTokensForProvider(text, model, site.id) : 0,
+    ...measurement,
     model,
     promptHash: text ? fingerprint(text) : '',
     textFound: Boolean(text),
   });
-  if (counted?.duplicate) return { seen: true, counted: false, conversation: true };
+  if (counted?.duplicate) {
+    broadcast('nexo:stats-changed', statsSnapshot());
+    return { seen: true, counted: false, conversation: true };
+  }
 
   const entry = {
     kind: 'sending',
@@ -1310,7 +1315,7 @@ function noteUserMessageFromNetwork(details = {}) {
       url: shortPath(url),
       source: 'network',
       chars: text.length,
-      tokens: text ? countTokensForProvider(text, model, site.id) : 0,
+      ...measurement,
       conversationId: null,
     },
     ts: Date.now(),
@@ -1653,9 +1658,9 @@ app.whenReady().then(async () => {
     onEvent: (id, event) => {
       try {
         if (event?.type === 'send') {
+          if (event.duplicate) { broadcast('nexo:stats-changed', statsSnapshot()); return; }
           writeCaptureTrace('request-detected', { host: event.host, site: event.site, url: event.url,
             source: 'cdp', chars: event.chars, messageId: event.messageId, duplicate: Boolean(event.duplicate) });
-          if (event.duplicate) return;
           const entry = {
             kind: 'sending',
             code: 'outgoing-cdp',
@@ -1669,6 +1674,9 @@ app.whenReady().then(async () => {
               source: 'cdp',
               chars: event.chars,
               tokens: event.tokens,
+              tokenEncoding: event.tokenEncoding || null,
+              tokenExact: event.tokenExact === true,
+              tokenMethod: event.tokenMethod || 'unverified',
             },
             ts: Date.now(),
           };

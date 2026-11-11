@@ -22,7 +22,7 @@ import { createStreamFilter } from '../core/streamFilter.js';
 import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isChatRequest, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
 import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
-import { estimateTokens, fingerprint, gptModelFromRequest } from '../core/text.js';
+import { estimateTokens, fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
@@ -206,6 +206,7 @@ function anunciarEnvio(datos = {}) {
     chars: Math.max(0, Number(datos.chars) || 0),
     tokens: Math.max(0, Number(datos.tokens) || 0),
     model: String(datos.model || ''),
+    submissionId: datos.submissionId || '',
     // Sólo llega al preload local; se quita antes del IPC y del registro.
     tokenText: datos.tokenText || '',
     // Huella del texto enviado: permite reconocer el mismo envío cuando lo
@@ -274,7 +275,7 @@ function textoDelCuadro() {
  */
 function gestoDeEnvio(razon) {
   if (!sitioActivo()) return null;
-  const texto = textoDelCuadro().trim();
+  const texto = textoDelCuadro();
   if (!texto) return null; // sin texto no hay mensaje que contar
 
   const ahora = Date.now();
@@ -316,7 +317,9 @@ function yaContadoPorGesto(chars) {
   if (!gesto) return false;
   if (Date.now() - gesto.at > VENTANA_ENLACE_MS) return false;
   // Sin texto en el cuerpo se acepta el del gesto; con texto, tiene que coincidir.
-  return !chars || chars === gesto.chars;
+  const matches = !chars || chars === gesto.chars;
+  if (matches) envio.porGesto = null;
+  return matches ? gesto.id : null;
 }
 
 /** Toma el gesto pendiente y lo desactiva: su petición llegó. */
@@ -429,6 +432,7 @@ async function planRequest(input, init) {
     promptText: prompt,
     promptTokens: estimateTokens(prompt),
     model: gptModelFromRequest(parsed),
+    submissionId: userMessageIdentity(parsed),
     promptHash: fingerprint(prompt),
     url,
   };
@@ -796,9 +800,12 @@ if (!window.__NEXO_HOOKED__) {
     if (prepared.chat && prepared.send !== false) {
       const gesto = tomarEnvioPendiente();
       const chars = prepared.promptChars || gesto?.chars || 0;
-      if (yaContadoPorGesto(chars)) {
+      const countedGesture = yaContadoPorGesto(chars);
+      if (countedGesture) {
         // Ya lo contó el gesto: la respuesta tiene que usar su identificador.
-        messageId = envio.porGesto.id;
+        messageId = countedGesture;
+        anunciarEnvio({messageId, source:'request', chars, tokenText:prepared.promptText ?? '',
+          model:prepared.model || '', submissionId:prepared.submissionId || '', promptHash:prepared.promptHash || '', textFound:typeof prepared.promptText === 'string', url});
       } else {
         messageId = anunciarEnvio({
           messageId: gesto?.id,
@@ -808,6 +815,7 @@ if (!window.__NEXO_HOOKED__) {
           tokenText: prepared.promptText || gesto?.tokenText || '',
           tokens: prepared.promptTokens ?? gesto?.tokens ?? 0,
           model: prepared.model || '',
+          submissionId: prepared.submissionId || '',
           promptHash: prepared.promptHash || gesto?.promptHash || '',
           textFound: Boolean(prepared.promptChars),
           url,

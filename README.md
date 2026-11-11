@@ -5,6 +5,13 @@ con IA, no acumular funciones. Sin cambiar silenciosamente el objetivo ni invent
 información para corregir respuestas.
 [Prioridades y criterios de revisión](docs/NEXO-CRITERIOS-RECTORES.md).
 
+**Conteo BPE de entrada corregido:** longitud de `encode` aplicada al texto
+original, sin recortar espacios ni normalizar Unicode. Encoding por modelo
+verificado; desconocidos y estimaciones separados. Comparación independiente:
+184 casos contra OpenAI tiktoken, sin discrepancias en IDs o longitud.
+[Informe, causa raíz y límites](docs/NEXO-BPE-EXACTO.md) ·
+[Textos exactos, IDs y resultados oficiales](docs/BPE-OFICIAL-COMPARACION.json).
+
 **0.1.33 · NEXO AI / Wormhole:** identidad oficial en ventana e interfaz,
 fondo espacial vectorial, menú izquierdo oculto con botón Wormhole, dock derecho
 automático o fijo y zoom de interfaz persistente. Se retira sólo la pestaña

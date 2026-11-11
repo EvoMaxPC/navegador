@@ -32,8 +32,8 @@ import {
   terminalOf,
 } from '../core/cdp.js';
 import { detectSite, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
-import { fingerprint, gptModelFromRequest } from '../core/text.js';
-import { countTokensForProvider } from './tokens.js';
+import { fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
+import { inputTokenMeasurement } from './tokens.js';
 import { parseSSE } from '../core/sse.js';
 import { isChatGptDpuMime } from '../core/chatgptDpu.js';
 
@@ -443,7 +443,7 @@ export class CdpObserver {
    * Es el mismo dato que la capa lee dentro de la página, pero desde el proceso
    * principal. Sirve de camino independiente: si la capa no está instalada, la
    * entrada se cuenta igual. Cuando los dos caminos ven el mismo envío, el motor
-   * lo descarta por la huella del texto y la cercanía en el tiempo.
+   * lo correlaciona primero por identidad de proveedor; la huella es respaldo.
    */
   async #noteSend(state, requestId, postData) {
     const entry = state.requests.get(requestId);
@@ -474,7 +474,7 @@ export class CdpObserver {
     const site = detectSite(entry.host);
     const model = gptModelFromRequest(json);
     const located = locateUserText(json, site);
-    const text = located && typeof located.value === 'string' ? located.value.trim() : '';
+    const text = located && typeof located.value === 'string' ? located.value : '';
     if (!text) return;
 
     if (!entry.chat && isPreparationRequest(site, entry.url)) {
@@ -501,6 +501,7 @@ export class CdpObserver {
     // getRequestPostData puede resolver después de responseReceived. Si acaba
     // de reconocerse la ruta nueva, todavía se puede activar el respaldo.
     if (state.pending.get(requestId)?.stream && this.contentAllowed(entry.host)) this.#startStreaming(state, requestId);
+    const measurement = inputTokenMeasurement(text, model, entry.host);
     const messageId = `cdp-${requestId}`;
     entry.messageId = messageId;
     if (!this.engine || typeof this.engine.onUserMessage !== 'function') return;
@@ -508,11 +509,12 @@ export class CdpObserver {
       const counted = this.engine.onUserMessage(state.id, {
         messageId,
         source: 'cdp',
+        submissionId: userMessageIdentity(json),
         site: site.id,
         host: entry.host,
         url: entry.url,
         chars: text.length,
-        tokens: countTokensForProvider(text, model, entry.host),
+        ...measurement,
         promptHash: fingerprint(text),
         textFound: true,
       });
@@ -527,7 +529,7 @@ export class CdpObserver {
         site: site.id,
         url: entry.url,
         chars: text.length,
-        tokens: countTokensForProvider(text, model, entry.host),
+        ...measurement,
         promptHash: fingerprint(text),
       });
     } catch (error) {

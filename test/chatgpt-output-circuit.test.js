@@ -189,7 +189,7 @@ for (const [name, expected, options] of [
     assert.equal(after.responses, before.responses + 1);
     assert.equal(after.outputTokens, before.outputTokens + countOutputTokens(expected));
     assert.equal(elements.outTokens.textContent, after.outputTokens.toLocaleString('es-AR'), 'sin refresco manual');
-    assert.equal(after.inputTokens, before.inputTokens + countGptTokens('Test'));
+    assert.equal(after.inputTokens, before.inputTokens + (countGptTokens('Test','gpt-6') ?? 0));
     if (options.mime) assert.equal(wire, body, 'NDJSON conserva sus bytes, incluidos Unicode y saltos');
     else {
       const visible = records(body).find((row) => row.v?.message?.author?.role === 'assistant' &&
@@ -479,7 +479,7 @@ for (const [name, options, expected] of [
     catch (error) { assert.ok(options.fetchError); }
     await pause(50);
     assert.deepEqual(outcomeDelta(before), expected);
-    assert.equal(stats().inputTokens, before.inputTokens + countGptTokens('Test', 'gpt-6'));
+    assert.equal(stats().inputTokens, before.inputTokens + (countGptTokens('Test', 'gpt-6') ?? 0));
     assert.equal(stats().outputTokens, before.outputTokens);
     assertOutcomeUi();
   });

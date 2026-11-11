@@ -22,9 +22,9 @@ for (const [model, count] of [['gpt-5', countO200k], ['gpt-4-turbo', countCl100k
 }
 
 test('el preload conserva el conteo existente de otros proveedores y del formato viejo', () => {
-  assert.deepEqual(outgoingMetadata({ host: 'claude.ai', tokenText: 'hola', tokens: 8 }), { host: 'claude.ai', tokens: 8 });
-  assert.deepEqual(outgoingMetadata({ host: 'chatgpt.com', tokens: 7 }), { host: 'chatgpt.com', tokens: 7 });
-  assert.equal(outgoingMetadata({ host: 'chatgpt.com', tokenText: '', tokens: 20 }).tokens, 0);
+  assert.deepEqual(outgoingMetadata({ host: 'claude.ai', tokenText: 'hola', tokens: 8 }), { host: 'claude.ai', tokens: 8,tokenExact:false,tokenEncoding:null,tokenMethod:'legacy-estimate' });
+  assert.deepEqual(outgoingMetadata({ host: 'chatgpt.com', tokens: 7 }), { host: 'chatgpt.com', tokens: 7,tokenExact:false,tokenEncoding:null,tokenMethod:'unverified' });
+  assert.equal(outgoingMetadata({ host: 'chatgpt.com', model:'gpt-5', tokenText: '', tokens: 20 }).tokens, 0);
 });
 
 test('el bridge real convierte el aviso outgoing antes de enviarlo por IPC', async () => {

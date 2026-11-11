@@ -93,7 +93,8 @@ test('la conversación real «hola» cuenta 1 mensaje, 1 respuesta y 1 turno', a
   // anuncia la capa de la página para el mismo envío.
   const trasEnvio = await stats();
   assert.equal(trasEnvio.messages, antes.messages + 1, 'el mensaje del usuario se cuenta');
-  assert.ok(trasEnvio.inputTokens > antes.inputTokens, 'con sus tokens de entrada');
+  assert.equal(trasEnvio.inputTokens, antes.inputTokens, 'auto no identifica un encoding');
+  assert.equal(trasEnvio.unknownInputMessages, antes.unknownInputMessages + 1);
 
   await callIpc(
     'nexo:stream-end',
@@ -149,7 +150,7 @@ test('el mensaje contado por la capa y por CDP es uno solo', async () => {
 
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 1, 'dos avisos del mismo envío, un mensaje');
-  assert.equal(despues.inputTokens, antes.inputTokens + 2, 'y los tokens una sola vez');
+  assert.equal(despues.estimatedInputTokens, antes.estimatedInputTokens + 2, 'metadato antiguo separado de BPE y contado una sola vez');
 });
 
 test('dos mensajes iguales seguidos sí son dos mensajes', async () => {

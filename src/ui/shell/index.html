@@ -98,7 +98,7 @@
         <div class="stats" id="stats">
           <div class="stat"><b id="statMessages">0</b><span>mensajes del usuario</span></div>
           <div class="stat"><b id="statResponses">0</b><span>respuestas de la IA</span></div>
-          <div class="stat"><b id="statInTokens">0</b><span>tokens de entrada *</span></div>
+          <div class="stat"><b id="statInTokens">0</b><span>tokens BPE · texto usuario *</span></div>
           <div class="stat"><b id="statOutTokens">0</b><span>tokens de salida IA (estimados)</span></div>
           <div class="stat"><b id="statInterventions">0</b><span>intervenciones</span></div>
           <div class="stat"><b id="statTurnsCancelled">0</b><span>turnos cancelados</span></div>
@@ -107,8 +107,11 @@
         </div>
         <details class="technical-details"><summary>Cómo se mide tu actividad</summary>
         <p class="note capture" id="captureLine">Captura: sin datos todavía.</p>
+        <p class="note" id="inputTokenCoverage">Entrada: sin datos todavía. Contexto oculto y facturación: no observables.</p>
         <p class="note" id="statsNote">
-          * Entrada: BPE local para GPT. Salida IA: estimación por palabras del texto
+          * Entrada: BPE del texto original con modelo y encoding verificados; no incluye
+          instrucciones internas ni tokens facturados. Modelo desconocido: no se inventa un conteo.
+          Las estimaciones de otros proveedores se muestran separadas. Salida IA: estimación por palabras del texto
           capturado (1 unidad por palabra), sin tokenizador. No es el consumo real de OpenAI. No incluye contenido no recibido. «Intervenciones» cuenta la
           actividad: +1 al enviar un mensaje y +1 al recibir una respuesta.
         </p>

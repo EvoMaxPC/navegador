@@ -115,7 +115,7 @@ export class Engine {
      * clasifica el resultado de ChatGPT. Ninguno depende de que el motor
      * intervenga: un mensaje sin mediación cuenta igual.
      *
-     * La salida se estima directamente sobre el texto; la entrada conserva su conteo.
+     * La salida heredada se estima; entrada BPE, estimaciones y desconocidos van separados.
      * No incluyen contenido multimodal ni tokens internos no expuestos por el proveedor.
      */
     this.counters = {
@@ -125,6 +125,9 @@ export class Engine {
       turnsFailed: 0,
       turnsPerformed: 0,
       inputTokens: 0,
+      estimatedInputTokens: 0,
+      unknownInputMessages: 0,
+      inputCorrelationUnverified: 0,
       outputTokens: 0,
       /**
        * Intervenciones del motor: cuántas veces Nexo cambió el texto que salía o
@@ -141,6 +144,8 @@ export class Engine {
     this.tokensEstimated = true;
     /** Envíos vistos, por pestaña: `${pestaña}|${messageId}`. */
     this.seenMessages = new Map();
+    this.inputRecords = new Map();
+    this.submissions = new Map();
     /** Respuestas contadas, por pestaña: `${pestaña}|${messageId}`. */
     this.seenResponses = new Map();
     /** Último envío de cada pestaña esperando respuesta. */
@@ -289,24 +294,34 @@ export class Engine {
     if (!messageId) return { ok: false, skipped: 'sin-id' };
     const now = Date.now();
     const key = `${webContentsId}|${messageId}`;
-    if (this.seenMessages.has(key)) return { ok: true, duplicate: true };
-
-    // El mismo envío puede llegar por dos caminos con identificadores distintos:
-    // el gesto de la página, la petición de la capa y la petición que ve CDP. Se
-    // reconoce por la huella del texto y el momento, no por el texto solo: dos
-    // envíos iguales seguidos desde la misma fuente son dos mensajes.
-    const hash = payload.promptHash ? String(payload.promptHash) : '';
     const source = String(payload.source || 'request');
+    const submissionId = typeof payload.submissionId === 'string' ? payload.submissionId : '';
+    const submissionKey = submissionId ? `${webContentsId}|${payload.host || payload.site || ''}|${submissionId}` : '';
+    const hash = payload.promptHash ? String(payload.promptHash) : '';
     const previo = this.lastSend.get(webContentsId);
-    if (previo && now - previo.at < VENTANA_ENVIO_MS) {
-      const mismaHuella = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
-      if (mismaHuella && previo.source !== source) {
-        this.seenMessages.set(key, now);
-        // El envío ya está contado con otro identificador: se registra el alias
-        // para que su respuesta cierre el turno correcto.
-        if (previo.messageId) this.messageAliases.set(key, previo.messageId);
-        return { ok: true, duplicate: true, merged: true, messageId: previo.messageId || messageId };
-      }
+    let correlatedByFallback = false;
+    let record = this.inputRecords.get(this.messageAliases.get(key) ? `${webContentsId}|${this.messageAliases.get(key)}` : key);
+    if (!record && submissionKey) record = this.inputRecords.get(this.submissions.get(submissionKey));
+    // Respaldo heredado para transportes sin identidad de proveedor. Cada fuente
+    // sólo puede emparejarse una vez por envío; IDs explícitos distintos NUNCA se fusionan.
+    if (!record && previo && now - previo.at < VENTANA_ENVIO_MS &&
+        (!submissionId || !previo.submissionId || submissionId === previo.submissionId)) {
+      const candidate = this.inputRecords.get(`${webContentsId}|${previo.messageId}`);
+      const sameHash = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
+      if (candidate && sameHash && !candidate.sources.has(source)) { record = candidate; correlatedByFallback = true; }
+    }
+    if (record) {
+      record.sources.add(source);
+      if (correlatedByFallback && !record.unverifiedCorrelation) { record.unverifiedCorrelation = true; this.counters.inputCorrelationUnverified += 1; }
+      if (submissionKey && !correlatedByFallback && record.unverifiedCorrelation) { record.unverifiedCorrelation = false; this.counters.inputCorrelationUnverified -= 1; }
+      if (submissionId && previo?.messageId === record.messageId) previo.submissionId = submissionId;
+      this.seenMessages.set(key, now);
+      this.messageAliases.set(key, record.messageId);
+      if (submissionKey) this.submissions.set(submissionKey, `${webContentsId}|${record.messageId}`);
+      this.#inputMeasurement(record, payload);
+      const waiting = this.awaiting.get(webContentsId);
+      if (waiting?.messageId === record.messageId && payload.model) waiting.model = payload.model;
+      return {ok:true,duplicate:true,merged:true,messageId:record.messageId};
     }
 
     this.seenMessages.set(key, now);
@@ -321,6 +336,7 @@ export class Engine {
       at: now,
       hash,
       source,
+      submissionId,
       messageId,
       chars: Math.max(0, Number(payload.chars) || 0),
     });
@@ -328,7 +344,14 @@ export class Engine {
     const chars = Math.max(0, Number(payload.chars) || 0);
     const tokens = Number.isFinite(Number(payload.tokens)) ? Math.max(0, Number(payload.tokens)) : 0;
     this.counters.messages += 1;
-    this.counters.inputTokens += tokens;
+    const inputRecord = {messageId, sources:new Set([source]), measurement:null, unverifiedCorrelation:!submissionKey};
+    if (!submissionKey) this.counters.inputCorrelationUnverified += 1;
+    this.inputRecords.set(key, inputRecord);
+    if (submissionKey) this.submissions.set(submissionKey, key);
+    this.#inputMeasurement(inputRecord, payload);
+    // Acotado igual que las ventanas de correlación; no se almacena texto original.
+    if (this.inputRecords.size > 4000) this.inputRecords.delete(this.inputRecords.keys().next().value);
+    if (this.submissions.size > 4000) this.submissions.delete(this.submissions.keys().next().value);
     this.counters.activity += 1;
 
     // Un mensaje nuevo cierra la atribución diferida del anterior: el texto que
@@ -345,6 +368,20 @@ export class Engine {
     });
 
     return { ok: true, duplicate: false, messageId, chars, tokens };
+  }
+
+  /** No mezclar BPE visible con estimaciones heredadas o texto/modelo desconocido. */
+  #inputMeasurement(record, payload) {
+    const valid = Number.isSafeInteger(payload.tokens) && payload.tokens >= 0;
+    const exact = valid && payload.tokenExact === true && payload.tokenMethod === 'bpe-original' && payload.tokenEncoding;
+    const category = exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
+    const priority = category === 'inputTokens' ? 10 + (payload.source === 'composer' ? 0 : 1) : category === 'estimatedInputTokens' ? 1 : 0;
+    const previous = record.measurement;
+    if (previous && previous.priority >= priority) return;
+    if (previous) this.counters[previous.category] -= previous.value;
+    const value = category === 'unknownInputMessages' ? 1 : payload.tokens;
+    this.counters[category] += value;
+    record.measurement = {category,value,priority};
   }
 
   /** Regenerar/continuar inicia otra respuesta, pero no otro mensaje de entrada.
@@ -1171,6 +1208,12 @@ export class Engine {
       turnsFailed: c.turnsFailed,
       turnsPerformed: c.turnsPerformed,
       inputTokens: c.inputTokens,
+      estimatedInputTokens: c.estimatedInputTokens,
+      unknownInputMessages: c.unknownInputMessages,
+      inputCorrelationUnverified: c.inputCorrelationUnverified,
+      inputTokenScope: 'visible-user-text-bpe',
+      hiddenContextTokens: null,
+      providerBilledTokens: null,
       outputTokens: c.outputTokens,
       // El panel muestra la actividad de la conversación: +1 al enviar y +1 al
       // recibir. Lo que hizo el mediador va aparte, para no mezclar dos cosas.

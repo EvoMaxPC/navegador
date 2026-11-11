@@ -40,6 +40,7 @@ const stats = () => callIpc('nexo:stats');
 const cuerpoChatGPT = (texto) =>
   JSON.stringify({
     action: 'next',
+    model: 'gpt-5',
     messages: [{ author: { role: 'user' }, content: { content_type: 'text', parts: [texto] } }],
   });
 

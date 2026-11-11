@@ -284,3 +284,10 @@ export function round(n, digits = 2) {
   const f = 10 ** digits;
   return Math.round(n * f) / f;
 }
+
+/** Identidad del envío proporcionada por el proveedor, nunca derivada del texto. */
+export function userMessageIdentity(payload) {
+  if (!Array.isArray(payload?.messages)) return '';
+  const message = [...payload.messages].reverse().find(m => (m?.author?.role || m?.role) === 'user');
+  return typeof message?.id === 'string' && message.id.length <= 200 ? message.id : '';
+}

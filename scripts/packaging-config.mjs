@@ -72,6 +72,7 @@ export const requiredAsarEntries = [
   'src/main/engine.js',
   'src/main/tokens.js',
   'src/core/gptTokens.cjs',
+  'src/core/bpe-models.json',
   'src/preload/token-metadata.cjs',
   'node_modules/gpt-tokenizer/package.json',
   'node_modules/gpt-tokenizer/cjs/main.js',

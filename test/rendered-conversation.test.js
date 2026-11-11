@@ -28,7 +28,8 @@ test('palabras renderizadas suben durante generación, no al abrir historiales',
   assert.equal(e.stats().outputTokens, 4); assert.equal(e.stats().responses, 1);
   close(e, '**Hola** mundo otra palabra');
   assert.equal(e.stats().outputTokens, 4); assert.equal(e.stats().responses, 1);
-  assert.equal(e.stats().inputTokens, 7);
+  assert.equal(e.stats().inputTokens, 0);
+  assert.equal(e.stats().estimatedInputTokens, 7);
 });
 
 test('SSE y DOM intercalados no concatenan dos copias; DOM es la estimación visible del mismo envío', () => {

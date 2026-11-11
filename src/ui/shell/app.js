@@ -50,6 +50,7 @@ const els = {
     outTokens: document.getElementById('statOutTokens'),
     interventions: document.getElementById('statInterventions'),
     capture: document.getElementById('captureLine'),
+    coverage: document.getElementById('inputTokenCoverage'),
   },
   sidebar: document.getElementById('sidebar'),
   connection: document.getElementById('connectionIndicator'),
@@ -884,6 +885,8 @@ function renderStats(next) {
     els.stats[key].textContent = num(stats[key]);
   }
   els.stats.inTokens.textContent = num(stats.inputTokens);
+  const coverage = els.stats.coverage;
+  if (coverage) coverage.textContent = `Entrada: ${num(stats.inputTokens)} tokens BPE del texto original; ${num(stats.estimatedInputTokens)} tokens estimados de otros proveedores (no sumados); ${num(stats.unknownInputMessages)} mensajes sin conteo verificable; ${num(stats.inputCorrelationUnverified)} envíos sin ID compartido de proveedor (correlación de respaldo, no garantizada). Contexto oculto y facturación: no observables.`;
   els.stats.outTokens.textContent = num(stats.outputTokens);
   els.stats.interventions.textContent = num(stats.interventions);
   if (els.stats.capture) els.stats.capture.textContent = captureLine(stats);

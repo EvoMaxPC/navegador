@@ -57,6 +57,7 @@ function progreso(view, messageId, text) {
 const cuerpoChatGPT = (texto) =>
   JSON.stringify({
     action: 'next',
+    model: 'gpt-5',
     messages: [{ author: { role: 'user' }, content: { content_type: 'text', parts: [texto] } }],
   });
 
@@ -346,7 +347,7 @@ test('9. un cierre de la inyección sin texto no impide el respaldo CDP', async 
   const fin = await stats();
   assert.equal(fin.responses, antes.responses + 1);
   assert.equal(fin.outputTokens, antes.outputTokens + contarPalabras(texto));
-  assert.equal(fin.inputTokens, antes.inputTokens + countGptTokens('control de cierre vacío'));
+  assert.equal(fin.inputTokens, antes.inputTokens + countGptTokens('control de cierre vacío','gpt-5'));
 });
 
 test('10. CDP recupera texto plano y NDJSON con MIME JSON sin duplicar acumulados', async () => {

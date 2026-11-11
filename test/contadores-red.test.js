@@ -93,6 +93,7 @@ function completarRed({ url, webContentsId = 1, statusCode = 200, id = null }) {
 const cuerpoChatGPT = (texto, extra = {}) =>
   JSON.stringify({
     action: 'next',
+    model: 'gpt-5',
     messages: [{ author: { role: 'user' }, content: { content_type: 'text', parts: [texto] } }],
     ...extra,
   });
