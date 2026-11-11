@@ -265,6 +265,15 @@ function textoDelCuadro() {
   return '';
 }
 
+function anunciarGesto(gesto) {
+  envio.porGesto = {
+    at: gesto.at, chars: gesto.chars, id: gesto.id,
+    tokenText: gesto.tokenText, tokens: gesto.tokens, promptHash: gesto.promptHash,
+  };
+  anunciarEnvio({ ...gesto, messageId: gesto.id, source: 'composer', textFound: true });
+}
+
+
 /**
  * El usuario pulsó Enviar (o Enter) en el cuadro.
  *
@@ -281,7 +290,11 @@ function gestoDeEnvio(razon) {
   const ahora = Date.now();
   const pendiente = envio.pendiente;
   // El mismo envío visto dos veces: el click que dispara el Enter, o al revés.
-  if (pendiente && ahora - pendiente.at < VENTANA_GESTO_MS) return pendiente;
+  if (pendiente && ahora - pendiente.at < VENTANA_GESTO_MS && pendiente.tokenText === texto) return pendiente;
+  if (pendiente) {
+    clearTimeout(pendiente.timer);
+    anunciarGesto(pendiente); // Otro texto es otro envío: no se pierde el anterior.
+  }
 
   const nuevo = {
     id: nuevoMessageId(),
@@ -296,36 +309,35 @@ function gestoDeEnvio(razon) {
   nuevo.timer = setTimeout(() => {
     if (envio.pendiente !== nuevo) return;
     envio.pendiente = null;
-    envio.porGesto = {
-      at: nuevo.at,
-      chars: nuevo.chars,
-      id: nuevo.id,
-      tokenText: nuevo.tokenText,
-      tokens: nuevo.tokens,
-      promptHash: nuevo.promptHash,
-    };
-    anunciarEnvio({ ...nuevo, messageId: nuevo.id, source: 'composer', textFound: true });
+    anunciarGesto(nuevo);
   }, ESPERA_PETICION_MS);
 
   envio.pendiente = nuevo;
   return nuevo;
 }
 
-/** ¿Este envío ya se contó por el gesto? Entonces la petición no lo repite. */
-function yaContadoPorGesto(chars) {
-  const gesto = envio.porGesto;
+/** Correlación sin usar longitud ni huellas normalizadas como identidad. */
+function mismoEnvioDelGesto(gesto, peticion) {
   if (!gesto) return false;
-  if (Date.now() - gesto.at > VENTANA_ENLACE_MS) return false;
-  // Sin texto en el cuerpo se acepta el del gesto; con texto, tiene que coincidir.
-  const matches = !chars || chars === gesto.chars;
-  if (matches) envio.porGesto = null;
-  return matches ? gesto.id : null;
+  // El gesto local no trae ID del proveedor: sólo es evidencia el texto literal de la
+  // petición, no texto tomado del propio gesto como respaldo (caso DPU opaco).
+  return peticion.textFound !== false && peticion.promptFromRequest !== false &&
+    typeof peticion.promptText === 'string' && peticion.promptText === gesto.tokenText;
 }
 
-/** Toma el gesto pendiente y lo desactiva: su petición llegó. */
-function tomarEnvioPendiente() {
+/** Devuelve el ID del gesto contado sólo si esta petición corresponde a él. */
+function yaContadoPorGesto(peticion) {
+  const gesto = envio.porGesto;
+  if (!gesto || Date.now() - gesto.at > VENTANA_ENLACE_MS) return null;
+  if (!mismoEnvioDelGesto(gesto, peticion)) return null;
+  envio.porGesto = null;
+  return gesto.id;
+}
+
+/** Una petición ajena no consume ni cancela el gesto pendiente. */
+function tomarEnvioPendiente(peticion) {
   const pendiente = envio.pendiente;
-  if (!pendiente) return null;
+  if (!mismoEnvioDelGesto(pendiente, peticion)) return null;
   clearTimeout(pendiente.timer);
   envio.pendiente = null;
   return pendiente;
@@ -402,6 +414,7 @@ async function planRequest(input, init) {
       promptChars: prompt.length,
       promptText: prompt,
       textFound: form.prompt !== null || typeof gesture?.tokenText === 'string',
+      promptFromRequest: form.prompt !== null,
       promptTokens: null,
       model: form.model,
       promptHash: prompt ? fingerprint(prompt) : '',
@@ -810,9 +823,9 @@ if (!window.__NEXO_HOOKED__) {
     // identificador con el que se empareja su respuesta.
     let messageId = null;
     if (prepared.chat && prepared.send !== false) {
-      const gesto = tomarEnvioPendiente();
+      const gesto = tomarEnvioPendiente(prepared);
       const chars = prepared.promptChars ?? gesto?.chars ?? 0;
-      const countedGesture = yaContadoPorGesto(chars);
+      const countedGesture = gesto ? null : yaContadoPorGesto(prepared);
       if (countedGesture) {
         // Ya lo contó el gesto: la respuesta tiene que usar su identificador.
         messageId = countedGesture;

@@ -218,3 +218,90 @@ test('compositor alternativo sin solicitud no estima; solicitud tardía aporta e
   assertExact(request);
   assert.equal(p.editor.value, reference.text);
 });
+
+// Regresiones de correlación: bundle real, sin acceder a sus funciones internas.
+async function sendText(p, text, id) {
+  const body = JSON.stringify({action:'next',model:'gpt-5',messages:[{id,author:{role:'user'},content:{parts:[text]}}]});
+  await p.window.fetch('/backend-api/f/conversation',{method:'POST',body});
+  assert.equal(p.wire.at(-1).init.body,body,'la correlación no modifica el cuerpo');
+  return p.outgoing().at(-1).payload;
+}
+const gestureCounted = () => new Promise(resolve=>setTimeout(resolve,2700));
+
+test('regresión correlación: dos gestos y peticiones de igual longitud mantienen dos IDs propios',async()=>{
+  const p=capturePage();
+  p.editor.value='hola';p.listeners.get('submit')();await gestureCounted();
+  const first=p.outgoing()[0].payload;
+  p.editor.value='chau';p.listeners.get('submit')();
+  const second=await sendText(p,'chau','user-chau');
+  assert.notEqual(second.messageId,first.messageId,'chau no hereda el ID de hola por medir cuatro caracteres');
+  const lateFirst=await sendText(p,'hola','user-hola');
+  assert.equal(lateFirst.messageId,first.messageId,'la petición tardía de hola recupera SU gesto');
+  assert.equal(new Set(p.outgoing().map(e=>e.payload.messageId)).size,2);
+});
+
+test('regresión correlación: una petición distinta no consume el gesto pendiente de igual longitud',async()=>{
+  const p=capturePage();
+  p.editor.value='hola';p.listeners.get('submit')();
+  const unrelated=await sendText(p,'chau','unrelated-chau');
+  await gestureCounted();
+  const gestures=p.outgoing().filter(e=>e.payload.source==='composer');
+  assert.equal(gestures.length,1,'el timer de hola sigue vivo tras la petición ajena');
+  const first=gestures[0].payload;
+  assert.equal(first.tokenText,'hola');assert.notEqual(first.messageId,unrelated.messageId);
+  const matched=await sendText(p,'hola','pending-hola');
+  assert.equal(matched.messageId,first.messageId);
+});
+
+test('regresión correlación: dos gestos distintos dentro de 800 ms no se descartan como doble clic',async()=>{
+  const p=capturePage();
+  p.editor.value='hola';p.listeners.get('submit')();
+  p.editor.value='chau';p.listeners.get('submit')();
+  const early=p.outgoing().filter(e=>e.payload.source==='composer');
+  assert.equal(early.length,1,'se conserva el primer gesto al registrar otro texto');
+  assert.equal(early[0].payload.tokenText,'hola');
+  const first=await sendText(p,'hola','rapid-hola');
+  const second=await sendText(p,'chau','rapid-chau');
+  assert.equal(first.messageId,early[0].payload.messageId);
+  assert.notEqual(first.messageId,second.messageId);
+  assert.equal(new Set(p.outgoing().map(e=>e.payload.messageId)).size,2);
+});
+
+test('regresión correlación: mismo hash normalizado no sustituye igualdad del texto exacto',async()=>{
+  const p=capturePage();
+  p.editor.value='Hola';p.listeners.get('submit')();await gestureCounted();
+  const first=p.outgoing()[0].payload;
+  const other=await sendText(p,'hola','case-sensitive');
+  assert.equal(other.promptHash,first.promptHash,'la huella existente normaliza mayúsculas');
+  assert.notEqual(other.messageId,first.messageId,'el texto literal es diferente pese a la misma huella y longitud');
+  assert.equal((await sendText(p,'Hola','original-case')).messageId,first.messageId);
+});
+
+test('regresión correlación: cuerpo ilegible no se identifica por cero caracteres',async()=>{
+  const p=capturePage();
+  p.editor.value='hola';p.listeners.get('submit')();await gestureCounted();
+  const first=p.outgoing()[0].payload;
+  await p.window.fetch('/backend-api/f/conversation',{method:'POST',body:'no-es-json'});
+  const opaque=p.outgoing().at(-1).payload;
+  assert.notEqual(opaque.messageId,first.messageId,'sin texto o identidad no hay prueba de correspondencia');
+  assert.equal((await sendText(p,'hola','after-opaque')).messageId,first.messageId);
+});
+
+test('regresión correlación: DPU sin prompt no valida identidad con texto copiado del mismo gesto',async()=>{
+  const p=capturePage();
+  p.editor.value='hola';p.listeners.get('submit')();await gestureCounted();
+  const first=p.outgoing()[0].payload;
+  const body=new URLSearchParams({model:'gpt-5'});
+  await p.window.fetch('/unauth-mweb/conversation/updates',{method:'POST',body});
+  assert.equal(p.wire.at(-1).init.body,body);
+  assert.notEqual(p.outgoing().at(-1).payload.messageId,first.messageId,'el fallback del gesto no es evidencia independiente');
+  assert.equal((await sendText(p,'hola','after-dpu')).messageId,first.messageId);
+});
+
+test('regresión correlación: un enlace consume el gesto una vez; otra petición lleva otro ID',async()=>{
+  const p=capturePage();
+  p.editor.value='hola';p.listeners.get('submit')();await gestureCounted();
+  const first=p.outgoing()[0].payload;
+  assert.equal((await sendText(p,'hola','same-text-1')).messageId,first.messageId);
+  assert.notEqual((await sendText(p,'hola','same-text-2')).messageId,first.messageId);
+});
