@@ -27,7 +27,7 @@ for (const row of reference.rows) {
     );
   });
 }
-test('texto original estricto: tipo, cadena vacía, NFC/NFD y modelo desconocido sin fallback', () => {
+test('texto original estricto: tipo, cadena vacía, NFC/NFD y fallback de familia más cercana', () => {
   for (const value of [null, undefined, 42, {}, ['hola']])
     assert.throws(() => countGptTokens(value, 'gpt-5'), TypeError);
   assert.equal(countGptTokens('', 'gpt-5'), 0);
@@ -35,7 +35,6 @@ test('texto original estricto: tipo, cadena vacía, NFC/NFD y modelo desconocido
     '',
     'auto',
     'claude-3',
-    'auto',
   ]) {
     assert.equal(countGptTokens(' texto ', model), null);
     assert.equal(
