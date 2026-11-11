@@ -17,18 +17,14 @@ export function inputTokenMeasurement(text, model = '', provider = '') {
     ].includes(source)
   ) {
     const encoding = encodingForModel(model);
-    // ChatGPT puede no exponer el modelo en el evento del compositor.
-    // En ese caso contamos con o200k_base y lo marcamos como aproximado,
-    // en lugar de dejar el contador vacío o fingir precisión por modelo.
-    const chatGptWeb = ['chatgpt', 'chatgpt.com', 'chat.openai.com'].includes(source);
-    const fallbackModel = !encoding && chatGptWeb ? 'gpt-5-chat-latest' : model;
-    const fallbackEncoding = !encoding && chatGptWeb ? 'o200k_base' : null;
+    // Sin un modelo reconocido no se puede afirmar qué encoding usa el
+    // proveedor. Se conserva null hasta recibir metadata verificable.
     return {
-      tokens: countGptTokens(text, fallbackModel),
-      tokenEncoding: encoding || fallbackEncoding,
+      tokens: encoding ? countGptTokens(text, model) : null,
+      tokenEncoding: encoding || null,
       tokenExact: Boolean(encoding),
-      tokenMethod: encoding ? 'bpe-original' : fallbackEncoding ? 'bpe-default' : 'unknown-model',
-      model: model || (fallbackEncoding ? fallbackModel : ''),
+      tokenMethod: encoding ? 'bpe-original' : 'unknown-model',
+      model: model || '',
     };
   }
   // Compatibilidad con otros proveedores: nunca etiquetar su estimación como BPE.
