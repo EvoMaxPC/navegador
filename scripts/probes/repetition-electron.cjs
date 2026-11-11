@@ -55,6 +55,11 @@ app.whenReady().then(() => {
   await until(() => webContents.getAllWebContents().some(w => w.getType() === 'webview' && w.getURL() === 'https://chatgpt.com/c/fixture'), 'webview HTTPS cargada');
   const guest = webContents.getAllWebContents().find(w => w.getType() === 'webview' && w.getURL() === 'https://chatgpt.com/c/fixture');
   try {
+    await until(() => guest.executeJavaScript('Boolean(window.__nexo?.state)'), 'capa instalada para comprobar retiro del espejo');
+    if (await guest.executeJavaScript(`Boolean(document.querySelector('#__nexo-gpt-capture-mirror'))`)) throw Error('El espejo de captura no debe aparecer');
+    const zoomControls = await shell.executeJavaScript(`document.querySelector('.floating-zoom')===null && document.querySelectorAll('.header-zoom [data-ui-zoom]').length===3 && document.querySelectorAll('[data-ui-zoom-value]').length===1`);
+    if (!zoomControls) throw Error('Debe quedar sólo el control superior de zoom de interfaz');
+    report.checks.push('sin espejo de captura ni zoom inferior; zoom superior conservado');
     // EVO apagada no muestra recuerdos. El lector aislado conserva su canal
     // RAM independiente: comprobarlo por IPC, no resucitando la pestaña retirada.
     const readSnapshot = () => shell.executeJavaScript(`nexo.repetition.get(${JSON.stringify({ webContentsId: guest.id, href: guest.getURL() })})`);
