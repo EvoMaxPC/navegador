@@ -380,11 +380,11 @@ export class Engine {
     record.host = payload.host || payload.site || record.host || '';
     if (typeof record.tokenText === 'string') {
       const measured = inputTokenMeasurement(record.tokenText, payload.model || '', record.host);
-      if (measured.tokenExact) payload = { ...payload, ...measured };
+      if (Number.isSafeInteger(measured.tokens) && measured.tokens >= 0) payload = { ...payload, ...measured };
     }
     const valid = Number.isSafeInteger(payload.tokens) && payload.tokens >= 0;
     const exact = valid && payload.tokenExact === true && payload.tokenMethod === 'bpe-original' && payload.tokenEncoding;
-    const category = exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
+    const category = exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified','bpe-default'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
     const priority = category === 'inputTokens' ? 10 + (payload.source === 'composer' ? 0 : 1) : category === 'estimatedInputTokens' ? 1 : 0;
     const previous = record.measurement;
     if (previous && previous.priority >= priority) {
