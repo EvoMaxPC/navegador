@@ -1,8 +1,9 @@
 # Centro de navegación de Nexo
 
 Estado: implementado en la shell (`arena/4678aef7-navegador`), verificado en la
-vista de interfaz web y con pruebas automatizadas. No se probó en una ventana
-Electron nueva ni en Windows en esta etapa.
+vista de interfaz web y con pruebas automatizadas. La ventana Electron real se
+probó con la sonda de la CI (Windows x64); la etapa 2 no se probó con una cuenta
+real de ChatGPT.
 
 ## Qué se agregó
 
@@ -64,10 +65,31 @@ Electron nueva ni en Windows en esta etapa.
 | `test/navigation-hub.test.js` | 10 pruebas del modelo, atajos, HTML, CSS y menú. |
 | `test/advanced-tools.test.js` | 2 pruebas de accesibilidad y teclado del centro de comandos. |
 
+### Etapa 2
+
+| Archivo | Cambio |
+| --- | --- |
+| `src/core/prompts.js` | Nuevo. Validación, variables y relleno de atajos, sin DOM ni disco. |
+| `src/main/promptStore.js` | Nuevo. Lista, guarda, borra y reordena atajos sobre `Store`. |
+| `src/core/settings.js` | Bloque `prompts` del perfil. |
+| `src/main/main.js` | IPC `nexo:prompts:*` sólo para la shell y `turnFollowUp` al cerrar un turno. |
+| `src/main/advancedBrowser.js` | Acción `insert-text` acotada y acciones de selección en el menú contextual. |
+| `src/preload/shell.cjs` | Grupo `prompts` y escucha `nexo:turn-followup`. |
+| `src/ui/shell/promptLibrary.js` | Nuevo. Lista, formulario y ejecución de atajos. |
+| `src/ui/shell/app.js` | Panel de atajos, barra de continuación e inserción sin envío. |
+| `src/ui/shell/navigationHub.js` | Sección «Conversar mejor» y diálogo «Continuar la respuesta». |
+| `src/ui/shell/index.html`, `navigationHub.css` | Solapa de atajos y estilos de la barra. |
+| `src/nav/shortcuts.js`, `src/main/menu.js` | Ctrl+Shift+P y entradas de menú. |
+| `test/prompt-library.test.js`, `test/turn-followup.test.js` | 16 pruebas del contrato y del siguiente paso. |
+| `test/probe-scripts.test.js` | 3 pruebas de los guiones de la sonda Electron. |
+| `scripts/probes/repetition-electron.cjs` | Guiones aislados y diagnóstico del paso que falló. |
+| `dev/preview.js` | `nexo.prompts` y gancho de demostración de la barra. |
+
 ## Verificación
 
-- Suite completa tras la etapa 2: **1688 pruebas, 1687 aprobadas, 0 fallos,
-  1 omitida** (la misma omitida previa).
+- Suite completa tras la etapa 2: **1691 pruebas, 1690 aprobadas, 0 fallos,
+  1 omitida** (la misma omitida previa). `npm run verify` (empaquetado de la capa
+  + suite) también pasa.
 - Los 13 fallos que traían los commits remotos de contadores se corrigieron en
   `23facfa`: el «tokenizer más cercano» inventaba compatibilidad (gpt-6 contado
   con o200k_base de GPT-5). Ahora un modelo no catalogado queda desconocido y
@@ -78,6 +100,19 @@ Electron nueva ni en Windows en esta etapa.
   teclado de pestañas y del centro de comandos. Sin errores de consola.
 - axe-core (WCAG 2 A/AA) sobre la shell cerrada, el buscador y el menú: **0
   violaciones**.
+- Etapa 2 en Chromium headless: guardar/editar/borrar atajos, variables
+  faltantes, inserción con aviso honesto, persistencia tras recargar y axe sin
+  violaciones en lista y formulario. La barra de continuación se probó con el
+  gancho de la vista (mostrar, escribir en el cuadro, descartar).
+- La sonda Electron de la CI fallaba en Windows con «Script failed to execute»;
+  la causa era local a la sonda (dos `const u` en el mismo contexto), no al
+  producto. Corregido en `e3234d3`, con prueba que reproduce el mecanismo.
+
+## Entrega
+
+- Fuentes: `deliveries/nexo-navegacion-profesional/FUENTES-navegacion-e3234d3.zip`
+  (301 archivos), SHA256
+  `dd3a0eddde48772ddcb5d07a5a0760df0775ef94c1508903c3eb9127f3a769a6`.
 
 ## Etapa 2 · interacción con la IA (2026-11)
 
