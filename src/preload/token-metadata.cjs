@@ -13,17 +13,27 @@ exports.outgoingMetadata = function outgoingMetadata(payload = {}) {
   if (typeof tokenText === 'string' && openai) {
     const encoding =
       payload.textFound === false ? null : encodingForModel(payload.model);
+    // El evento del compositor de ChatGPT no siempre conoce el modelo activo.
+    // o200k_base da un conteo BPE útil, explícitamente aproximado, hasta que
+    // el sitio exponga el identificador del modelo.
+    const chatGptWeb = ['chatgpt', 'chatgpt.com', 'chat.openai.com'].includes(provider);
+    const fallbackModel = !encoding && chatGptWeb ? 'gpt-5-chat-latest' : payload.model;
+    const fallbackEncoding = !encoding && chatGptWeb && payload.textFound !== false ? 'o200k_base' : null;
     metadata.tokens = encoding
       ? countGptTokens(tokenText, payload.model)
-      : null;
-    metadata.tokenEncoding = encoding;
+      : fallbackEncoding
+        ? countGptTokens(tokenText, fallbackModel)
+        : null;
+    metadata.tokenEncoding = encoding || fallbackEncoding;
     metadata.tokenExact = Boolean(encoding);
     metadata.tokenMethod =
       payload.textFound === false
         ? 'unreadable'
         : encoding
           ? 'bpe-original'
-          : 'unknown-model';
+          : fallbackEncoding
+            ? 'bpe-default'
+            : 'unknown-model';
   } else {
     metadata.tokenExact = false;
     metadata.tokenEncoding = null;
