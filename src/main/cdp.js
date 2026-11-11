@@ -514,6 +514,7 @@ export class CdpObserver {
         host: entry.host,
         url: entry.url,
         chars: text.length,
+        tokenText: text,
         ...measurement,
         promptHash: fingerprint(text),
         textFound: true,

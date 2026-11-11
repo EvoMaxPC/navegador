@@ -13,7 +13,8 @@ import { settingsForHost, isEvoMemoryEnabled } from '../core/settings.js';
 import { StreamSentinel } from '../core/streamSentinel.js';
 import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
 import { fingerprint } from '../core/text.js';
-import { countOutputTokens } from './tokens.js';
+import { countOutputTokens, inputTokenMeasurement } from './tokens.js';
+import { VisibleOutputTokens } from './visibleOutputTokens.js';
 import { TURN_OUTCOMES, turnOutcome } from '../core/turnOutcome.js';
 import { looksEncrypted } from '../memory/item.js';
 
@@ -126,6 +127,7 @@ export class Engine {
       turnsPerformed: 0,
       inputTokens: 0,
       estimatedInputTokens: 0,
+      estimatedInputMessages: 0,
       unknownInputMessages: 0,
       inputCorrelationUnverified: 0,
       outputTokens: 0,
@@ -142,6 +144,7 @@ export class Engine {
       activity: 0,
     };
     this.tokensEstimated = true;
+    this.visibleOutput = new VisibleOutputTokens();
     /** Envíos vistos, por pestaña: `${pestaña}|${messageId}`. */
     this.seenMessages = new Map();
     this.inputRecords = new Map();
@@ -339,6 +342,7 @@ export class Engine {
       submissionId,
       messageId,
       chars: Math.max(0, Number(payload.chars) || 0),
+      model: payload.model || '',
     });
 
     const chars = Math.max(0, Number(payload.chars) || 0);
@@ -372,16 +376,39 @@ export class Engine {
 
   /** No mezclar BPE visible con estimaciones heredadas o texto/modelo desconocido. */
   #inputMeasurement(record, payload) {
+    if (typeof payload.tokenText === 'string' && payload.textFound !== false && payload.tokenText.length <= 200_000) record.tokenText = payload.tokenText;
+    record.host = payload.host || payload.site || record.host || '';
+    if (typeof record.tokenText === 'string') {
+      const measured = inputTokenMeasurement(record.tokenText, payload.model || '', record.host);
+      if (measured.tokenExact) payload = { ...payload, ...measured };
+    }
     const valid = Number.isSafeInteger(payload.tokens) && payload.tokens >= 0;
     const exact = valid && payload.tokenExact === true && payload.tokenMethod === 'bpe-original' && payload.tokenEncoding;
     const category = exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
     const priority = category === 'inputTokens' ? 10 + (payload.source === 'composer' ? 0 : 1) : category === 'estimatedInputTokens' ? 1 : 0;
     const previous = record.measurement;
-    if (previous && previous.priority >= priority) return;
+    if (previous && previous.priority >= priority) {
+      if (previous.category === 'inputTokens') delete record.tokenText;
+      return;
+    }
     if (previous) this.counters[previous.category] -= previous.value;
+    if (previous?.category === 'estimatedInputTokens') this.counters.estimatedInputMessages -= 1;
+    if (category === 'estimatedInputTokens') this.counters.estimatedInputMessages += 1;
     const value = category === 'unknownInputMessages' ? 1 : payload.tokens;
     this.counters[category] += value;
     record.measurement = {category,value,priority};
+    if (category !== 'unknownInputMessages') delete record.tokenText;
+  }
+
+  #responseModel(webContentsId, messageId, model, host = '') {
+    if (!model || !messageId) return;
+    const canonical = this.resolveMessageId(webContentsId, messageId);
+    const record = this.inputRecords.get(`${webContentsId}|${canonical}`);
+    if (record) this.#inputMeasurement(record, { model, host, source: 'response-metadata' });
+    const send = this.lastSend.get(webContentsId);
+    if (send?.messageId === canonical) send.model = model;
+    const waiting = this.awaiting.get(webContentsId);
+    if (waiting?.messageId === canonical) waiting.model = model;
   }
 
   /** Regenerar/continuar inicia otra respuesta, pero no otro mensaje de entrada.
@@ -469,6 +496,7 @@ export class Engine {
     const canonical = this.resolveMessageId(webContentsId, messageId);
     const settled = (this.recentTexts.get(webContentsId) || []).findLast(item => item.messageId === canonical);
     const payload = { text: turn.content, cumulative: true, source: 'dom-render', messageId: canonical,
+      model: recent?.model || send?.model || '',
       domId: turn.id, documentUrl: snapshot.href, host: safeHost(snapshot.href), site: 'chatgpt' };
     if (settled) {
       this.#mergeResponse(webContentsId, turn.content, { messageId: canonical, source: 'dom-render', domId: turn.id, documentUrl: snapshot.href });
@@ -497,6 +525,7 @@ export class Engine {
       return { ok: true, skipped: 'rendered-authoritative' };
     }
     if (previous && messageId && previous.messageId && previous.messageId !== messageId) {
+      // El parcial anterior ya fue visible: conserva su aporte de sesión.
       this.streamProgress.delete(webContentsId);
     }
     const current = this.streamProgress.get(webContentsId) || {
@@ -505,8 +534,12 @@ export class Engine {
     if (payload.source === 'dom-render') Object.assign(current, { source: 'dom-render', domId: payload.domId, documentUrl: payload.documentUrl });
     current.text = payload.cumulative === true ? fragment : current.text + fragment;
     current.messageId ||= messageId;
-    current.model ||= payload.model || '';
-    current.host ||= payload.host || '';
+    current.model = payload.model || current.model || pending?.entry?.model || '';
+    this.#responseModel(webContentsId, messageId, current.model, payload.host || pending?.entry?.host || '');
+    current.host ||= payload.host || pending?.entry?.host || '';
+    const noText = this.sinTexto.get(webContentsId);
+    if (noText && (!noText.messageId || noText.messageId === messageId)) this.visibleOutput.remove(noText);
+    this.visibleOutput.set(current, current.text, current.model, current.host);
     // Reestimar el texto acumulado evita redondear y sumar cada fragmento por separado.
     const totalTokens = this.#outputTokens(current.text, current.model, current.host);
     const increment = totalTokens - current.tokens;
@@ -524,6 +557,7 @@ export class Engine {
       // reconcilie el texto completo contra CDP/red. Un cierre recortado no
       // puede perder los caracteres reales ya entregados en vivo.
       this.counters.outputTokens -= live.tokens;
+      this.visibleOutput.remove(live);
       this.streamProgress.delete(webContentsId);
       const finalText = String(payload.text || '');
       payload = { ...payload,
@@ -543,6 +577,7 @@ export class Engine {
     const messageId = String(payload.messageId || '');
     const now = Date.now();
     const textoPayload = String(payload.text || '');
+    this.#responseModel(webContentsId, messageId || this.currentSendId(webContentsId), payload.model, payload.host);
     // El texto de una respuesta ya contada por la red: se suman los tokens y la
     // respuesta no se cuenta dos veces.
     if (!this.streamProgress.has(webContentsId) && textoPayload.trim() &&
@@ -556,6 +591,10 @@ export class Engine {
       ? `${webContentsId}|${messageId}`
       : `${webContentsId}|sse|${String(payload.text || '').length}|${fingerprint(String(payload.text || ''))}`;
     const alreadySeen = this.seenResponses.has(key);
+    if (alreadySeen && !this.sinTexto.has(webContentsId) &&
+        !(this.recentTexts.get(webContentsId) || []).some(item => item.messageId === this.resolveMessageId(webContentsId, messageId))) {
+      return { ok: true, duplicate: true };
+    }
 
     // Misma respuesta vista antes (por CDP o por otro cierre del stream): no se
     // cuenta, aunque el identificador del envío haya cambiado. Lo que decide es
@@ -577,7 +616,7 @@ export class Engine {
 
     // Respuesta contada sin texto: si el texto aparece después, sus tokens se
     // suman a esta misma respuesta.
-    if (!texto.trim()) {
+    if (!texto.length) {
       const pendienteSinTexto = pendiente || this.#pendingTurn(webContentsId, now);
       this.sinTexto.set(pendienteSinTexto?.id ?? webContentsId, {
         at: now,
@@ -585,6 +624,7 @@ export class Engine {
         host: pendienteSinTexto?.entry.host || payload.host || null,
         model: payload.model || pendienteSinTexto?.entry.model || '',
       });
+      this.visibleOutput.set(this.sinTexto.get(pendienteSinTexto?.id ?? webContentsId), null, payload.model || pendienteSinTexto?.entry?.model || '', payload.host || pendienteSinTexto?.entry?.host || '');
     } else {
       this.sinTexto.delete(pendiente?.id ?? webContentsId);
     }
@@ -650,6 +690,7 @@ export class Engine {
       host: pendiente.entry.host || payload.host || null,
       model: pendiente.entry.model || '',
     });
+    this.visibleOutput.set(this.sinTexto.get(pendiente.id), null, pendiente.entry.model || '', pendiente.entry.host || '');
 
     return {
       ok: true,
@@ -687,6 +728,7 @@ export class Engine {
 
     const tokens = this.#outputTokens(text, model || anotada.model, provider || anotada.host);
     this.counters.outputTokens += Math.max(0, tokens);
+    this.visibleOutput.remove(anotada);
     this.sinTexto.delete(webContentsId);
     // Queda en el registro: si los tokens de salida suben sin una respuesta
     // nueva, esto es lo que lo explica.
@@ -709,6 +751,7 @@ export class Engine {
     vistos.push({ at: now, text, tokens, messageId: messageId || anotada.messageId || null,
       ...(renderedMeta.source === 'dom-render' ? { rendered: true, domId: renderedMeta.domId, documentUrl: renderedMeta.documentUrl } : {}),
       model: model || anotada.model, provider: provider || anotada.host });
+    this.visibleOutput.set(vistos.at(-1), text, model || anotada.model, provider || anotada.host);
     this.recentTexts.set(webContentsId, vistos.slice(-6));
     return true;
   }
@@ -738,6 +781,8 @@ export class Engine {
         this.counters.outputTokens += tokens - identity.tokens;
         Object.assign(identity, { text, tokens, at: now, rendered: true, domId, documentUrl });
       }
+      this.visibleOutput.set(identity, identity.text, model || identity.model, provider || identity.provider);
+      identity.model = model || identity.model;
       return { duplicate: true, tokens: 0, sameText: identity.text === text };
     }
     for (const visto of vistos) {
@@ -767,6 +812,8 @@ export class Engine {
         visto.at = now;
         if (messageId) visto.messageId = messageId;
       }
+      this.visibleOutput.set(visto, visto.text, model || visto.model || esperando?.entry?.model, provider || visto.provider || esperando?.entry?.host);
+      visto.model = model || visto.model;
       this.recentTexts.set(webContentsId, vistos);
       return { duplicate: true, sameText: igual, tokens: 0 };
     }
@@ -782,6 +829,7 @@ export class Engine {
       ultima.text = junto;
       ultima.tokens = tokens;
       ultima.at = now;
+      this.visibleOutput.set(ultima, junto, model || ultima.model, provider || ultima.provider);
       this.recentTexts.set(webContentsId, vistos);
       return { duplicate: true, sameText: false, tokens: 0, joined: true };
     }
@@ -789,6 +837,7 @@ export class Engine {
     const tokens = this.#outputTokens(text, model || esperando?.entry?.model || '', provider || esperando?.entry?.host || '');
     vistos.push({ at: now, text, tokens, messageId: messageId || null, rendered: source === 'dom-render', domId, documentUrl,
       model: model || esperando?.entry?.model || '', provider: provider || esperando?.entry?.host || '' });
+    if (text.length) this.visibleOutput.set(vistos.at(-1), text, model || esperando?.entry?.model, provider || esperando?.entry?.host);
     this.recentTexts.set(webContentsId, vistos.slice(-6));
     return { duplicate: false, sameText: false, tokens };
   }
@@ -999,6 +1048,7 @@ export class Engine {
     const now = Date.now();
 
     const host = capture.host || safeHost(capture.url) || 'desconocido';
+    this.#responseModel(webContentsId, capture.messageId || this.currentSendId(webContentsId), capture.model, host);
     // La memoria puede observar ChatGPT sin mediación del sitio, con EVO global activa. Esta vía
     // sólo se permite en una conversación normal (no chat temporal) y mientras
     // EVO MEMORY siga habilitada; nunca crea ni ejecuta un guardián.
@@ -1036,6 +1086,11 @@ export class Engine {
     }
 
     if (this.#seenAlready(webContentsId, keys, { pendiente, messageId: awaitId })) {
+      const recorded = (this.recentTexts.get(webContentsId) || []).findLast(item => item.messageId === awaitId);
+      if (recorded) {
+        this.visibleOutput.set(recorded, recorded.text, capture.model || recorded.model, capture.host || recorded.provider);
+        recorded.model = capture.model || recorded.model;
+      }
       this.cdp.duplicates += 1;
       return { ok: true, duplicate: true };
     }
@@ -1209,12 +1264,15 @@ export class Engine {
       turnsPerformed: c.turnsPerformed,
       inputTokens: c.inputTokens,
       estimatedInputTokens: c.estimatedInputTokens,
+      estimatedInputMessages: c.estimatedInputMessages,
       unknownInputMessages: c.unknownInputMessages,
       inputCorrelationUnverified: c.inputCorrelationUnverified,
       inputTokenScope: 'visible-user-text-bpe',
       hiddenContextTokens: null,
       providerBilledTokens: null,
-      outputTokens: c.outputTokens,
+      outputTokens: c.outputTokens, // compatibilidad: estimación heredada, no BPE
+      ...this.visibleOutput.totals,
+      outputTokenScope: 'visible-assistant-text-bpe',
       // El panel muestra la actividad de la conversación: +1 al enviar y +1 al
       // recibir. Lo que hizo el mediador va aparte, para no mezclar dos cosas.
       interventions: c.activity,

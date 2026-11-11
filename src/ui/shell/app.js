@@ -1,3 +1,4 @@
+import { tokenCounterView } from './tokenCounterView.js';
 import { createWormholeChrome } from './wormholeChrome.js';
 import { createRepetitionView } from './repetition.js';
 import { isEvoMemoryEnabled } from '../../core/settings.js';
@@ -884,10 +885,12 @@ function renderStats(next) {
   for (const key of ['turnsCancelled', 'turnsFailed', 'turnsPerformed']) {
     els.stats[key].textContent = num(stats[key]);
   }
-  els.stats.inTokens.textContent = num(stats.inputTokens);
-  const coverage = els.stats.coverage;
-  if (coverage) coverage.textContent = `Entrada: ${num(stats.inputTokens)} tokens BPE del texto original; ${num(stats.estimatedInputTokens)} tokens estimados de otros proveedores (no sumados); ${num(stats.unknownInputMessages)} mensajes sin conteo verificable; ${num(stats.inputCorrelationUnverified)} envíos sin ID compartido de proveedor (correlación de respaldo, no garantizada). Contexto oculto y facturación: no observables.`;
-  els.stats.outTokens.textContent = num(stats.outputTokens);
+  const tokenView = tokenCounterView(stats);
+  els.stats.inTokens.textContent = tokenView.input;
+  els.stats.inTokens.title = tokenView.detail;
+  els.stats.outTokens.textContent = tokenView.output;
+  els.stats.outTokens.title = tokenView.detail;
+  if (els.stats.coverage) els.stats.coverage.textContent = tokenView.detail;
   els.stats.interventions.textContent = num(stats.interventions);
   if (els.stats.capture) els.stats.capture.textContent = captureLine(stats);
 }

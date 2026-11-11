@@ -1295,6 +1295,7 @@ function noteUserMessageFromNetwork(details = {}) {
     host,
     url,
     chars: text.length,
+    tokenText: located ? text : undefined,
     ...measurement,
     model,
     promptHash: text ? fingerprint(text) : '',

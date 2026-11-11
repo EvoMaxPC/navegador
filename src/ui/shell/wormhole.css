@@ -23,7 +23,7 @@ body{background:#020718 url('../assets/identity/nexo-universe.svg') center/cover
 .icon-btn{color:#a8d8ff}.icon-btn:hover{color:#5be3ff;background:#12418a44;border-color:#4b84c2;box-shadow:0 0 9px #1589df33}
 .ui-zoom{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid #4e66ba;border-radius:24px;background:linear-gradient(135deg,#06132be8,#151033df);box-shadow:inset 0 0 12px #243e9a44,0 0 12px #515dff22;color:#daefff;font-size:12px}
 .ui-zoom button{border:0;background:transparent;color:#acdfff;border-radius:50%;width:28px;height:28px;font-size:23px;cursor:pointer;line-height:1}
-.ui-zoom button:hover{background:#21489366;color:#fff}.ui-zoom output{min-width:45px;text-align:center;font-variant-numeric:tabular-nums}.header-zoom{position:absolute;right:135px;top:calc(100% + 15px);z-index:20}
+.ui-zoom button:hover{background:#21489366;color:#fff}.ui-zoom output{min-width:45px;text-align:center;font-variant-numeric:tabular-nums}
 .workspace-rail{grid-column:1;grid-row:2;margin:18px 8px 14px 13px;min-width:0;padding:22px 10px 14px;border:1px solid #438ada;border-right-color:#7f5aee;border-radius:22px 22px 26px 10px;background:linear-gradient(145deg,#08387580,#02091de8 65%,#25105b99);box-shadow:inset 3px 0 9px #38bfff22,0 0 18px #177cff33;backdrop-filter:blur(16px);visibility:hidden;opacity:0;overflow:auto;transition:opacity .18s,visibility .18s}
 .left-menu-open .workspace-rail{visibility:visible;opacity:1}
 .rail-caption{font-size:9px;color:#8eb6e0}.rail-item{min-height:49px;font-size:12px;gap:12px;color:#c6d8f0}.rail-item svg{color:#73caff;filter:drop-shadow(0 0 4px #1993df44);width:24px;height:24px;flex:none}.rail-item:hover,.rail-item.selected{color:#efffff;border:1px solid #2a8fff;background:linear-gradient(110deg,#135ebd70,#1c256866);box-shadow:inset 2px 0 4px #49e5ff66,0 0 12px #147eff44}.rail-item:disabled{opacity:.45}.rail-bottom{margin-top:auto;text-align:center;min-height:120px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;padding-top:24px}.rail-bottom img{width:42px;height:42px;object-fit:contain}.rail-bottom span{font-size:9px;letter-spacing:.02em}.rail-bottom small{font-size:9px;color:#9bc6f1}
@@ -40,21 +40,24 @@ body{background:#020718 url('../assets/identity/nexo-universe.svg') center/cover
 .system-bar{background:linear-gradient(90deg,#05152be8,#0a0820de);border-color:#2a5b97;color:#b4ceeb}.system-brand img{object-fit:contain}.system-brand strong{color:#4bd8ff}
 @keyframes wormhole-orbit{to{transform:rotate(360deg)}}
 @media(min-width:1600px){:root{--rail-width:246px;--sidebar-width:430px}.chrome-brand{width:305px}.chrome-brand strong{font-size:28px}}
-@media(max-width:1150px){:root{--rail-width:200px;--sidebar-width:360px}.chrome-brand{width:240px;gap:10px}.chrome-brand strong{font-size:22px}.chrome-brand small{font-size:9px}.wormhole-button{width:54px;height:54px}.engine-pill{display:none}.header-zoom{right:90px}.rail-item span,.rail-caption,.rail-bottom{display:initial}.rail-item{justify-content:flex-start}.rail-bottom{display:flex}.system-telemetry{display:none}}
-@media(max-width:780px){.chrome-brand{width:auto;gap:8px}.chrome-brand small{display:none}.chrome-brand strong{font-size:18px}.wormhole-button{width:42px;height:42px}.tabstrip{padding-inline:12px;min-height:58px}.tab{min-width:90px}.browser.left-menu-open{--left-width:0px}.workspace-rail{position:fixed;top:var(--chrome-height,110px);left:0;bottom:34px;width:214px;z-index:28}.browser.with-sidebar{--right-width:62px}.browser.with-sidebar .sidebar{position:fixed;right:0;top:var(--chrome-height,110px);bottom:36px;left:auto;width:min(400px,calc(100vw - 16px));z-index:27;margin:10px 7px}.header-zoom{right:80px;top:calc(100% + 10px);font-size:10px}.header-zoom button{width:24px;height:24px}.sites,.chrome-brand>span:last-child{display:none}.toolbar{padding-inline:8px}.system-bar{padding-inline:9px}}
+@media(max-width:1150px){:root{--rail-width:200px;--sidebar-width:360px}.chrome-brand{width:240px;gap:10px}.chrome-brand strong{font-size:22px}.chrome-brand small{font-size:9px}.wormhole-button{width:54px;height:54px}.engine-pill{display:none}.rail-item span,.rail-caption,.rail-bottom{display:initial}.rail-item{justify-content:flex-start}.rail-bottom{display:flex}.system-telemetry{display:none}}
+@media(max-width:780px){.chrome-brand{width:auto;gap:8px}.chrome-brand small{display:none}.chrome-brand strong{font-size:18px}.wormhole-button{width:42px;height:42px}.tabstrip{padding-inline:12px;min-height:58px}.tab{min-width:90px}.browser.left-menu-open{--left-width:0px}.workspace-rail{position:fixed;top:var(--chrome-height,110px);left:0;bottom:34px;width:214px;z-index:28}.browser.with-sidebar{--right-width:62px}.browser.with-sidebar .sidebar{position:fixed;right:0;top:var(--chrome-height,110px);bottom:36px;left:auto;width:min(400px,calc(100vw - 16px));z-index:27;margin:10px 7px}.sites,.chrome-brand>span:last-child{display:none}.toolbar{padding-inline:8px}.system-bar{padding-inline:9px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 
 /* Etiquetas visibles al expandir: revertir el recorte accesible de la barra antigua. */
 .browser.with-sidebar .stab-label{position:static;width:auto;height:auto;overflow:visible;clip-path:none;white-space:normal}
-.header-zoom{position:static;flex:none;margin-left:8px;z-index:auto}
+
 
 .sidebar .row{display:grid;grid-template-columns:minmax(0,1fr) minmax(90px,1fr);gap:9px;align-items:center}
 .sidebar .row select,.sidebar .row input[type=number]{width:100%;min-width:0;max-width:100%}
 .sidebar .row input[type=checkbox]{justify-self:end}
-@media(max-width:1000px){.header-zoom{padding:3px 4px;gap:2px}.header-zoom button{width:23px;font-size:19px}.header-zoom output{min-width:36px;font-size:10px}.chrome-brand strong{font-size:20px}.chrome-brand small{font-size:8px}.chrome-brand{width:220px}}
-@media(max-width:780px){.chrome-brand{width:auto}.header-zoom{margin-left:auto}}
+@media(max-width:1000px){.chrome-brand strong{font-size:20px}.chrome-brand small{font-size:8px}.chrome-brand{width:220px}}
+@media(max-width:780px){.chrome-brand{width:auto}}
 
 .dock-brand{display:block;width:44px;height:44px;flex:none;align-self:center;margin:2px 0 9px;border-radius:50%;border:1px solid #3b8fff;box-shadow:0 0 12px #358aff55}.dock-brand img{display:block;width:100%;height:100%;border-radius:50%;object-fit:contain}
 
 /* Identificador hamburguesa del control existente, sin alterar la cabecera. */
 .wormhole-button .hamburger-icon{position:absolute;right:-3px;bottom:-1px;width:26px;height:26px;padding:3px;box-sizing:border-box;border:1px solid #7294bc;border-radius:6px;background:#071327ed;color:#edf7ff;pointer-events:none}
+
+/* Zoom sólo en Ajustes: no ocupa la cabecera ni se superpone al sitio. */
+.settings-zoom{justify-content:center;flex-wrap:wrap;max-width:100%}

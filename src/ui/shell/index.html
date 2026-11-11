@@ -18,7 +18,6 @@
         <div class="chrome-brand"><button id="toggleLeftMenu" class="wormhole-button" aria-label="Menú hamburguesa: abrir o cerrar menú izquierdo" aria-controls="leftMenu" aria-expanded="false" title="Abrir o cerrar menú izquierdo"><img src="../assets/identity/NEXO-Wormhole.png" alt="" /><svg class="hamburger-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button><div><strong>NEXO <em>AI</em></strong><small>Tu portal al Mundo de la IA</small></div></div>
         <div class="tabs" id="tabs" role="tablist"></div>
         <button class="icon-btn new-tab" id="newTab" title="Pestaña nueva (Ctrl+T)" aria-label="Pestaña nueva">+</button>
-      <div class="ui-zoom header-zoom" role="group" aria-label="Zoom de la interfaz"><button data-ui-zoom="out" aria-label="Reducir interfaz">−</button><output data-ui-zoom-value aria-live="polite">100%</output><button data-ui-zoom="in" aria-label="Aumentar interfaz">+</button><button data-ui-zoom="reset" aria-label="Restablecer zoom de interfaz" title="Restablecer">↻</button></div>
         <div class="chrome-right">
           <span class="engine-pill" id="enginePill" title="Estado del motor de mediación">
             <span class="dot"></span><span id="enginePillText">Mediación activa</span>
@@ -97,8 +96,8 @@
         <div class="stats" id="stats">
           <div class="stat"><b id="statMessages">0</b><span>mensajes del usuario</span></div>
           <div class="stat"><b id="statResponses">0</b><span>respuestas de la IA</span></div>
-          <div class="stat"><b id="statInTokens">0</b><span>tokens BPE · texto usuario *</span></div>
-          <div class="stat"><b id="statOutTokens">0</b><span>tokens de salida IA (estimados)</span></div>
+          <div class="stat"><b id="statInTokens">0</b><span>Tokens de entrada de usuario</span></div>
+          <div class="stat"><b id="statOutTokens">0</b><span>Tokens de respuesta IA</span></div>
           <div class="stat"><b id="statInterventions">0</b><span>intervenciones</span></div>
           <div class="stat"><b id="statTurnsCancelled">0</b><span>turnos cancelados</span></div>
           <div class="stat"><b id="statTurnsFailed">0</b><span>turnos fallidos</span></div>
@@ -108,11 +107,12 @@
         <p class="note capture" id="captureLine">Captura: sin datos todavía.</p>
         <p class="note" id="inputTokenCoverage">Entrada: sin datos todavía. Contexto oculto y facturación: no observables.</p>
         <p class="note" id="statsNote">
-          * Entrada: BPE del texto original con modelo y encoding verificados; no incluye
-          instrucciones internas ni tokens facturados. Modelo desconocido: no se inventa un conteo.
-          Las estimaciones de otros proveedores se muestran separadas. Salida IA: estimación por palabras del texto
-          capturado (1 unidad por palabra), sin tokenizador. No es el consumo real de OpenAI. No incluye contenido no recibido. «Intervenciones» cuenta la
-          actividad: +1 al enviar un mensaje y +1 al recibir una respuesta.
+          Entrada y respuesta: cantidad de tokens calculada con el tokenizador BPE del modelo identificado
+          sobre el texto original visible, sin convertir palabras ni caracteres en tokens.
+          «—» indica que falta el modelo o el texto; «+ ?» indica cobertura parcial. Las estimaciones se detallan aparte.
+          No incluye contexto oculto ni tokens facturados por el proveedor.
+          Los mensajes y respuestas son cantidades de turnos, no tokens. «Intervenciones» cuenta la
+          actividad: +1 al enviar un mensaje y +1 al recibir una respuesta. Cancelados, fallidos y realizados requieren señales de resultado; no se inventan por haber recibido texto.
         </p>
         </details>
         <div class="panel-head">
@@ -304,7 +304,9 @@
           <input type="number" id="setKeepRecent" min="2" max="40" step="1" />
         </label>
 
-        <div class="panel-head"><h2>Apariencia · menú derecho</h2></div>
+        <div class="panel-head"><h2>Apariencia</h2></div>
+        <div class="row"><span>Zoom de la interfaz</span><div class="ui-zoom settings-zoom" role="group" aria-label="Zoom de la interfaz"><button data-ui-zoom="out" aria-label="Reducir interfaz">−</button><output data-ui-zoom-value aria-live="polite">100%</output><button data-ui-zoom="in" aria-label="Aumentar interfaz">+</button><button data-ui-zoom="reset" aria-label="Restablecer zoom de interfaz" title="Restablecer">↻</button></div></div>
+        <div class="panel-head"><h2>Menú derecho</h2></div>
         <label class="row"><span>Comportamiento del menú derecho</span><select id="rightMenuMode"><option value="auto">Automático · expandir al pasar el mouse</option><option value="fixed">Fijo · siempre expandido</option></select></label>
         <p class="note">El modo automático también se expande al enfocar con el teclado. El menú izquierdo se inicia cerrado y se abre con NEXO Wormhole.</p>
         <div class="panel-head"><h2>Sitios de IA</h2></div>

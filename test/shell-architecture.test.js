@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { tokenCounterView } from '../src/ui/shell/tokenCounterView.js';
 import { createFrameQueue } from '../src/ui/shell/scheduler.js';
 import { safeFaviconUrl, navigationStatus } from '../src/ui/shell/security.js';
 import { isPublicAssetPath } from '../src/main/internalAssets.js';
@@ -50,12 +51,12 @@ test('la shell consume la ráfaga IPC sin consultar stats de nuevo ni renderizar
   const frames = []; let requests = 0; let listener; let writes = 0;
   const keys = ['messages', 'responses', 'turnsCancelled', 'turnsFailed', 'turnsPerformed', 'inTokens', 'outTokens', 'interventions', 'capture'];
   const elements = Object.fromEntries(keys.map((key) => [key, { get textContent() { return this.value; }, set textContent(value) { writes++; this.value = value; } }]));
-  const context = vm.createContext({ els: { stats: elements }, uiTasks: createFrameQueue((run) => frames.push(run)), nexo: {
+  const context = vm.createContext({ tokenCounterView, els: { stats: elements }, uiTasks: createFrameQueue((run) => frames.push(run)), nexo: {
     getStats: async () => { requests++; return { messages: 1 }; }, on: (_name, fn) => { listener = fn; },
   } });
   vm.runInContext(source.slice(source.indexOf('function num(value)'), source.indexOf('const MEM =')), context);
   vm.runInContext(source.match(/nexo\.on\?\.\('nexo:stats-changed',[\s\S]*?\n\}\);/)[0], context);
-  for (let i = 0; i < 1000; i++) listener({ messages: i, outputTokens: i });
+  for (let i = 0; i < 1000; i++) listener({ messages: i, outputBpeTokens: i });
   assert.equal(requests, 0); assert.equal(writes, 0); assert.equal(frames.length, 1);
   frames.shift()();
   assert.equal(elements.messages.textContent, '999');
@@ -69,7 +70,7 @@ test('una consulta IPC antigua no pisa estadísticas push más nuevas; las consu
   const keys = ['messages', 'responses', 'turnsCancelled', 'turnsFailed', 'turnsPerformed', 'inTokens', 'outTokens', 'interventions', 'capture'];
   const elements = Object.fromEntries(keys.map((key) => [key, {}]));
   let resolve; let requests = 0;
-  const context = vm.createContext({ els: { stats: elements }, nexo: { getStats: () => { requests++; return new Promise((done) => { resolve = done; }); } } });
+  const context = vm.createContext({ tokenCounterView, els: { stats: elements }, nexo: { getStats: () => { requests++; return new Promise((done) => { resolve = done; }); } } });
   vm.runInContext(source.slice(source.indexOf('function num(value)'), source.indexOf('const MEM =')), context);
   const first = vm.runInContext('refreshStats()', context);
   const second = vm.runInContext('refreshStats()', context);

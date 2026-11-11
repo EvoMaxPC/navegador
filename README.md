@@ -66,7 +66,8 @@ los dos sentidos**:
   tokens internos filtrados) y ofrece continuar exactamente donde se cortó.
 
 Todo el análisis es **local y determinista**: sin modelos auxiliares ni nube. La entrada GPT conserva el tokenizador BPE local
-`gpt-tokenizer`. **La salida IA se estima por las palabras capturadas, sin tokenizador: 1 unidad estimada por cada palabra (no es el consumo real de OpenAI).**
+`gpt-tokenizer`. **La tarjeta de salida IA usa BPE sobre el texto visible original cuando el modelo/encoding están identificados; no es el consumo facturado de OpenAI. Las estimaciones heredadas y los casos sin modelo/texto se detallan aparte.**
+[Medición de entrada/respuesta, cobertura y pruebas](docs/NEXO-CONTADORES-ENTRADA-RESPUESTA-BPE.md). El zoom de interfaz está en Ajustes → Apariencia.
 Se actualiza mientras ChatGPT escribe y se reconcilia al terminar sin duplicar el conteo.
 
 **Corrección de tokens de salida 0.1.19:** captura SSE/NDJSON según el MIME real
