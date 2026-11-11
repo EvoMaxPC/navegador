@@ -34,17 +34,25 @@ test('texto original estricto: tipo, cadena vacía, NFC/NFD y modelo desconocido
   for (const model of [
     '',
     'auto',
-    'gpt-6',
-    'gpt-5-desconocido',
-    'gpt-4.1-inventado',
     'claude-3',
-    'GPT-5',
+    'auto',
   ]) {
     assert.equal(countGptTokens(' texto ', model), null);
     assert.equal(
       inputTokenMeasurement(' texto ', model, 'chatgpt').tokenExact,
       false,
     );
+  }
+  for (const [model, expectedModel] of [
+    ['gpt-6', 'gpt-5'],
+    ['gpt-5-desconocido', 'gpt-5'],
+    ['gpt-4.1-inventado', 'gpt-4.1'],
+    ['GPT-5', 'gpt-5'],
+  ]) {
+    const result = inputTokenMeasurement(' texto ', model, 'chatgpt');
+    assert.equal(result.tokens, countGptTokens(' texto ', expectedModel));
+    assert.equal(result.tokenModel, expectedModel);
+    assert.equal(result.tokenMethod, model === 'GPT-5' ? 'bpe-original' : 'bpe-nearest-model');
   }
   assert.notDeepEqual(
     encodeGptText('café', 'gpt-5'),
