@@ -1,7 +1,8 @@
+import { isEvoMemoryEnabled } from '../../core/settings.js';
 import { createUnderstandingPanel } from './understandingPanel.js';
 import { createWorkDossier } from './workDossier.js';
 import { createBrowserTools } from './browserTools.js';
-import { createMemoryPanel, memoryReadout } from './memoryPanel.js';
+import { createMemoryPanel, memoryReadout, setMemoryPanelAvailability } from './memoryPanel.js';
 import { readMemoryConversation, sameConversationSource } from './chatgptDirect.js';
 import { createRepetitionView } from './repetition.js';
 import { isChatGptMemoryUrl } from '../../core/chatgptConversation.js';
@@ -712,7 +713,7 @@ nexo.on('nexo:repetition-changed', (snapshot) => {
     } catch { return; }
   }
   memoryLiveRevision += 1;
-  memState.liveSnapshot = snapshot.href ? { ...snapshot, href: source.href } : null;
+  memState.liveSnapshot = isEvoMemoryEnabled(state.settings) && snapshot.href ? { ...snapshot, href: source.href } : null;
   if (isPanelActive('memory')) uiTasks.schedule('chat-capture', renderChatCapture);
   if (!isPanelActive('repetition')) return;
   repetitionTicket += 1;
@@ -981,20 +982,19 @@ const memoryLiveView = createRepetitionView({
 });
 
 function renderChatCapture() {
+  if(!isEvoMemoryEnabled(state.settings)) { syncMemoryAvailability(); return; }
   const conversations = memState.conversations || [];
   const savedTurns = conversations.reduce((sum, entry) => sum + (entry.turns?.length || 0), 0);
   const live = sameConversationSource(memState.liveSnapshot, repetitionSource()) ? memState.liveSnapshot : null;
   document.getElementById('memoryLiveConversation').dataset.strategy = live?.strategy || 'none';
   const liveTurns = live?.turns || [];
-  const readout = memoryReadout({ enabled: state.settings?.memory?.enabled, live, conversations, loaded: memoryRegistryLoaded });
+  const readout = memoryReadout({ enabled: isEvoMemoryEnabled(state.settings), live, conversations, loaded: memoryRegistryLoaded });
   document.getElementById('memoryPersistence').dataset.state = readout.state;
   document.getElementById('memoryPersistenceTitle').textContent = readout.title;
   document.getElementById('memoryPersistenceDetail').textContent = readout.detail;
   memoryLiveView.render(live, 'Esperando los mensajes renderizados de esta pestaña…');
   const liveStatus = document.getElementById('memoryLiveStatus');
-  if (liveTurns.length) liveStatus.textContent += state.settings?.memory?.enabled === false
-    ? ' · Guardado local desactivado: esta copia sólo está en RAM.'
-    : live.strategy === 'direct-console-injection'
+  if (liveTurns.length) liveStatus.textContent += live.strategy === 'direct-console-injection'
       ? ' · Lectura directa de respaldo en RAM; no confirma guardado local.'
       : ' · Vista en RAM inmediata; guardado local agrupado cada 500 ms.';
   const users = liveTurns.filter((turn) => turn.role === 'user').length;
@@ -1043,13 +1043,33 @@ function renderMemoryItems(entries) {
     .join('');
 }
 
+function syncMemoryAvailability(){
+  const enabled=isEvoMemoryEnabled(state.settings);
+  setMemoryPanelAvailability(document.getElementById('panel-memory'),enabled);
+  if(enabled)return;
+  memoryRefreshTicket++;memoryLiveRevision++;
+  memState.items=[];memState.conversations=[];memState.liveSnapshot=null;memState.lastPacket=null;memState.stats={};memoryRegistryLoaded=false;
+  MEM.list.replaceChildren();MEM.conversations.replaceChildren();MEM.packet.value='';
+  memoryLiveView.render(null,'EVO Memory desactivada. Comprensión sigue activa.');
+  MEM.items.textContent='0';MEM.tokens.textContent='0';MEM.saved.textContent='0 %';MEM.legend.replaceChildren();MEM.file.textContent='';
+  if(MEM.context)MEM.context.textContent='EVO Memory desactivada; Comprensión sigue activa.';
+  MEM.captureCurrent.textContent='0';MEM.captureSaved.textContent='0';MEM.captureConversations.textContent='0';MEM.captureDot.dataset.active='false';
+  MEM.captureStatus.textContent='EVO Memory desactivada';MEM.captureDetail.textContent='No se muestran ni se guardan recuerdos. Comprensión sigue activa.';
+  document.getElementById('memoryPersistence').dataset.state='disabled';
+  document.getElementById('memoryPersistenceTitle').textContent='EVO Memory desactivada';
+  document.getElementById('memoryPersistenceDetail').textContent='Comprensión sigue activa; los recuerdos anteriores no se borraron.';
+}
+
 async function refreshMemory() {
-  if (!nexo.memory) return;
+  if (!nexo.memory || !isEvoMemoryEnabled(state.settings)) { syncMemoryAvailability(); return; }
   const ticket = ++memoryRefreshTicket, source = repetitionSource(), tab = activeTab();
   if (!sameConversationSource(memState.liveSnapshot, source)) { memState.liveSnapshot = null; renderChatCapture(); }
   try {
-    memState.stats = await nexo.memory.stats();
-    memState.items = await nexo.memory.list();
+    const stats=await nexo.memory.stats();
+    if(ticket!==memoryRefreshTicket||!isEvoMemoryEnabled(state.settings))return;
+    const items=await nexo.memory.list();
+    if(ticket!==memoryRefreshTicket||!isEvoMemoryEnabled(state.settings))return;
+    memState.stats=stats;memState.items=items;
     MEM.items.textContent = String(memState.stats.active ?? 0);
     MEM.tokens.textContent = String(memState.stats.tokens ?? 0);
     MEM.saved.textContent = `${memState.stats.savedPct ?? 0} %`;
@@ -1071,7 +1091,9 @@ async function refreshMemory() {
     MEM.file.textContent = memState.stats.file ? `Archivo: ${memState.stats.file}` : '';
     renderMemoryItems(memState.items.slice(0, 40));
     if (nexo.memory.conversations) {
-      memState.conversations = await nexo.memory.conversations();
+      const conversations=await nexo.memory.conversations();
+      if(ticket!==memoryRefreshTicket||!isEvoMemoryEnabled(state.settings))return;
+      memState.conversations=conversations;
       memoryRegistryLoaded = true;
       const live = await readMemoryConversation({ source, tab,
         getSource: () => ticket === memoryRefreshTicket ? repetitionSource() : null,
@@ -1079,7 +1101,7 @@ async function refreshMemory() {
         getLive: () => memState.liveSnapshot,
         getRevision: () => memoryLiveRevision,
       });
-      if (ticket !== memoryRefreshTicket) return;
+      if (ticket !== memoryRefreshTicket || !isEvoMemoryEnabled(state.settings)) return;
       if (live !== undefined) memState.liveSnapshot = live;
       renderChatCapture();
       if (MEM.conversations?.closest('details')?.open) {
@@ -1098,7 +1120,7 @@ MEM.conversations.closest('details').addEventListener('toggle', () => { if (MEM.
 
 MEM.list.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-action]');
-  if (!button) return;
+  if (!button || !isEvoMemoryEnabled(state.settings)) return;
   const { id, action } = button.dataset;
   if (action === 'pin') {
     const current = memState.items.find((item) => item.id === id);
@@ -1111,20 +1133,25 @@ MEM.list.addEventListener('click', async (event) => {
 
 MEM.searchForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if(!isEvoMemoryEnabled(state.settings))return;
   const query = MEM.search.value.trim();
   if (!query) return refreshMemory();
+  const ticket=memoryRefreshTicket;
   const results = await nexo.memory.recall(query, 20);
-  renderMemoryItems(results);
+  if(ticket===memoryRefreshTicket&&isEvoMemoryEnabled(state.settings))renderMemoryItems(results);
 });
 
 MEM.handoff.addEventListener('click', async () => {
+  if(!isEvoMemoryEnabled(state.settings))return;
+  const ticket=memoryRefreshTicket;
   const packet = await nexo.memory.handoff();
-  if (!packet) return;
+  if (ticket!==memoryRefreshTicket || !packet || !isEvoMemoryEnabled(state.settings)) return;
   memState.lastPacket = packet;
   MEM.packet.value = packet.markdown;
 });
 
 MEM.copy.addEventListener('click', async () => {
+  if(!isEvoMemoryEnabled(state.settings))return;
   if (!MEM.packet.value) await MEM.handoff.click();
   if (!MEM.packet.value) return;
   try {
@@ -1137,13 +1164,16 @@ MEM.copy.addEventListener('click', async () => {
 });
 
 MEM.importBtn.addEventListener('click', async () => {
+  if(!isEvoMemoryEnabled(state.settings))return;
   const raw = MEM.packet.value.trim();
   if (!raw) return;
   let packet = memState.lastPacket;
   if (!packet || JSON.stringify(packet.markdown).slice(1, 80) !== JSON.stringify(raw).slice(1, 80)) {
     packet = { markdown: raw, items: parsePacketText(raw) };
   }
+  const ticket=memoryRefreshTicket;
   const result = await nexo.memory.import(packet);
+  if(ticket!==memoryRefreshTicket||!isEvoMemoryEnabled(state.settings))return;
   MEM.packet.value =
     `Importadas ${result.added}, fusionadas ${result.merged}.` +
     (result.ignored ? ` Sin leer (cifradas): ${result.ignored}.` : '');
@@ -1199,6 +1229,7 @@ function fillSettings(settings) {
   S.budget.value = settings.context?.budgetTokens ?? 6000;
   S.keepRecent.value = settings.context?.keepRecentTurns ?? 6;
   updateEnginePill();
+  syncMemoryAvailability();
 }
 
 function updateEnginePill() {
@@ -1532,6 +1563,7 @@ nexo.on?.('nexo:stats-changed', (stats) => {
 nexo.on('nexo:settings-changed', (settings) => {
   fillSettings(settings);
   renderSitesList();
+  if(isEvoMemoryEnabled(settings)&&isPanelActive('memory'))uiTasks.schedule('memory',refreshMemory);
 });
 
 nexo.on('nexo:open-tab', ({ url }) => {

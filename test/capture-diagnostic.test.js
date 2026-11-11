@@ -72,8 +72,8 @@ test('el recibo de EVO MEMORY corresponde a la captura actual y distingue fallo 
   for (const fail of [false, true]) {
     const memory = new EvoMemory({ storage: { read: () => null, write() { if (fail) throw new Error('disco lleno'); } } });
     const log = Array.from({ length: 60 }, () => ({ code: 'gpt-response-memory', meta: { chars: 999, messageId: 'viejo' } }));
-    const engine = new Engine({ memory, store: { settings: { enabled: false, memory: { enabled: true } }, pushLog: (entry) => log.unshift(entry) } });
-    const result = engine.onCdpCapture(5, { site: 'chatgpt', host: 'chatgpt.com', text: secret, messageId: 'actual' });
+    const engine = new Engine({ memory, store: { settings: { enabled: true, memory: { enabled: true }, sites: { chatgpt: { enabled: false } } }, pushLog: (entry) => log.unshift(entry) } });
+    const result = engine.onCdpCapture(5, { site: 'chatgpt', host: 'chatgpt.com', text: secret, messageId: 'actual', documentUrl:'https://chatgpt.com/c/receipt' });
     assert.equal(result.memory.chars, secret.length);
     assert.equal(result.memory.saved, !fail);
     assert.equal(result.memory.persisted, !fail);

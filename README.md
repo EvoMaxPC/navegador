@@ -23,6 +23,10 @@ de extractos del asistente, siempre sin verificación factual. No completa aún 
 explicaciones de alcance y correcciones humanas con historia. Desarrollo por
 etapas cerrado con [revisión final y límites pendientes](docs/NEXO-COMPRENSION-REVISION-FINAL.md).
 
+**Interruptor EVO:** al desactivar Mediación global también se desactiva EVO Memory
+(captura y visualización), sin borrar recuerdos. **Comprensión sigue activa**.
+[Corrección y validación](docs/NEXO-EVO-OFF-MEMORY-OFF.md).
+
 **0.1.33 · Capa 1 — User Understanding Engine:** objetivo literal persistente,
 restricciones separadas de preferencias, tarea/subobjetivos, procedencia, vigencia,
 incertidumbre y aclaraciones revisables. Integrado a preparación de mensajes y

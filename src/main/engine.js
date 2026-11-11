@@ -9,7 +9,7 @@ import { isChatGptMemoryUrl } from '../core/chatgptConversation.js';
 import { ConversationGuard } from '../core/guard.js';
 import { detectSite, isAuthRequest, isProfileId } from '../core/sites.js';
 import { isAiHost } from '../core/cdp.js';
-import { settingsForHost } from '../core/settings.js';
+import { settingsForHost, isEvoMemoryEnabled } from '../core/settings.js';
 import { StreamSentinel } from '../core/streamSentinel.js';
 import { recoverySuggestions, repairResponse } from '../core/responseEngine.js';
 import { fingerprint } from '../core/text.js';
@@ -40,7 +40,7 @@ const CHANNEL_LABEL = {
 function rememberCapturedGptAnswer(memory, store, capture = {}) {
   const text = String(capture.text || '').trim();
   const host = String(capture.host || '').toLowerCase();
-  if (!memory?.store || !text || store?.settings?.memory?.enabled === false ||
+  if (!memory?.store || !text || !isEvoMemoryEnabled(store?.settings) ||
     (capture.documentUrl && !isChatGptMemoryUrl(capture.documentUrl)) ||
     (capture.site !== 'chatgpt' && !['chatgpt.com', 'chat.openai.com'].includes(host))) return null;
 
@@ -199,7 +199,7 @@ export class Engine {
         settings: settingsForHost(this.store.settings, host),
         host,
         language: this.store.settings.uiLocale === 'en' ? 'en' : 'es',
-        memory: this.memory,
+        memory: isEvoMemoryEnabled(this.store.settings) ? this.memory : null,
         conversationId: `${host}#${webContentsId}`,
       });
       this.guards.set(webContentsId, guard);
@@ -248,6 +248,7 @@ export class Engine {
 
     const guard = this.#guard(webContentsId, host);
     // Se refrescan los ajustes por si el usuario los cambió en vivo.
+    guard.memory = isEvoMemoryEnabled(this.store.settings) ? this.memory : null;
     guard.setSettings(settingsForHost(this.store.settings, host));
 
     const report = guard.preparePrompt(prompt);
@@ -961,11 +962,11 @@ export class Engine {
     const now = Date.now();
 
     const host = capture.host || safeHost(capture.url) || 'desconocido';
-    // La memoria puede observar ChatGPT sin habilitar la mediación. Esta vía
+    // La memoria puede observar ChatGPT sin mediación del sitio, con EVO global activa. Esta vía
     // sólo se permite en una conversación normal (no chat temporal) y mientras
     // EVO MEMORY siga habilitada; nunca crea ni ejecuta un guardián.
     const passiveMemoryObservation = detectSite(host).id === 'chatgpt' &&
-      this.store.settings.memory?.enabled !== false &&
+      isEvoMemoryEnabled(this.store.settings) &&
       isChatGptMemoryUrl(capture.documentUrl || '');
     if (!this.isEnabledFor(host) && !passiveMemoryObservation) {
       return { ok: false, skipped: 'disabled' };
@@ -1142,6 +1143,7 @@ export class Engine {
   refresh() {
     for (const [id, guard] of this.guards) {
       const host = guard.host || '';
+      guard.memory = isEvoMemoryEnabled(this.store.settings) ? this.memory : null;
       guard.setSettings(settingsForHost(this.store.settings, host));
     }
   }
@@ -1296,15 +1298,15 @@ export class Engine {
   /* ---------------- EVO MEMORY ---------------- */
 
   memoryList() {
-    return this.memory ? this.memory.list() : [];
+    return this.memory && isEvoMemoryEnabled(this.store.settings) ? this.memory.list() : [];
   }
 
   memoryStats() {
-    return this.memory ? this.memory.stats() : { total: 0, active: 0, byKind: {}, tokens: 0, circuits: {} };
+    return this.memory && isEvoMemoryEnabled(this.store.settings) ? {...this.memory.stats(),enabled:true} : { enabled:false,total: 0, active: 0, byKind: {}, tokens: 0, circuits: {} };
   }
 
   memoryRecall(query, opts = {}) {
-    if (!this.memory) return [];
+    if (!this.memory || !isEvoMemoryEnabled(this.store.settings)) return [];
     return this.memory.recall(query, opts).map((entry) => ({
       id: entry.item.id,
       kind: entry.item.kind,
@@ -1320,28 +1322,28 @@ export class Engine {
   }
 
   memoryPin(id, pinned = true) {
-    if (!this.memory) return { ok: false };
+    if (!this.memory || !isEvoMemoryEnabled(this.store.settings)) return { ok: false };
     this.memory.pin(id, pinned);
     return { ok: true };
   }
 
   memoryForget(id) {
-    if (!this.memory) return { ok: false };
+    if (!this.memory || !isEvoMemoryEnabled(this.store.settings)) return { ok: false };
     return { ok: this.memory.forget(id) };
   }
 
   memoryTouch(id) {
-    if (!this.memory) return { ok: false };
+    if (!this.memory || !isEvoMemoryEnabled(this.store.settings)) return { ok: false };
     return { ok: this.memory.touch(id) };
   }
 
   memoryHandoff() {
-    if (!this.memory) return null;
+    if (!this.memory || !isEvoMemoryEnabled(this.store.settings)) return null;
     return this.memory.handoff();
   }
 
   memoryImport(packet) {
-    if (!this.memory) return { added: 0, merged: 0, superseded: 0 };
+    if (!this.memory || !isEvoMemoryEnabled(this.store.settings)) return { added: 0, merged: 0, superseded: 0 };
     return this.memory.importHandoff(packet);
   }
 

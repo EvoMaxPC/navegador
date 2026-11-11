@@ -1,6 +1,6 @@
 /** Sólo presentación. No guarda, captura ni modifica conversaciones. */
 export function memoryReadout({ enabled, live, conversations = [], loaded = false }) {
-  if (enabled === false) return { state: 'disabled', title: 'Guardado desactivado', detail: 'La lectura visible sólo está en RAM.' };
+  if (enabled === false) return { state: 'disabled', title: 'EVO Memory desactivada', detail: 'No se muestran recuerdos. Comprensión sigue activa.' };
   if (live?.strategy === 'direct-console-injection') return {
     state: 'ram', title: 'Lectura de respaldo · RAM', detail: 'Esta lectura no confirma persistencia en disco.',
   };
@@ -50,4 +50,10 @@ export function createMemoryPanel({ root, browser, pin, onSelect = () => {} }) {
     pin.title = floating ? 'Fijar: reservar espacio junto a la página' : 'Desfijar: mostrar el panel sobre la página';
   });
   return { select, get selected() { return selected; } };
+}
+
+/** Oculta sólo el contenido EVO; nunca el panel hermano de Comprensión. */
+export function setMemoryPanelAvailability(root, enabled) {
+  root.classList.toggle('evo-memory-disabled', !enabled);
+  root.querySelector('#memoryDisabledNotice').hidden = enabled;
 }

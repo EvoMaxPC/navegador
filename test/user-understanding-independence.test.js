@@ -468,3 +468,11 @@ test('lector reintenta un ACK negativo y confirma después de la cola real, sin 
     await settings({ enabled: true, memory: { enabled: true } });
   }
 });
+
+test('EVO global apagada desactiva captura/lectura EVO aun con memory.enabled=true, sin detener UUE',async()=>{
+ await settings({enabled:true,memory:{enabled:true}});const g=attach('global-off-memory-on');const text='RECUERDO CONSERVADO AL APAGAR EVO';invoke('nexo:conversation-snapshot',g,{...payload(g,'Mi objetivo: conservar comprensión'),turns:[{id:'u1',role:'user',content:'Mi objetivo: conservar comprensión'},{id:'a1',role:'assistant',content:text}]});const saved=await invoke('nexo:memory:conversations',owner,{});assert.ok(saved.some(c=>c.turns.some(t=>t.content===text)));
+ const original=EvoMemory.prototype.captureConversation;let captures=0;EvoMemory.prototype.captureConversation=function(...args){captures++;return original.apply(this,args);};
+ try{await settings({enabled:false,memory:{enabled:true}});const ack=invoke('nexo:conversation-snapshot',g,payload(g,'No ejecutes código','u2'));assert.equal(ack.ok,true);assert.equal(ack.observed,true);assert.equal(ack.memoryDisabled,true);assert.equal(captures,0);assert.deepEqual(await invoke('nexo:memory:list',owner,{}),[]);assert.deepEqual(await invoke('nexo:memory:conversations',owner,{}),[]);assert.deepEqual(await invoke('nexo:memory:recall',owner,{query:text}),[]);assert.equal(await invoke('nexo:memory:handoff',owner,{}),null);const stats=await invoke('nexo:memory:stats',owner,{});assert.equal(stats.enabled,false);assert.equal(stats.tokens,0);assert.equal(stats.file,null);const snap=await read(g);assert.equal(snap.observationEnabled,true);assert.equal(snap.state.user_goal.text,'conservar comprensión');assert.equal(snap.state.explicit_constraints[0].text,'No ejecutes código');disk(g,snap);
+ await settings({enabled:true});const restored=await invoke('nexo:memory:conversations',owner,{});assert.ok(restored.some(c=>c.turns.some(t=>t.content===text)));assert.equal((await read(g)).state.user_goal.text,'conservar comprensión');
+ }finally{EvoMemory.prototype.captureConversation=original;await settings({enabled:true,memory:{enabled:true}});}
+});

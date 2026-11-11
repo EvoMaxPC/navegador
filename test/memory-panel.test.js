@@ -74,3 +74,10 @@ test('una solapa desconocida no cambia la selección ni ejecuta acciones', () =>
   const f = fixture(); f.panel.select('__proto__');
   assert.equal(f.panel.selected, 'conversation'); assert.deepEqual(f.selected, []);
 });
+
+test('disponibilidad EVO requiere interruptor global y preferencia; no cambia los ajustes guardados',async()=>{
+ const {isEvoMemoryEnabled}=await import('../src/core/settings.js');for(const [settings,enabled] of [[{},true],[{enabled:false,memory:{enabled:true}},false],[{enabled:true,memory:{enabled:false}},false],[{enabled:true,memory:{enabled:true}},true]]){const before=structuredClone(settings);assert.equal(isEvoMemoryEnabled(settings),enabled);assert.deepEqual(settings,before);}
+});
+test('panel desactivado oculta sólo EVO y explica que Comprensión sigue activa',async()=>{
+ const {setMemoryPanelAvailability}=await import('../src/ui/shell/memoryPanel.js');const notice={hidden:true},calls=[],root={classList:{toggle:(...args)=>calls.push(args)},querySelector:s=>{assert.equal(s,'#memoryDisabledNotice');return notice;}};setMemoryPanelAvailability(root,false);assert.equal(notice.hidden,false);assert.deepEqual(calls[0],['evo-memory-disabled',true]);const readout=memoryReadout({enabled:false,live:{turns:[{content:'privado'}]}});assert.match(readout.detail,/Comprensión sigue activa/);assert.ok(!JSON.stringify(readout).includes('privado'));setMemoryPanelAvailability(root,true);assert.equal(notice.hidden,true);
+});

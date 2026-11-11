@@ -26,7 +26,7 @@ import { isAiHost } from '../core/cdp.js';
 import { detectSite, isAuthRequest, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
-import { DEFAULT_SETTINGS } from '../core/settings.js';
+import { DEFAULT_SETTINGS, isEvoMemoryEnabled } from '../core/settings.js';
 import { fingerprint, gptModelFromRequest } from '../core/text.js';
 import { countTokensForProvider, countOutputTokens } from './tokens.js';
 import { hostOf, isInternal } from '../nav/url.js';
@@ -738,7 +738,7 @@ function registerIpc() {
       ? userUnderstanding?.observeConversation(event.sender,payload.turns,{streaming:payload.streaming===true})
       : { skipped: 'snapshot-no-autorizado' };
     const observed = observation?.ok === true || observation?.duplicate === true;
-    if(store.settings.memory?.enabled === false) {
+    if(!isEvoMemoryEnabled(store.settings)) {
       // La cola confirma entrega a UUE, no una captura EVO que no fue solicitada.
       return observed
         ? { ok: true, observed: true, memoryDisabled: true }
@@ -774,8 +774,8 @@ function registerIpc() {
     if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());
     return { ...result, observed, observationSkipped: observed ? undefined : observation?.skipped, assistantCaptures: undefined };
   });
-  ipcMain.handle('nexo:memory:conversations', () => memory.memory.listConversations());
-  ipcMain.handle('nexo:memory:stats', () => ({ ...engine.memoryStats(), file: memory?.file || null }));
+  ipcMain.handle('nexo:memory:conversations', () => isEvoMemoryEnabled(store.settings) ? memory.memory.listConversations() : []);
+  ipcMain.handle('nexo:memory:stats', () => ({ ...engine.memoryStats(), file: isEvoMemoryEnabled(store.settings) ? memory?.file || null : null }));
   ipcMain.handle('nexo:memory:list', () => engine.memoryList());
   ipcMain.handle('nexo:memory:recall', (_event, payload = {}) =>
     engine.memoryRecall(String(payload.query || ''), { limit: payload.limit || 12 }));
@@ -1594,7 +1594,7 @@ app.whenReady().then(async () => {
   memory = created;
   userUnderstanding = new UserUnderstandingService({memory:created.memory,
     file:join(app.getPath('userData'),`nexo-understanding-${createHash('sha256').update(created.memory.projectId).digest('hex').slice(0,16)}.json`),
-    memoryEnabled:()=>store.settings.memory?.enabled!==false,notify:broadcast});
+    memoryEnabled:()=>isEvoMemoryEnabled(store.settings),notify:broadcast});
   captureDiagnosticFile = join(app.getPath('documents'), 'NEXO-CAPTURE-DIAGNOSTIC.jsonl');
   captureDiagnostic = createCaptureDiagnostic(captureDiagnosticFile, {
     onError: (code) => console.warn('[nexo] diagnóstico de captura no escrito:', code),
@@ -1624,14 +1624,14 @@ app.whenReady().then(async () => {
     // Se vuelve a consultar al leer cuerpos, por si el interruptor cambia con la
     // pestaña ya abierta.
     // La memoria habilitada autoriza observación pasiva de ChatGPT aunque la
-    // mediación esté apagada. No se altera el prompt; sólo se lee la respuesta
+    // mediación del sitio esté apagada, pero nunca con EVO global apagada. Sólo se lee la respuesta
     // para guardarla en EVO MEMORY. Para otros proveedores sigue mandando el
     // interruptor de mediación del sitio.
     contentAllowed: (host) => {
       const normalized = String(host || '').toLowerCase();
       const isChatGpt = normalized === 'chatgpt.com' || normalized.endsWith('.chatgpt.com') ||
         normalized === 'chat.openai.com' || normalized.endsWith('.chat.openai.com');
-      return engine.isEnabledFor(host) || (isChatGpt && store.settings.memory?.enabled !== false);
+      return engine.isEnabledFor(host) || (isChatGpt && isEvoMemoryEnabled(store.settings));
     }, 
     // Lo que el depurador no pudo leer se ve en el registro: un cero sin causa
     // es lo que nos tuvo dando vueltas cuatro versiones.

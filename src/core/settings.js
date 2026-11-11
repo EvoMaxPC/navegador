@@ -92,3 +92,8 @@ export function settingsForHost(settings, host) {
   if (site.protocolLevel) merged.protocol.level = site.protocolLevel;
   return merged;
 }
+
+/** EVO Memory requiere EVO global y su preferencia propia. UUE no usa este gate para observar. */
+export function isEvoMemoryEnabled(settings) {
+  return settings?.enabled !== false && settings?.memory?.enabled !== false;
+}
