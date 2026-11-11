@@ -382,9 +382,13 @@ export class Engine {
       const measured = inputTokenMeasurement(record.tokenText, payload.model || '', record.host);
       if (Number.isSafeInteger(measured.tokens) && measured.tokens >= 0) payload = { ...payload, ...measured };
     }
+    // El gesto del compositor identifica que hubo un envío, pero todavía no
+    // conoce el modelo efectivo. No convertirlo en una estimación GPT-5:
+    // conservarlo como desconocido hasta que la petición/red aporte metadata.
+    const awaitingModel = payload.source === 'composer' && !String(payload.model || '').trim();
     const valid = Number.isSafeInteger(payload.tokens) && payload.tokens >= 0;
     const exact = valid && payload.tokenExact === true && payload.tokenMethod === 'bpe-original' && payload.tokenEncoding;
-    const category = exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified','bpe-default','bpe-nearest-model'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
+    const category = awaitingModel ? 'unknownInputMessages' : exact ? 'inputTokens' : valid && (!payload.tokenMethod || ['legacy-estimate','unverified','bpe-default','bpe-nearest-model'].includes(payload.tokenMethod)) ? 'estimatedInputTokens' : 'unknownInputMessages';
     const priority = category === 'inputTokens' ? 10 + (payload.source === 'composer' ? 0 : 1) : category === 'estimatedInputTokens' ? 1 : 0;
     const previous = record.measurement;
     if (previous && previous.priority >= priority) {
