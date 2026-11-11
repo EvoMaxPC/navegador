@@ -71,6 +71,11 @@ app.whenReady().then(() => {
   await shell.executeJavaScript(`(async()=>{await nexo.setSettings({enabled:false,memory:{enabled:false}});await nexo.advanced.setPreferences({...await nexo.advanced.preferences(),rightMenuMode:'fixed'});document.getElementById('omnibox').value='https://chatgpt.com/c/fixture';document.getElementById('omniboxForm').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));document.querySelector('.rail-item[data-open-panel="memory"]').click();})()`);
   await until(() => webContents.getAllWebContents().some(w => w.getType() === 'webview' && w.getURL() === 'https://chatgpt.com/c/fixture'), 'webview HTTPS cargada');
   const guest = webContents.getAllWebContents().find(w => w.getType() === 'webview' && w.getURL() === 'https://chatgpt.com/c/fixture');
+  const guestLogs = [];
+  guest.on('console-message', (event) => {
+    const text = String(event?.message ?? event ?? '');
+    if (text) guestLogs.push(text.slice(0, 300));
+  });
   try {
     await until(() => guest.executeJavaScript('Boolean(window.__nexo?.state)'), 'capa instalada para comprobar retiro del espejo');
     if (await guest.executeJavaScript(`Boolean(document.querySelector('#__nexo-gpt-capture-mirror'))`)) throw Error('El espejo de captura no debe aparecer');
@@ -97,9 +102,9 @@ app.whenReady().then(() => {
     await until(async () => (await readSnapshot())?.turns?.[1]?.content.endsWith('Respuesta final'), 'streaming DOM actualiza lector aislado sin duplicados');
     await shell.executeJavaScript(`(async()=>{await nexo.setSettings({enabled:true,memory:{enabled:true}});document.querySelector('.stab[data-panel="memory"]').click();})()`);
     await until(() => shell.executeJavaScript('document.querySelectorAll("#memoryLiveConversation .repeat-text").length===2'), 'Memoria muestra la misma conversación en vivo');
-    await guest.executeJavaScript(`window.postMessage({__nexo:'event',type:'outgoing',payload:{host:'chatgpt.com',site:'chatgpt',source:'composer',model:'gpt-5',messageId:'render-fixture-send',tokenText:'pregunta nueva',chars:14}},'*');const u=document.createElement('article');u.setAttribute('data-message-author-role','user');u.setAttribute('data-message-id','u2');u.textContent='pregunta nueva';document.querySelector('main').append(u);`);
+    await guest.executeJavaScript(`(()=>{window.postMessage({__nexo:'event',type:'outgoing',payload:{host:'chatgpt.com',site:'chatgpt',source:'composer',model:'gpt-5',messageId:'render-fixture-send',tokenText:'pregunta nueva',chars:14}},'*');const u=document.createElement('article');u.setAttribute('data-message-author-role','user');u.setAttribute('data-message-id','u2');u.textContent='pregunta nueva';document.querySelector('main').append(u);})()`);
     await until(() => shell.executeJavaScript('document.querySelectorAll("#memoryLiveConversation .repeat-text").length===3'), 'envío observado conserva historial y suma otra entrada');
-    await guest.executeJavaScript(`const a=document.createElement('article');a.setAttribute('data-message-author-role','assistant');a.setAttribute('data-message-id','a2');a.innerHTML='<pre id="liveAnswer" class="markdown"></pre>';document.querySelector('main').append(a);const stop=document.createElement('button');stop.id='fixtureStop';stop.setAttribute('data-testid','stop-button');document.body.append(stop);`);
+    await guest.executeJavaScript(`(()=>{const a=document.createElement('article');a.setAttribute('data-message-author-role','assistant');a.setAttribute('data-message-id','a2');a.innerHTML='<pre id="liveAnswer" class="markdown"></pre>';document.querySelector('main').append(a);const stop=document.createElement('button');stop.id='fixtureStop';stop.setAttribute('data-testid','stop-button');document.body.append(stop);})()`);
     const expectedInputTokens = countGptTokens('pregunta nueva', 'gpt-5');
     await until(() => shell.executeJavaScript(`nexo.getStats().then(s=>s.inputTokens===${expectedInputTokens})`), 'entrada original contada con BPE en preload real');
     const previousOutput = countGptTokens(expected[1] + 'Respuesta final', 'gpt-4o');
@@ -121,7 +126,7 @@ app.whenReady().then(() => {
     const disk = JSON.parse(readFileSync(memoryFile, 'utf8'));
     if (!disk.conversations.some(c=>c.turns.some(t=>t.id==='a2' && t.content===finalText))) throw Error('El archivo de memoria no contiene el texto literal');
     report.checks.push('texto literal confirmado también leyendo el archivo de memoria');
-    await guest.executeJavaScript(`const u=document.createElement('article');u.setAttribute('data-message-author-role','user');u.setAttribute('data-message-id','u3');u.textContent='pregunta nueva';document.querySelector('main').append(u);`);
+    await guest.executeJavaScript(`(()=>{const u=document.createElement('article');u.setAttribute('data-message-author-role','user');u.setAttribute('data-message-id','u3');u.textContent='pregunta nueva';document.querySelector('main').append(u);})()`);
     await until(() => shell.executeJavaScript(`document.getElementById('statInTokens').textContent===${JSON.stringify(String(totalInput + countGptTokens('pregunta nueva', 'gpt-4o')))}`), 'dos mensajes legítimos idénticos con distinto ID suman dos aportes');
     await shell.executeJavaScript(`nexo.setSettings({tokenCounting:{model:'gpt-4'}})`);
     const recountedInput = countGptTokens(expected[0], 'gpt-4') + 2 * countGptTokens('pregunta nueva', 'gpt-4');
@@ -129,9 +134,9 @@ app.whenReady().then(() => {
     await shell.executeJavaScript(`nexo.setSettings({tokenCounting:{model:'gpt-4o'}})`);
     await shell.executeJavaScript(`document.querySelector('.rail-item[data-open-panel="memory"]').click()`);
     // Las APIs del mundo principal no deben controlar el lector aislado.
-    await guest.executeJavaScript(`delete window.__nexo; Document.prototype.querySelectorAll=function(){throw Error('API alterada por la página de prueba');};const body=document.createElement('body');body.innerHTML='<article data-turn="assistant"><pre class="markdown">GPT tras reemplazar body</pre></article>';document.body.replaceWith(body);`);
+    await guest.executeJavaScript(`(()=>{delete window.__nexo; Document.prototype.querySelectorAll=function(){throw Error('API alterada por la página de prueba');};const body=document.createElement('body');body.innerHTML='<article data-turn="assistant"><pre class="markdown">GPT tras reemplazar body</pre></article>';document.body.replaceWith(body);})()`);
     await until(() => shell.executeJavaScript('document.querySelectorAll("#memoryLiveConversation .repeat-text").length===1 && document.querySelector("#memoryLiveConversation .repeat-text").textContent==="GPT tras reemplazar body"'), 'lector aislado sobrevive APIs de página alteradas y body sustituido');
-    await guest.executeJavaScript(`window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));document.getElementsByTagName('pre')[0].textContent='GPT después de pageshow';window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));`);
+    await guest.executeJavaScript(`(()=>{window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));document.getElementsByTagName('pre')[0].textContent='GPT después de pageshow';window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));})()`);
     await until(() => shell.executeJavaScript('document.querySelector("#memoryLiveConversation .repeat-text")?.textContent==="GPT después de pageshow"'), 'reanuda tras eventos pagehide/pageshow sintéticos');
     // Forzar la rama de respaldo de la shell: sin caché consultable ni eventos
     // automáticos visibles, aunque el DOM HTTPS contiene ambos mensajes.
@@ -179,6 +184,12 @@ app.whenReady().then(() => {
     report.processMetricsContext = 'Muestra final de integración, aceleración por hardware desactivada; CPU media desde la consulta inicial, no medición de uso cotidiano ni comparación entre versiones';
     finish();
   } catch (error) {
+    // Un fallo de guion en el webview llega como «Script failed to execute» sin
+    // decir cuál. Se anota el último paso intentado y la consola del invitado.
+    report.error = String(error.stack || error);
+    report.failedAfter = report.checks.at(-1) || null;
+    report.guestConsole = guestLogs.slice(-8);
+    if (!report.error.includes('Script failed')) throw error;
     report.reader = await guest.executeJavaScript('window.__nexo?.conversationReader?.()').catch(() => null);
     report.panel = await shell.executeJavaScript('document.getElementById("memoryLiveStatus")?.textContent').catch(() => null);
     throw error;
