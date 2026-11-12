@@ -846,7 +846,8 @@ function registerIpc() {
     if (!isShellRequest(event)) return { state: 'unauthorized' };
     return { ...store.loadStatus, error: store.lastError || store.loadError?.message || null };
   });
-  ipcMain.handle('nexo:settings:set', (_event, patch) => {
+  ipcMain.handle('nexo:settings:set', (event, patch) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     if (patch?.tokenCounting?.model !== undefined && !tokenizerModels().models.some(item => item.id === patch.tokenCounting.model)) throw new Error('Elegí un modelo de tokenizador verificado.');
     const next = store.setSettings(patch);
     engine.refresh();
@@ -855,7 +856,8 @@ function registerIpc() {
     broadcast('nexo:stats-changed', statsSnapshot());
     return next;
   });
-  ipcMain.handle('nexo:settings:reset', () => {
+  ipcMain.handle('nexo:settings:reset', (event) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     const next = store.replaceSettings(DEFAULT_SETTINGS);
     engine.refresh();
     refreshGuestSettings();

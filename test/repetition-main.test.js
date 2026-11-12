@@ -5,7 +5,7 @@ register('./harness/loader.mjs', import.meta.url);
 const { journal } = await import('./harness/electron-stub.mjs');
 await import('../src/main/main.js');
 const settle = () => new Promise((resolve) => setTimeout(resolve, 35));
-const invoke = (channel, sender, payload) => journal.ipcHandlers.get(channel)({ sender }, payload);
+const invoke = (channel, sender, payload) => journal.ipcHandlers.get(channel)({ sender, senderFrame: sender.mainFrame }, payload);
 const turns = [{ id: 'u', role: 'user', content: '  pregunta\n' }, { id: 'a', role: 'assistant', content: '\nRespuesta 😊\n  código\n' }];
 let shell, a, b;
 

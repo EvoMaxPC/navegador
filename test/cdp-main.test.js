@@ -29,6 +29,12 @@ function callIpc(channel, payload, senderId = 1) {
   return handler({ sender: { id: senderId } }, payload);
 }
 
+/** Ajustes: el único emisor autorizado es la shell, con marco principal. */
+function setSettings(payload) {
+  const shell = journal.windows[0].webContents;
+  return journal.ipcHandlers.get('nexo:settings:set')({ sender: shell, senderFrame: shell.mainFrame }, payload);
+}
+
 const TEXTO =
   'Decidimos registrar el turno observado por CDP tal cual llegó: sin cortarlo y sin cambiar una sola letra de lo que se mostró.';
 
@@ -306,7 +312,7 @@ test('un turno ya contado por el camino HTTP/SSE no se cuenta otra vez por CDP',
 
 test('ChatGPT sigue observado para EVO MEMORY aunque la mediación esté apagada', async () => {
   const beforeStats = await callIpc('nexo:stats', {});
-  await callIpc('nexo:settings:set', { sites: { chatgpt: { enabled: false } }, memory: { enabled: true } });
+  await setSettings({ sites: { chatgpt: { enabled: false } }, memory: { enabled: true } });
   const win = journal.windows[0];
   const view = win.attachWebview('https://chatgpt.com/c/memory-passive');
   view.navigateTo('https://chatgpt.com/c/memory-passive', 'ChatGPT');
@@ -360,11 +366,11 @@ test('ChatGPT sigue observado para EVO MEMORY aunque la mediación esté apagada
     'la observación no intercepta ni reescribe el envío');
   assert.equal(JSON.parse(postData).messages[0].content.parts[0], prompt);
 
-  await callIpc('nexo:settings:set', { sites: { chatgpt: { enabled: true } }, memory: { enabled: true } });
+  await setSettings({ sites: { chatgpt: { enabled: true } }, memory: { enabled: true } });
 });
 
 test('un sitio apagado en Ajustes no se observa', async () => {
-  await callIpc('nexo:settings:set', { sites: { claude: { enabled: false } } });
+  await setSettings({ sites: { claude: { enabled: false } } });
   const win = journal.windows[0];
   const view = win.attachWebview('https://claude.ai/chat/apagado');
   view.navigateTo('https://claude.ai/chat/apagado', 'Claude');
@@ -372,7 +378,7 @@ test('un sitio apagado en Ajustes no se observa', async () => {
   assert.equal(view.debugger.attached, false, 'apagar la mediación apaga la observación');
 
   // Se vuelve a encender para no afectar a las pruebas siguientes.
-  await callIpc('nexo:settings:set', { sites: { claude: { enabled: true } } });
+  await setSettings({ sites: { claude: { enabled: true } } });
   view.navigateTo('https://claude.ai/chat/encendido', 'Claude');
   await settle();
   assert.equal(view.debugger.attached, true);
