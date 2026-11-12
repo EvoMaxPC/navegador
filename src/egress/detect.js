@@ -22,8 +22,14 @@ const API_KEY_PATTERNS = [
   /(?<![A-Za-z0-9])xox[abprs]-[A-Za-z0-9-]{10,}/g,
   /(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{35}/g,
   /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
-  /-----BEGIN ([A-Z ]*)PRIVATE KEY-----[\s\S]{0,8000}?-----END \1PRIVATE KEY-----|-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
 ];
+
+// PEM: la cabecera se localiza con una regex plana y el cierre con `indexOf`
+// acotado a la ventana. La variante anterior expandía hasta 8000 caracteres por
+// cabecera antes de rendirse, y con miles de cabeceras sin END eso se notaba.
+const PEM_BEGIN = /-----BEGIN ([A-Z ]*)PRIVATE KEY-----/g;
+const PEM_WINDOW = 8000;
+const pemEnd = (etiqueta) => `-----END ${etiqueta}PRIVATE KEY-----`;
 
 // 14 a 19 dígitos, primer dígito 2-6, separadores simples. Con Luhn.
 // Se excluye 13 dígitos y primer dígito 1/7/8/9 para no marcar marcas de
@@ -59,6 +65,27 @@ export function detectSensitive(text) {
     raw.push({ type, severity: SEVERITY[type], start: m.index, end: m.index + m[0].length });
 
   for (const re of API_KEY_PATTERNS) for (const m of text.matchAll(re)) push('api_key', m);
+
+  // Un bloque sólo se toma entero si su END lleva la misma etiqueta y empieza
+  // dentro de la ventana; si no, el hallazgo es la cabecera sola. Las búsquedas
+  // de cada etiqueta van en orden creciente, así que el último resultado sirve
+  // de caché: si no había END más adelante, tampoco lo habrá después.
+  const pemCache = new Map();
+  for (const m of text.matchAll(PEM_BEGIN)) {
+    const etiqueta = m[1];
+    const marcador = pemEnd(etiqueta);
+    const desde = m.index + m[0].length;
+    const previo = pemCache.get(etiqueta);
+    let fin;
+    if (previo && desde >= previo.desde && (previo.indice === -1 || previo.indice >= desde)) {
+      fin = previo.indice;
+    } else {
+      fin = text.indexOf(marcador, desde);
+    }
+    pemCache.set(etiqueta, { desde, indice: fin });
+    const cierre = fin !== -1 && fin <= desde + PEM_WINDOW ? fin + marcador.length : desde;
+    raw.push({ type: 'api_key', severity: SEVERITY.api_key, start: m.index, end: cierre });
+  }
 
   for (const m of text.matchAll(CARD)) {
     const digits = m[0].replace(/[ -]/g, '');

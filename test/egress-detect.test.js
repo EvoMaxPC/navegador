@@ -110,3 +110,13 @@ test('redactar una clave PEM no deja el cuerpo', async () => {
   const out = redact(pem, detectSensitive(pem), createVault());
   assert.equal(out, '[API_KEY_1]');
 });
+
+test('un millón de caracteres con cabeceras PEM sin END: tiempo acotado', () => {
+  const unidad = '-----BEGIN RSA PRIVATE KEY-----\n';
+  const t = unidad.repeat(Math.ceil(1_000_000 / unidad.length)).slice(0, 1_000_000);
+  const t0 = performance.now();
+  const fs = detectSensitive(t);
+  assert.ok(performance.now() - t0 < 3000, 'demasiado lento');
+  assert.equal(fs.length, 31250);
+  assert.equal(fs[0].start, 0);
+});
