@@ -29,7 +29,8 @@ import { isAiHost } from '../core/cdp.js';
 import { detectSite, isAuthRequest, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
-import { DEFAULT_SETTINGS, isEvoMemoryEnabled } from '../core/settings.js';
+import { DEFAULT_SETTINGS, isEvoMemoryEnabled, settingsForHost } from '../core/settings.js';
+import { createEgressGate } from './egressGate.js';
 import { fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
 import { inputTokenMeasurement, countOutputTokens } from './tokens.js';
 import gptTokens from '../core/gptTokens.cjs';
@@ -143,6 +144,11 @@ const capture = {
   blocked: 0,
   lastRequestAt: 0,
 };
+/**
+ * Canal `egress`: retiene o redacta datos sensibles antes de que salgan. El
+ * modo por defecto es `off`, así que hoy no interviene ningún envío.
+ */
+let egressGate = null;
 let memory = null;
 /** Registro local de diagnóstico de captura: sólo metadatos, nunca texto de conversación. */
 let captureDiagnosticFile = null;
@@ -545,6 +551,64 @@ function observeDomTokens(sender, snapshot, source = 'isolated') {
   return domTokenTotals.observe({ ...snapshot, source, href: sender.getURL(), webContentsId: sender.id,
     projectId: store?.settings?.memory?.projectId || 'default' }, domTokenModel());
 }
+/** Nombres legibles por tipo; el resumen del diálogo nunca lleva el valor. */
+const EGRESS_TYPE_LABELS = {
+  card: 'Tarjeta bancaria',
+  api_key: 'Clave de API',
+  email: 'Correo electrónico',
+  dni_es: 'DNI/NIE',
+};
+const EGRESS_BUTTONS = {
+  redact: 'Redactar y enviar',
+  cancel: 'Cancelar envío',
+  send: 'Enviar igualmente',
+};
+
+/**
+ * Pregunta al usuario qué hacer con un envío que lleva datos críticos.
+ *
+ * Devuelve siempre uno de `redact | cancel | send | timeout`; cualquier fallo
+ * es `cancel` (falla cerrado). El `detail` va con tipos y cantidades: nunca el
+ * valor detectado.
+ */
+async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
+  const list = Array.isArray(allowed) && allowed.length ? allowed : ['cancel'];
+  const owner = sender?.hostWebContents || null;
+  if (!owner || (typeof owner.isDestroyed === 'function' && owner.isDestroyed())) return 'cancel';
+  const parent = BrowserWindow.fromWebContents(owner);
+  if (!parent || parent.isDestroyed()) return 'cancel';
+  const buttons = list.map((choice) => EGRESS_BUTTONS[choice] || EGRESS_BUTTONS.cancel);
+  const cancelId = Math.max(0, list.indexOf('cancel'));
+  const detail = (Array.isArray(summary) ? summary : [])
+    .map((s) => `• ${EGRESS_TYPE_LABELS[s?.type] || String(s?.type || 'dato')}: ${Number(s?.count) || 0}`)
+    .join('\n');
+  // Electron 45 admite `signal` en MessageBoxOptions: es el timeout real del
+  // diálogo. Sin él, el cuadro queda abierto hasta que la persona decida.
+  const controller = new AbortController();
+  const ms = Number(timeoutMs);
+  const timer = Number.isFinite(ms) && ms > 0
+    ? setTimeout(() => controller.abort(), Math.min(ms, 600_000))
+    : null;
+  try {
+    const { response } = await dialog.showMessageBox(parent, {
+      type: 'warning',
+      title: 'NEXO',
+      message: 'NEXO detectó datos sensibles en tu mensaje',
+      detail,
+      buttons,
+      defaultId: cancelId,
+      cancelId,
+      noLink: true,
+      signal: controller.signal,
+    });
+    return list[response] || 'cancel';
+  } catch (error) {
+    return controller.signal.aborted ? 'timeout' : 'cancel';
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function statsSnapshot() {
   return {
     ...engine.stats(),
@@ -555,6 +619,7 @@ function statsSnapshot() {
     // Estado de la captura, para la línea de diagnóstico del panel. No son
     // contadores de la conversación: son hechos del propio vigilante.
     capture: { ...capture },
+    egress: egressGate ? egressGate.stats() : null,
   };
 }
 
@@ -637,6 +702,22 @@ function registerIpc() {
       });
     }
     return result;
+  });
+  /*
+   * Canal `egress`: la capa pregunta por un cuerpo que está a punto de salir.
+   * Sólo lo puede pedir una pestaña de IA que pertenezca a esta ventana; el
+   * resto cuenta como intento no autorizado. Con `mode:'off'` (por defecto)
+   * responde `pass` sin leer nada.
+   */
+  ipcMain.handle('nexo:egress', async (event, payload) => {
+    let host = '';
+    try { host = new URL(event.sender?.getURL?.() || '').hostname; } catch { /* sin URL */ }
+    if (!isUnderstandingSource(event) || !host || detectSite(host).id === 'generic') {
+      egressGate?.noteUnauthorized();
+      return { action: 'error', reason: 'emisor' };
+    }
+    if (!egressGate) return { action: 'error', reason: 'sin-puerta' };
+    return egressGate.handle({ sender: event.sender, host, payload });
   });
   ipcMain.handle('nexo:turn-result', (event, payload) => {
     if (event.sender?.getType?.() !== 'webview' || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -1852,6 +1933,14 @@ app.whenReady().then(async () => {
     },
   });
   registerProtocol();
+  // Puerta de salida de datos (canal `egress`). Se crea antes de registrar los
+  // canales; su modo por defecto es `off`, así que no interviene ningún envío.
+  egressGate = createEgressGate({
+    getConfig: (host) => settingsForHost(store.settings, host).egress,
+    askUser: askNativeEgress,
+    onDiagnostic: (entry) => noteDiagnostic(entry),
+    onStats: () => broadcast('nexo:stats-changed', statsSnapshot()),
+  });
   registerIpc();
   configureSession();
   // Una línea con la versión que corre y qué captura quedó armada. Sin esto,
