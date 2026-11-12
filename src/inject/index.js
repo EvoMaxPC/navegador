@@ -26,6 +26,7 @@ import { estimateTokens, fingerprint, gptModelFromRequest, userMessageIdentity }
 import { normalizeEgress } from '../core/egressConfig.js';
 import { readBody } from '../core/readBody.js';
 import { detectSensitive } from '../egress/detect.js';
+import { guardSlots } from '../egress/slots.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
@@ -495,28 +496,6 @@ async function chatGptDpuRequest(input, init) {
 
 /** Margen sobre el tiempo de decisión: el diálogo puede tardar, el puente no. */
 const MARGEN_EGRESS_MS = 5000;
-
-/**
- * Partes de texto del último mensaje del usuario.
- *
- * ChatGPT manda `content.parts` como array mixto: strings junto a objetos
- * (imágenes, archivos). Sólo los strings son texto del mensaje; el resto se
- * ignora. Se mira únicamente el último mensaje de usuario: los anteriores son
- * historial y no salen en esta petición.
- */
-function guardSlots(payload) {
-  const mensajes = payload?.messages;
-  if (!Array.isArray(mensajes)) return [];
-  for (let i = mensajes.length - 1; i >= 0; i -= 1) {
-    if (mensajes[i]?.author?.role !== 'user') continue;
-    const partes = mensajes[i]?.content?.parts;
-    if (Array.isArray(partes)) return partes.filter((p) => typeof p === 'string' && p.length > 0);
-    const texto = mensajes[i]?.content?.text;
-    if (typeof texto === 'string' && texto.length) return [texto];
-    return [];
-  }
-  return [];
-}
 
 /** ¿Hay algo crítico en este texto? El mismo juicio que usa la puerta. */
 function hayCritico(texto) {
