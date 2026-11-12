@@ -31,6 +31,8 @@ import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS, isEvoMemoryEnabled, settingsForHost } from '../core/settings.js';
 import { createEgressGate } from './egressGate.js';
+import { inspectOutgoing } from './egressNet.js';
+import { normalizeEgress } from '../core/egressConfig.js';
 import { fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
 import { inputTokenMeasurement, countOutputTokens } from './tokens.js';
 import gptTokens from '../core/gptTokens.cjs';
@@ -1379,6 +1381,56 @@ function uploadText(uploadData) {
 }
 
 /**
+ * Respaldo del guardián de salida en la red.
+ *
+ * Devuelve `true` sólo si hay que cancelar la petición. Es la segunda barrera:
+ * la primera es la capa inyectada, que sí dialoga con el usuario. Acá no hay
+ * diálogo posible (la petición está en vuelo) y tampoco se puede reescribir el
+ * cuerpo, así que la única decisión es frenar o dejar pasar.
+ *
+ * Falla abierto SIEMPRE: cualquier error, cualquier cuerpo que no se pueda leer
+ * y cualquier modo que no sea `enforce` dejan pasar, igual que antes de existir
+ * esta función.
+ *
+ * @param {object} details datos de `webRequest.onBeforeRequest`
+ * @returns {boolean}
+ */
+function bloqueoDeRed(details = {}) {
+  try {
+    if (!engine || !store) return false;
+    const url = String(details.url || '');
+    const host = hostOf(url);
+    if (!isAiHost(host)) return false;
+    const method = String(details.method || 'GET').toUpperCase();
+    if (method !== 'POST') return false;
+    const site = detectSite(host);
+    // Sólo peticiones de chat de un sitio con perfil. La ruta del canal de
+    // respuestas (`/conversation/updates`) no lleva el prompt y se deja fuera.
+    if (!isMediable(site, url, method)) return false;
+    if (isResponseRequest(site, url, method)) return false;
+
+    const config = normalizeEgress(settingsForHost(store.settings, host).egress);
+    if (config.mode !== 'enforce') return false; // ni se lee el cuerpo
+    const result = inspectOutgoing({ method, bodyText: uploadText(details.uploadData), config });
+    if (!result.cancel) return false;
+
+    const types = result.summary.map((s) => `${s.type}: ${s.count}`).join(', ');
+    noteDiagnostic({
+      code: 'egress-net-block',
+      key: `egress-net-block|${host}`,
+      severity: 'warn',
+      title: 'NEXO frenó un envío con datos sensibles (respaldo)',
+      detail: `Tipos: ${types}. Motivo: ${result.reason}.`,
+      meta: { host, site: site.id, url: shortPath(url), method, summary: result.summary },
+    });
+    return true;
+  } catch (error) {
+    console.log('[red] respaldo del guardián:', error?.message || error);
+    return false;
+  }
+}
+
+/**
  * Mensaje del usuario, leído desde el proceso principal.
  *
  * Es el tercer camino (además de la capa y de CDP) y el más difícil de romper:
@@ -1584,6 +1636,13 @@ function watchProviderNetwork(s) {
   s.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details = {}, callback) => {
     capture.requests += 1;
     capture.lastRequestAt = Date.now();
+    // Respaldo del guardián: si la capa no llegó a frenar el envío (no se
+    // inyectó, su consulta se perdió, el sitio cambió), la red lo frena aquí.
+    // Va ANTES de contar: un mensaje que no salió no puede sumar.
+    if (bloqueoDeRed(details)) {
+      callback({ cancel: true });
+      return;
+    }
     try {
       const note = noteUserMessageFromNetwork(details);
       if (note?.seen) capture.chatRequests += 1;
