@@ -355,6 +355,17 @@ export function installAdvancedBrowser({
        * reemplaza la selección como haría el portapapeles. Nunca envía: la
        * persona revisa y pulsa Enviar.
        */
+      /*
+       * Leer la selección real de la página para reutilizarla (atajo con
+       * {{seleccion}}). La shell no puede leer el DOM del webview; esta acción
+       * devuelve sólo el texto seleccionado, acotado, y nunca lo envía a nadie.
+       */
+      case 'selected-text': {
+        const text = bounded((await contents.executeJavaScript(
+          "(()=>{const a=document.activeElement;if(a&&(a.tagName==='TEXTAREA'||a.tagName==='INPUT')&&Number.isInteger(a.selectionStart)){const s=a.value.slice(a.selectionStart,a.selectionEnd);if(s)return s;}return String(window.getSelection?.()||'');})()",
+        ).catch(() => ''))).slice(0, 20000);
+        return { ok: true, text };
+      }
       case 'insert-text': {
         const text = bounded(payload.text).slice(0, 20000);
         if (!text) throw Error('No hay texto para insertar');

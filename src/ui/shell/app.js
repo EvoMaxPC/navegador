@@ -1923,6 +1923,7 @@ browserTools = createBrowserTools({nexo,state,activeTab,createTab,activateTab,cl
 promptLibrary = createPromptLibrary({root:document.getElementById('promptRoot'),nexo,activeTab,
   // Insertar es la acción nativa que escribe en el cuadro del sitio; nunca envía.
   insertText:text=>nexo.advanced.action({action:'insert-text',webContentsId:activeTab()?.view?.getWebContentsId?.(),text}),
+  selectedText:async()=>{const r=await nexo.advanced.action({action:'selected-text',webContentsId:activeTab()?.view?.getWebContentsId?.()});return r?.ok?r.text:'';},
   notice:pushLocalNotice,onChanged:()=>{}});
 workPanel = createWorkDossier({nexo,root:document.getElementById('panel-work'),
   getWorkspaceId:()=>browserTools.workspace,

@@ -25,7 +25,7 @@ const VARIABLE_HINTS = {
   fecha: 'la fecha de hoy',
 };
 
-export function createPromptLibrary({ root, nexo, activeTab, insertText, notice, onChanged }) {
+export function createPromptLibrary({ root, nexo, activeTab, insertText, selectedText, notice, onChanged }) {
   let items = [];
   let editing = null;
   // 'list' | 'edit': un refresco de fondo no puede borrar lo que la persona
@@ -33,26 +33,29 @@ export function createPromptLibrary({ root, nexo, activeTab, insertText, notice,
   let view = 'list';
   let status = null;
 
-  function selectionText() {
-    const tab = activeTab();
-    let text = '';
+  /**
+   * La selección vive en la página, no en la shell: `window.getSelection()` de
+   * la shell siempre está vacía y un webview no expone `getSelectedText()`.
+   * Se pide al proceso principal, que la lee del contenido real de la pestaña.
+   */
+  async function selectionText() {
     try {
-      text = String(window.getSelection?.() || '');
-      if (!text) text = String(tab?.view?.getSelectedText?.() || '');
+      const text = String((await selectedText?.()) || '').trim();
+      if (text) return text;
     } catch { /* la selección es opcional */ }
-    return text.trim();
+    return '';
   }
-  function values() {
+  async function values() {
     const tab = activeTab();
     return {
-      seleccion: selectionText(),
+      seleccion: await selectionText(),
       pestana: tab?.title || '',
       sitio: (() => { try { return new URL(tab?.url || '').hostname; } catch { return ''; } })(),
       fecha: new Date().toLocaleDateString('es-AR'),
     };
   }
   async function run(item) {
-    const filled = fillPrompt(item.text, values());
+    const filled = fillPrompt(item.text, await values());
     if (filled.missing.length) {
       notice(`Completá ${filled.missing.map((name) => `{{${name}}}`).join(', ')} antes de enviar: el texto se inserta tal cual.`);
     }

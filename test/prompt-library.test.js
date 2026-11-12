@@ -211,3 +211,18 @@ test('los atajos de conversación están en menú, panel y atajo de teclado, sin
   assert.match(hub, /'prompt-list', 'Atajos de conversación'/);
   assert.match(hub, /'prompt-bar', 'Insertar un atajo'/);
 });
+
+test('la selección se pide a la pestaña real, no a la shell vacía', () => {
+  const app = read('src/ui/shell/app.js');
+  assert.match(app, /selectedText:async\(\)=>\{[\s\S]{0,200}action:\s*'selected-text'/);
+  const advanced = read('src/main/advancedBrowser.js');
+  assert.match(advanced, /case 'selected-text'/);
+  // Lee contenido real y lo acota; no lo envía a ningún lado.
+  const bloque = advanced.slice(advanced.indexOf("case 'selected-text'"));
+  assert.match(bloque.slice(0, 900), /executeJavaScript/);
+  assert.match(bloque.slice(0, 900), /slice\(0, 20000\)/);
+  assert.doesNotMatch(bloque.slice(0, 900), /fetch\(|http[s]?:\/\//);
+  const library = read('src/ui/shell/promptLibrary.js');
+  assert.match(library, /async function values\(\)/);
+  assert.match(library, /await values\(\)/);
+});
