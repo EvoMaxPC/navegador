@@ -376,9 +376,11 @@ function gestoDeEsteEnvio(texto) {
  * En `off` y `observe` no se llama, y sin gesto no hace nada.
  */
 function retenerGesto(texto) {
-  // Un clic nuevo mientras hay otro retenido no rompe la retención: el que
-  // manda es el que se está consultando.
-  if (envio.retenido) return envio.retenido;
+  // Si quedó un retenido de un envío anterior (por ejemplo, un planRequest que
+  // murió sin liberar), no se reutiliza como propio: se descarta con la regla de
+  // «no salió» y se retiene el de ahora. Así un huérfano no contamina el envío
+  // siguiente ni se queda retenido para siempre.
+  if (envio.retenido) liberarGesto(envio.retenido);
   const gesto = gestoDeEsteEnvio(texto);
   if (!gesto) return null;
   if (gesto === envio.pendiente) {
@@ -706,38 +708,51 @@ async function planRequest(input, init) {
   const canRewrite = (site.body?.kind === 'chatgpt-messages' || site.body?.kind === 'claude-prompt') &&
     slots.length <= 1;
   // Mientras la puerta decide, el gesto del usuario no puede contar el envío:
-  // el diálogo puede tardar más que ESPERA_PETICION_MS. Se libera siempre.
+  // el diálogo puede tardar más que ESPERA_PETICION_MS.
   const retenido = normalizeEgress(state.settings?.egress).mode === 'enforce' ? retenerGesto(prompt) : null;
-  let guard;
+  const ctx = { input, init, parsed, prompt, url, canMediate, canRewrite, slots, desdeRequest, liberar: () => {} };
+  if (!retenido) return continuarPlan(ctx);
+  // Todo lo que va del `retenerGesto` al final puede lanzar (JSON.stringify del
+  // cuerpo, `new Request`, `patchUserText`…). El `finally` garantiza que el gesto
+  // se libere UNA vez: con texto si el plan salió, sin texto si no.
+  let liberado = false;
+  const liberar = (saneado = null) => {
+    if (liberado) return;
+    liberado = true;
+    liberarGesto(retenido, saneado);
+  };
   try {
-    guard = await guardPrompt(prompt, { canRewrite, slots });
-  } catch (error) {
-    liberarGesto(retenido);
-    throw error;
+    const plan = await continuarPlan({ ...ctx, liberar });
+    liberar(plan?.blocked ? null : plan?.promptText);
+    return plan;
+  } finally {
+    // Cualquier excepción o retorno que no haya pasado por `liberar` descarta.
+    liberar();
   }
-  if (guard.action === 'block') {
-    liberarGesto(retenido);
-    return { chat: true, send: true, blocked: true, promptText: prompt, url };
-  }
+}
+
+/**
+ * Resto de `planRequest` después del guardián.
+ *
+ * Vive aparte para que la liberación del gesto esté en UN `try/finally` y no en
+ * cinco `return` repartidos. `liberar` llega desde arriba cuando hay gesto
+ * retenido; si no hay, este camino no toca nada del gesto.
+ */
+async function continuarPlan({ input, init, parsed, prompt, url, canMediate, canRewrite, slots, desdeRequest, liberar }) {
+  const guard = await guardPrompt(prompt, { canRewrite, slots });
+  if (guard.action === 'block') return { chat: true, send: true, blocked: true, promptText: prompt, url };
   let outbound = prompt;
   if (guard.action === 'replace') {
     // Un solo bloque de texto: se repone en el cuerpo y se sigue. Con varios no
     // hay forma segura de saber cuál es cuál, así que se retiene (falla cerrado)
     // en vez de enviar alguno sin sanear.
-    if (guard.texts.length !== 1) {
-      liberarGesto(retenido);
-      return { chat: true, send: true, blocked: true, promptText: prompt, url };
-    }
+    if (guard.texts.length !== 1) return { chat: true, send: true, blocked: true, promptText: prompt, url };
     outbound = guard.texts[0];
   }
   if (outbound !== prompt && !patchUserText(parsed, site, outbound)) {
     // No se pudo dejar el texto saneado en el cuerpo: no se envía el original.
-    liberarGesto(retenido);
     return { chat: true, send: true, blocked: true, promptText: prompt, url };
   }
-  // El envío sigue: el gesto vuelve a estar pendiente, con el reloj renovado y
-  // el texto saneado (si lo hubo) para que la petición se reconozca como suya.
-  liberarGesto(retenido, outbound);
 
   const base = {
     chat: true,

@@ -74,6 +74,26 @@ function crearReloj(inicio = 1_700_000_000_000) {
   };
 }
 
+/**
+ * `init` cuyo `body` lanza en el acceso `fallaEn`.
+ *
+ * Sirve para reventar DESPUÉS de la puerta: en `planBase` se hace `{ ...init }`,
+ * que recorre las propiedades y vuelve a leer `body`. Con `fallaEn = 2`, el 1.º
+ * acceso es la lectura del texto en `planRequest` y el 2.º el del spread, ya con
+ * la decisión del guardián tomada.
+ */
+function initQueLanzaEn(json, fallaEn) {
+  let accesos = 0;
+  return {
+    method: 'POST',
+    get body() {
+      accesos += 1;
+      if (accesos === fallaEn) throw new Error(`init.body roto en el acceso ${accesos}`);
+      return json;
+    },
+  };
+}
+
 function crearMundo({ modo = 'off', eleccion = () => 'cancel', texto = TARJETA, demoraDialogo = 0 } = {}) {
   const reloj = crearReloj();
   const eventos = [];
@@ -300,4 +320,98 @@ test('b6 · una excepción en la consulta libera el gesto', { skip }, async () =
   assert.equal(resultado?.status, 200, 'sin datos críticos el envío sigue pese al fallo del puente');
   assert.equal(mundo.peticiones.length, 1, 'una sola petición');
   assert.equal(mundo.mensajes().length, 1, `no queda retenido ni se cuenta dos veces: ${mundo.mensajes().length}`);
+});
+
+test('g1 · excepción DESPUÉS de que la puerta responde replace: libera y el siguiente envío cuenta 1', { skip }, async () => {
+  const mundo = crearMundo({ modo: 'enforce', eleccion: () => 'redact' });
+
+  mundo.pulsarEnviar();
+  await mundo.reloj.asentar();
+  mundo.reloj.avanzar(300);
+  await mundo.reloj.asentar();
+  // La puerta contesta `replace` y después revienta el armado del cuerpo: el
+  // spread de `planBase` vuelve a leer `init.body` (acceso 2) y lanza.
+  // Acceso 1: `typeof init?.body === 'string'`. Acceso 2: la lectura del texto.
+  // Acceso 3: el spread de `planBase`, ya con la decisión del guardián tomada.
+  const primero = mundo.window.fetch('/backend-api/conversation', initQueLanzaEn(cuerpo(TARJETA), 3)).catch((e) => e);
+  mundo.reloj.avanzar(4000);
+  await mundo.reloj.asentar();
+  const resultado = await primero;
+  mundo.reloj.avanzar(6000);
+  await mundo.reloj.asentar();
+
+  // El envío no salió: no hay que contarlo.
+  assert.ok(resultado instanceof Error, `debería lanzar, llegó ${resultado?.constructor?.name}`);
+  assert.equal(mundo.peticiones.length, 0, 'no salió ninguna petición');
+  assert.equal(mundo.mensajes().length, 0, `mensajes tras el fallo: ${mundo.mensajes().length}`);
+
+  // El siguiente envío normal cuenta exactamente uno: el gesto quedó libre.
+  mundo.pulsarEnviar();
+  await mundo.reloj.asentar();
+  mundo.reloj.avanzar(300);
+  await mundo.reloj.asentar();
+  const segundo = mundo.window.fetch('/backend-api/conversation', { method: 'POST', body: cuerpo(TARJETA) }).catch((e) => e);
+  mundo.reloj.avanzar(4000);
+  await mundo.reloj.asentar();
+  await segundo;
+  mundo.reloj.avanzar(6000);
+  await mundo.reloj.asentar();
+
+  assert.equal(mundo.peticiones.length, 1, 'salió sólo el segundo');
+  assert.equal(mundo.mensajes().length, 1, `el siguiente envío cuenta 1, no 2: ${mundo.mensajes().length}`);
+});
+
+test('g2 · un segundo clic con un gesto retenido no rompe la retención ni cuenta doble', { skip }, async () => {
+  const mundo = crearMundo({ modo: 'enforce', eleccion: () => 'cancel', demoraDialogo: 4000 });
+
+  mundo.pulsarEnviar();
+  await mundo.reloj.asentar();
+  mundo.reloj.avanzar(300);
+  await mundo.reloj.asentar();
+
+  const promesa = mundo.window.fetch('/backend-api/conversation', { method: 'POST', body: cuerpo(TARJETA) }).catch((e) => e);
+  // Mientras el diálogo está abierto, la persona vuelve a pulsar Enviar.
+  mundo.reloj.avanzar(1000);
+  await mundo.reloj.asentar();
+  mundo.pulsarEnviar();
+  await mundo.reloj.asentar();
+  mundo.reloj.avanzar(3000);
+  await mundo.reloj.asentar();
+  const resultado = await promesa;
+  mundo.reloj.avanzar(6000);
+  await mundo.reloj.asentar();
+
+  assert.equal(resultado?.name, 'AbortError', 'sigue retenido');
+  assert.equal(mundo.peticiones.length, 0, 'no salió nada');
+
+  // El clic extra no tiene petición que lo consuma, así que a los 2,5 s cuenta
+  // solo: es el comportamiento de siempre para un gesto huérfano, y este parche
+  // no lo cambia. Lo que importa es que el envío retenido NO sume por su cuenta
+  // y que no haya doble conteo del mismo envío.
+  const anuncios = mundo.mensajes();
+  assert.ok(anuncios.length <= 1, `no hay doble conteo: ${anuncios.length}`);
+  assert.equal(anuncios.every((a) => a.payload.source === 'composer'), true, 'el único aviso es del clic huérfano');
+});
+
+test('g3 · un retenido huérfano de un envío anterior no contamina el siguiente', { skip }, async () => {
+  const mundo = crearMundo({ modo: 'enforce', eleccion: () => 'cancel' });
+
+  // Primer envío: la puerta bloquea y libera. No debe quedar nada retenido.
+  await cicloEnvio(mundo, { tardar: 0 });
+  assert.equal(mundo.mensajes().length, 0);
+
+  // Segundo envío normal: cuenta uno y no arrastra el anterior.
+  mundo.pulsarEnviar();
+  await mundo.reloj.asentar();
+  mundo.reloj.avanzar(300);
+  await mundo.reloj.asentar();
+  const segundo = mundo.window.fetch('/backend-api/conversation', { method: 'POST', body: cuerpo(TARJETA) }).catch((e) => e);
+  mundo.reloj.avanzar(4000);
+  await mundo.reloj.asentar();
+  await segundo;
+  mundo.reloj.avanzar(6000);
+  await mundo.reloj.asentar();
+
+  assert.equal(mundo.mensajes().length, 0, 'el segundo también se retiene, y no se cuenta nada');
+  assert.equal(mundo.peticiones.length, 0);
 });
