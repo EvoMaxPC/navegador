@@ -168,6 +168,12 @@ const envio = {
   pendiente: null,
   /** Envío que ya se contó sólo con el gesto, por si la petición no aparece. */
   porGesto: null,
+  /**
+   * Gesto apartado mientras el guardián decide. Su temporizador está parado: no
+   * puede contar un envío que quizá no salga. `anunciado` dice si ya llegó a
+   * contar (si el temporizador venció antes de retenerlo).
+   */
+  retenido: null,
 };
 
 /** Margen para que aparezca la petición antes de contar el gesto por su cuenta. */
@@ -274,6 +280,11 @@ function anunciarGesto(gesto) {
   envio.porGesto = {
     at: gesto.at, chars: gesto.chars, id: gesto.id,
     tokenText: gesto.tokenText, tokens: gesto.tokens, promptHash: gesto.promptHash,
+    // Texto saneado que reemplazó al del cuadro: la petición lo traerá así.
+    sustituidoPor: gesto.sustituidoPor || null,
+    // Sólo para `liberarGesto`: si el envío se retuvo, no hay que borrar la
+    // marca de un gesto posterior.
+    _timer: gesto.timer,
   };
   anunciarEnvio({ ...gesto, messageId: gesto.id, source: 'composer', textFound: true });
 }
@@ -326,8 +337,12 @@ function mismoEnvioDelGesto(gesto, peticion) {
   if (!gesto) return false;
   // El gesto local no trae ID del proveedor: sólo es evidencia el texto literal de la
   // petición, no texto tomado del propio gesto como respaldo (caso DPU opaco).
-  return peticion.textFound !== false && peticion.promptFromRequest !== false &&
-    typeof peticion.promptText === 'string' && peticion.promptText === gesto.tokenText;
+  if (peticion.textFound === false || peticion.promptFromRequest === false) return false;
+  if (typeof peticion.promptText !== 'string') return false;
+  // El guardián pudo redactar entre el gesto y la petición: entonces la
+  // petición trae el texto saneado, no el del cuadro. Es el mismo envío.
+  return peticion.promptText === gesto.tokenText ||
+    (typeof gesto.sustituidoPor === 'string' && peticion.promptText === gesto.sustituidoPor);
 }
 
 /** Devuelve el ID del gesto contado sólo si esta petición corresponde a él. */
@@ -337,6 +352,98 @@ function yaContadoPorGesto(peticion) {
   if (!mismoEnvioDelGesto(gesto, peticion)) return null;
   envio.porGesto = null;
   return gesto.id;
+}
+
+/**
+ * El gesto que corresponde a este texto, lo haya confirmado la petición o no.
+ *
+ * En `enforce` la petición espera al diálogo del guardián, así que puede tardar
+ * más que `ESPERA_PETICION_MS`: para entonces el gesto ya se anunció solo y vive
+ * en `porGesto`. Sin mirar ahí, el envío se contaría dos veces.
+ */
+function gestoDeEsteEnvio(texto) {
+  if (envio.retenido && mismoEnvioDelGesto(envio.retenido, { promptText: texto })) return envio.retenido;
+  if (envio.pendiente && mismoEnvioDelGesto(envio.pendiente, { promptText: texto })) return envio.pendiente;
+  const gesto = envio.porGesto;
+  if (gesto && Date.now() - gesto.at <= VENTANA_ENLACE_MS && mismoEnvioDelGesto(gesto, { promptText: texto })) return gesto;
+  return null;
+}
+
+/**
+ * Aparta el gesto mientras el guardián decide, y para su temporizador.
+ *
+ * Sólo para `enforce` con un gesto que corresponda al texto que se va a enviar.
+ * En `off` y `observe` no se llama, y sin gesto no hace nada.
+ */
+function retenerGesto(texto) {
+  // Un clic nuevo mientras hay otro retenido no rompe la retención: el que
+  // manda es el que se está consultando.
+  if (envio.retenido) return envio.retenido;
+  const gesto = gestoDeEsteEnvio(texto);
+  if (!gesto) return null;
+  if (gesto === envio.pendiente) {
+    clearTimeout(gesto.timer);
+    gesto.timer = null;
+    envio.pendiente = null;
+  }
+  const retenido = {
+    ...gesto,
+    timer: null,
+    retenidoEn: Date.now(),
+    anunciado: Boolean(gesto.messageId),
+    sustituidoPor: gesto.sustituidoPor || null,
+  };
+  if (gesto === envio.porGesto) envio.porGesto = null;
+  envio.retenido = retenido;
+  return retenido;
+}
+
+/**
+ * Devuelve el gesto retenido a la circulación.
+ *
+ * Se llama SIEMPRE (try/finally), también cuando la consulta lanza.
+ *
+ *   · Sin texto (`saneado` nulo): la decisión fue retener. Se descarta el gesto
+ *     y, si ya se había anunciado, se cierra el turno como cancelado. Ojo: un
+ *     cancelado ya anunciado **queda contado** como mensaje; es una limitación
+ *     aceptada (pasó `ESPERA_PETICION_MS` antes de la decisión) y no se puede
+ *     descontar sin inventar contadores negativos en el motor.
+ *   · Con texto: el envío sigue. El gesto vuelve a `pendiente` con el reloj
+ *     renovado, y con `sustituidoPor` si el guardián lo redactó.
+ */
+function liberarGesto(retenido, saneado = null) {
+  if (!retenido) return;
+  if (envio.retenido === retenido) envio.retenido = null;
+
+  if (typeof saneado !== 'string') {
+    if (retenido.anunciado) {
+      bridge.event('turn-result', {
+        messageId: retenido.messageId,
+        host: CONFIG.host || location.hostname,
+        site: site.id,
+        outcome: 'cancelled',
+        stoppedByUser: false,
+        blockedByGuard: true,
+      });
+    }
+    return;
+  }
+
+  const nuevo = {
+    ...retenido,
+    at: Date.now(),
+    // `true` = provisional: hay un temporizador vivo que puede anunciarlo.
+    provisional: true,
+    sustituidoPor: saneado === retenido.tokenText ? null : saneado,
+    promptHash: fingerprint(saneado),
+  };
+  nuevo.timer = setTimeout(() => {
+    if (envio.pendiente !== nuevo) return;
+    envio.pendiente = null;
+    anunciarGesto(nuevo);
+  }, ESPERA_PETICION_MS);
+  envio.pendiente = nuevo;
+  return nuevo;
 }
 
 /** Una petición ajena no consume ni cancela el gesto pendiente. */
@@ -598,20 +705,39 @@ async function planRequest(input, init) {
   const slots = guardSlots(parsed);
   const canRewrite = (site.body?.kind === 'chatgpt-messages' || site.body?.kind === 'claude-prompt') &&
     slots.length <= 1;
-  const guard = await guardPrompt(prompt, { canRewrite, slots });
-  if (guard.action === 'block') return { chat: true, send: true, blocked: true, promptText: prompt, url };
+  // Mientras la puerta decide, el gesto del usuario no puede contar el envío:
+  // el diálogo puede tardar más que ESPERA_PETICION_MS. Se libera siempre.
+  const retenido = normalizeEgress(state.settings?.egress).mode === 'enforce' ? retenerGesto(prompt) : null;
+  let guard;
+  try {
+    guard = await guardPrompt(prompt, { canRewrite, slots });
+  } catch (error) {
+    liberarGesto(retenido);
+    throw error;
+  }
+  if (guard.action === 'block') {
+    liberarGesto(retenido);
+    return { chat: true, send: true, blocked: true, promptText: prompt, url };
+  }
   let outbound = prompt;
   if (guard.action === 'replace') {
     // Un solo bloque de texto: se repone en el cuerpo y se sigue. Con varios no
     // hay forma segura de saber cuál es cuál, así que se retiene (falla cerrado)
     // en vez de enviar alguno sin sanear.
-    if (guard.texts.length !== 1) return { chat: true, send: true, blocked: true, promptText: prompt, url };
+    if (guard.texts.length !== 1) {
+      liberarGesto(retenido);
+      return { chat: true, send: true, blocked: true, promptText: prompt, url };
+    }
     outbound = guard.texts[0];
   }
   if (outbound !== prompt && !patchUserText(parsed, site, outbound)) {
     // No se pudo dejar el texto saneado en el cuerpo: no se envía el original.
+    liberarGesto(retenido);
     return { chat: true, send: true, blocked: true, promptText: prompt, url };
   }
+  // El envío sigue: el gesto vuelve a estar pendiente, con el reloj renovado y
+  // el texto saneado (si lo hubo) para que la petición se reconozca como suya.
+  liberarGesto(retenido, outbound);
 
   const base = {
     chat: true,
@@ -965,6 +1091,14 @@ if (!window.__NEXO_HOOKED__) {
       const gesto = tomarEnvioPendiente(prepared);
       const chars = prepared.promptChars ?? gesto?.chars ?? 0;
       const countedGesture = gesto ? null : yaContadoPorGesto(prepared);
+      // El gesto ya se anunció (venció el temporizador antes de la decisión):
+      // si el guardián retuvo el envío, no hay nada que reanunciar y el turno
+      // hay que cerrarlo, porque el aviso ya salió.
+      if (prepared.blocked && countedGesture) {
+        bridge.event('turn-result', { messageId: countedGesture, host: CONFIG.host || location.hostname,
+          site: site.id, outcome: 'cancelled', stoppedByUser: false, blockedByGuard: true });
+        throw new DOMException('NEXO retuvo el envío', 'AbortError');
+      }
       if (countedGesture) {
         // Ya lo contó el gesto: la respuesta tiene que usar su identificador.
         messageId = countedGesture;
