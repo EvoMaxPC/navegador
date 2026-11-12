@@ -23,6 +23,8 @@ import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isChatRequest, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
 import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
 import { estimateTokens, fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
+import { normalizeEgress } from '../core/egressConfig.js';
+import { detectSensitive } from '../egress/detect.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
@@ -37,6 +39,8 @@ const state = {
   currentMessageId: null,
   /** Identificador de cada envío reconocido: asocia mensaje, respuesta y turno. */
   messageSeq: 0,
+  /** Último veredicto del guardián de salida (`null` si nunca corrió). */
+  egress: null,
 };
 
 /* ------------------------------------------------------------------ */
@@ -376,6 +380,98 @@ async function chatGptDpuRequest(input, init) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 1b. guardián de salida (datos sensibles)                            */
+/* ------------------------------------------------------------------ */
+
+/** Margen sobre el tiempo de decisión: el diálogo puede tardar, el puente no. */
+const MARGEN_EGRESS_MS = 5000;
+
+/**
+ * Partes de texto del último mensaje del usuario.
+ *
+ * ChatGPT manda `content.parts` como array mixto: strings junto a objetos
+ * (imágenes, archivos). Sólo los strings son texto del mensaje; el resto se
+ * ignora. Se mira únicamente el último mensaje de usuario: los anteriores son
+ * historial y no salen en esta petición.
+ */
+function guardSlots(payload) {
+  const mensajes = payload?.messages;
+  if (!Array.isArray(mensajes)) return [];
+  for (let i = mensajes.length - 1; i >= 0; i -= 1) {
+    if (mensajes[i]?.author?.role !== 'user') continue;
+    const partes = mensajes[i]?.content?.parts;
+    if (Array.isArray(partes)) return partes.filter((p) => typeof p === 'string' && p.length > 0);
+    const texto = mensajes[i]?.content?.text;
+    if (typeof texto === 'string' && texto.length) return [texto];
+    return [];
+  }
+  return [];
+}
+
+/**
+ * Consulta la puerta de salida antes de enviar. Nunca lanza: un guardián que
+ * rompe el envío de la página es peor que uno que no interviene.
+ *
+ *   · `off` no cuesta nada y no habla con el proceso principal.
+ *   · `observe` registra lo que la puerta habría hecho y deja pasar siempre.
+ *   · `enforce` obedece a la puerta (`replace`, `block`, `pass`).
+ *
+ * Si la puerta no contesta (o contesta algo que no entiende) se mira el texto
+ * acá con el mismo detector del proceso principal: sólo se retiene si hay datos
+ * críticos. Es el único camino en el que la decisión se toma en la página.
+ */
+async function guardPrompt(text, { canRewrite = false, unreadable = null, slots = null } = {}) {
+  const cfg = normalizeEgress(state.settings?.egress);
+  if (cfg.mode === 'off') return { action: 'pass' };
+
+  const decidido = (resultado) => {
+    state.egress = { mode: cfg.mode, action: resultado.action, reason: resultado.reason || '', at: Date.now() };
+    return resultado;
+  };
+  const espera = cfg.decisionTimeoutMs + MARGEN_EGRESS_MS;
+
+  // Cuerpo ilegible: se declara el motivo y decide la puerta (`onUnreadable`).
+  // Sin texto que juzgar, el respaldo local no tiene nada que mirar.
+  if (unreadable) {
+    try {
+      const out = await bridge.request('egress', { unreadable, canRewrite: false }, espera);
+      if (cfg.mode === 'enforce' && out?.action === 'block') return decidido({ action: 'block', reason: unreadable });
+      return decidido({ action: 'pass', reason: unreadable });
+    } catch (error) {
+      bridge.event('error', { stage: 'egress', message: String(error?.message || error) });
+      return decidido({ action: 'pass', reason: unreadable });
+    }
+  }
+
+  // Se envían todas las partes de texto del mensaje, no sólo la que se puede
+  // reponer: si el usuario pegó el dato en un segundo bloque, también se ve.
+  const partes = Array.isArray(slots) && slots.length ? slots : [text];
+  let out = null;
+  let fallo = '';
+  try {
+    out = await bridge.request('egress', { slots: partes, canRewrite }, espera);
+  } catch (error) {
+    fallo = String(error?.message || error);
+    bridge.event('error', { stage: 'egress', message: fallo });
+  }
+
+  if (!fallo && out && out.action === 'replace' && Array.isArray(out.slots) &&
+      out.slots.length === partes.length && out.slots.every((x) => typeof x === 'string')) {
+    return decidido({ action: 'replace', texts: out.slots });
+  }
+  // `observe` no interviene nunca: se deja constancia y el envío sigue igual.
+  if (cfg.mode === 'observe') return decidido({ action: 'pass', reason: `observado:${out?.action || 'sin-puerta'}` });
+  if (!fallo && out?.action === 'block') return decidido({ action: 'block', reason: out.reason || 'egress' });
+  if (!fallo && (out?.action === 'pass' || out?.action === 'error')) {
+    // `error` es un payload que la puerta no aceptó: se cae al detector local.
+    if (out.action === 'pass') return decidido({ action: 'pass', reason: out.reason || '' });
+  }
+
+  const criticos = detectSensitive(String(text || '')).some((f) => f.severity === 'critical');
+  return decidido(criticos ? { action: 'block', reason: 'fail-safe' } : { action: 'pass', reason: fallo ? 'sin-puerta' : 'sin-veredicto' });
+}
+
+/* ------------------------------------------------------------------ */
 /* 1 + 2. petición saliente                                            */
 /* ------------------------------------------------------------------ */
 
@@ -407,6 +503,10 @@ async function planRequest(input, init) {
       envio.porGesto && Date.now() - envio.porGesto.at <= VENTANA_ENLACE_MS ? envio.porGesto : null
     );
     const prompt = form.prompt ?? gesture?.tokenText ?? '';
+    // En DPU el cuerpo se reescribe en el proceso principal, no acá: el guardián
+    // sólo puede retener (`block`) y no se le ofrece redactar.
+    const dpuGuard = await guardPrompt(prompt, { canRewrite: false, unreadable: form.prompt === null ? 'formulario' : null });
+    if (dpuGuard.action === 'block') return { chat: true, send: true, blocked: true, promptText: prompt, url };
     return {
       chat: true,
       send: true,
@@ -438,7 +538,13 @@ async function planRequest(input, init) {
   // Sin cuerpo legible sigue siendo una conversación: se captura la respuesta y
   // el envío se cuenta igual (lo confirma el gesto o la propia petición).
   const parsed = safeJson(text);
-  if (!parsed) return { chat: true, send: true, reason: 'cuerpo-no-legible' };
+  if (!parsed) {
+    // Sin cuerpo legible no hay texto que redactar; el guardián sólo puede
+    // retener, y eso lo decide el ajuste `onUnreadable` de la puerta.
+    const sinCuerpo = await guardPrompt('', { canRewrite: false, unreadable: 'stream-o-desconocido' });
+    if (sinCuerpo.action === 'block') return { chat: true, send: true, blocked: true, promptText: '' };
+    return { chat: true, send: true, reason: 'cuerpo-no-legible' };
+  }
 
   // «Regenerar» y «continuar» son peticiones de conversación, pero no son un
   // mensaje nuevo del usuario: se captura la respuesta y no se cuenta mensaje.
@@ -450,15 +556,35 @@ async function planRequest(input, init) {
   if (!located || !located.value) return { chat: true, send: true, reason: 'sin-texto' };
 
   const prompt = located.value;
+  // Guardián de salida ANTES de la mediación: redactar aquí deja el texto
+  // saneado como base y el motor registra exactamente lo que se va a enviar.
+  // `canRewrite` sólo si sabemos volver a poner el texto en el cuerpo.
+  const canRewrite = site.body?.kind === 'chatgpt-messages' || site.body?.kind === 'claude-prompt';
+  const slots = guardSlots(parsed);
+  const guard = await guardPrompt(prompt, { canRewrite, slots });
+  if (guard.action === 'block') return { chat: true, send: true, blocked: true, promptText: prompt, url };
+  let outbound = prompt;
+  if (guard.action === 'replace') {
+    // Un solo bloque de texto: se repone en el cuerpo y se sigue. Con varios no
+    // hay forma segura de saber cuál es cuál, así que se retiene (falla cerrado)
+    // en vez de enviar alguno sin sanear.
+    if (guard.texts.length !== 1) return { chat: true, send: true, blocked: true, promptText: prompt, url };
+    outbound = guard.texts[0];
+  }
+  if (outbound !== prompt && !patchUserText(parsed, site, outbound)) {
+    // No se pudo dejar el texto saneado en el cuerpo: no se envía el original.
+    return { chat: true, send: true, blocked: true, promptText: prompt, url };
+  }
+
   const base = {
     chat: true,
     send: true,
     promptChars: prompt.length,
-    promptText: prompt,
-    promptTokens: legacyProviderInputTokens(prompt),
+    promptText: outbound,
+    promptTokens: legacyProviderInputTokens(outbound),
     model: gptModelFromRequest(parsed),
     submissionId: userMessageIdentity(parsed),
-    promptHash: fingerprint(prompt),
+    promptHash: fingerprint(outbound),
     url,
   };
 
@@ -472,15 +598,21 @@ async function planRequest(input, init) {
   // envolviendo la respuesta.
   let report = null;
   try {
-    report = await bridge.request('prepare', { prompt, url, site: site.id });
+    report = await bridge.request('prepare', { prompt: outbound, url, site: site.id });
   } catch (error) {
     bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
   }
-  if (!report?.text) return { ...base, plan: null };
+  // Si el guardián reescribió el cuerpo antes de la mediación, el plan base ya
+  // lleva ese texto: la petición original no puede volver a salir con el dato.
+  const planBase = outbound === prompt ? { input, init } : {
+    input: desdeRequest ? new Request(input, { body: JSON.stringify(parsed) }) : input,
+    init: desdeRequest ? init : { ...init, body: JSON.stringify(parsed) },
+  };
+  if (!report?.text) return { ...base, plan: planBase };
 
   // El texto no cambió: no hay nada que reescribir, pero el envío se registra y
   // la respuesta se captura. Antes se descartaba todo y el turno no existía.
-  if (report.text === prompt) return { ...base, plan: { input, init }, mediated: false };
+  if (report.text === outbound) return { ...base, plan: planBase, mediated: false };
 
   if (!patchUserText(parsed, site, report.text)) return { ...base, plan: null };
   const body = JSON.stringify(parsed);
@@ -757,7 +889,8 @@ if (!window.__NEXO_HOOKED__) {
   window.fetch = async function nexoFetch(input, init) {
     // Si sólo está activa la repetición, leer el DOM no habilita captura de red
     // ni mediación. Se devuelve el fetch original sin inspeccionar el cuerpo.
-    if (site.id === 'chatgpt' && !state.enabled && state.settings.memory?.enabled === false) return nativeFetch(input, init);
+    const egressActivo = normalizeEgress(state.settings?.egress).mode !== 'off';
+    if (site.id === 'chatgpt' && !state.enabled && state.settings.memory?.enabled === false && !egressActivo) return nativeFetch(input, init);
     const url = absoluteUrl(urlOf(input));
     const method = methodOf(input, init);
 
@@ -767,6 +900,15 @@ if (!window.__NEXO_HOOKED__) {
       prepared = await planRequest(input, init);
     } catch (error) {
       bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
+    }
+
+    // 2) El guardián de salida retuvo el mensaje: no se envía y se simula una
+    //    cancelación de red, que es el camino que la página ya sabe manejar
+    //    («Detener»). Tampoco se anota como envío: no llegó a salir.
+    if (prepared.blocked) {
+      const error = new DOMException('NEXO retuvo el envío', 'AbortError');
+      bridge.event('error', { stage: 'egress-blocked', message: String(state.egress?.reason || 'egress') });
+      throw error;
     }
 
     // Un envío se anota siempre: con o sin mediación, y aunque no se pueda leer
