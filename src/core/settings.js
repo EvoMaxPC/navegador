@@ -5,6 +5,7 @@
  */
 
 import { detectSite } from './sites.js';
+import { GUARD_DEFAULTS } from './guardConfig.js';
 
 export const DEFAULT_SETTINGS = {
   version: 1,
@@ -70,6 +71,7 @@ export const DEFAULT_SETTINGS = {
   logging: {
     maxEntries: 400,
   },
+  guard: { ...GUARD_DEFAULTS },
 };
 
 function isPlainObject(value) {
