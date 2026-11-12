@@ -89,7 +89,7 @@ real de ChatGPT.
 
 ## Verificación
 
-- Suite completa tras la etapa 2: **1693 pruebas, 1692 aprobadas, 0 fallos,
+- Suite completa tras la etapa 2: **1694 pruebas, 1693 aprobadas, 0 fallos,
   1 omitida** (la misma omitida previa). `npm run verify` (empaquetado de la capa
   + suite) también pasa.
 - Los 13 fallos que traían los commits remotos de contadores se corrigieron en
@@ -129,6 +129,11 @@ con plantillas propias para conversar con la IA. Variables admitidas:
 `{{seleccion}}` (texto seleccionado en la página), `{{pestana}}`, `{{sitio}}` y
 `{{fecha}}`. Las que no tienen valor **quedan visibles** para completarlas: no
 se reemplazan por vacío ni por texto inventado.
+
+La selección se lee de la **pestaña real** con la acción `selected-text` del
+proceso principal (campo enfocado o selección de la página, máximo 20 000
+caracteres); la shell no puede leerla por sí misma. Sólo se devuelve a la shell,
+nunca al sitio.
 
 - Inserción con la acción nativa `insert-text` del proceso principal: escribe en
   el cuadro del sitio en el foco actual y **nunca envía**. La interfaz lo dice
