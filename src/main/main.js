@@ -574,9 +574,19 @@ const EGRESS_BUTTONS = {
 async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
   const list = Array.isArray(allowed) && allowed.length ? allowed : ['cancel'];
   const owner = sender?.hostWebContents || null;
-  if (!owner || (typeof owner.isDestroyed === 'function' && owner.isDestroyed())) return 'cancel';
+  if (!owner || (typeof owner.isDestroyed === 'function' && owner.isDestroyed())) {
+    noteDiagnostic({ code: 'egress-sin-ventana', severity: 'warn',
+      title: 'NEXO no pudo mostrar la confirmación',
+      detail: 'No se encontró la ventana de la pestaña; el envío se bloqueó.' });
+    return 'cancel';
+  }
   const parent = BrowserWindow.fromWebContents(owner);
-  if (!parent || parent.isDestroyed()) return 'cancel';
+  if (!parent || parent.isDestroyed()) {
+    noteDiagnostic({ code: 'egress-sin-ventana', severity: 'warn',
+      title: 'NEXO no pudo mostrar la confirmación',
+      detail: 'No se encontró la ventana de la pestaña; el envío se bloqueó.' });
+    return 'cancel';
+  }
   const buttons = list.map((choice) => EGRESS_BUTTONS[choice] || EGRESS_BUTTONS.cancel);
   const cancelId = Math.max(0, list.indexOf('cancel'));
   const detail = (Array.isArray(summary) ? summary : [])
@@ -601,6 +611,12 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
       noLink: true,
       signal: controller.signal,
     });
+    // La doc de `signal` dice que el cuadro se comporta «como cancelado por el
+    // usuario»: lo esperable es que RESUELVA con el botón de cancelar, no que
+    // rechace (leído en electron.d.ts:23542-23547, no verificado en ejecución).
+    // Por eso el timeout se mira antes que `response`; si igual rechaza, el
+    // catch de abajo cubre el mismo caso.
+    if (controller.signal.aborted) return 'timeout';
     return list[response] || 'cancel';
   } catch (error) {
     return controller.signal.aborted ? 'timeout' : 'cancel';
