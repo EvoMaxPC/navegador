@@ -258,3 +258,41 @@ test('e2 · sin decisionTimeoutMs: el puente espera 125000 ms', { skip }, async 
   const largos = mundo.temporizadores.filter((ms) => ms > 1000);
   assert.deepEqual(largos, [125000], `temporizadores largos: ${JSON.stringify(largos)}`);
 });
+
+test('5a · bloqueo por la puerta: ni un evento con stage egress-blocked', { skip }, async () => {
+  const mundo = crearMundo({ modo: 'enforce', eleccion: () => 'cancel' });
+  mundo.window.addEventListener('message', () => {});
+  const eventos = [];
+  const postOriginal = mundo.window.postMessage;
+  mundo.window.postMessage = (msg) => { if (msg?.__nexo === 'event') eventos.push(msg); return postOriginal(msg); };
+
+  await assert.rejects(() => mundo.window.fetch('/backend-api/conversation', {
+    method: 'POST',
+    body: bodyChatGpt(TARJETA),
+  }), { name: 'AbortError' });
+  await esperar();
+
+  assert.equal(eventos.filter((e) => e.payload?.stage === 'egress-blocked').length, 0,
+    'la puerta ya avisó: no se duplica el diagnóstico');
+  // La puerta sí dejó su diagnóstico propio.
+  assert.equal(mundo.diagnos.filter((d) => d.code === 'egress-block').length, 1);
+});
+
+test('5a · bloqueo por planFallido: un evento con stage egress-fail-safe', { skip }, async () => {
+  const mundo = crearMundo({ modo: 'enforce' });
+  const eventos = [];
+  const postOriginal = mundo.window.postMessage;
+  mundo.window.postMessage = (msg) => { if (msg?.__nexo === 'event') eventos.push(msg); return postOriginal(msg); };
+
+  await assert.rejects(
+    () => mundo.window.fetch('/backend-api/conversation', initQueLanzaEn(bodyChatGpt(TARJETA), 2)),
+    { name: 'AbortError' },
+  );
+  await esperar();
+
+  const avisos = eventos.filter((e) => e.payload?.stage === 'egress-fail-safe');
+  assert.equal(avisos.length, 1, 'la red de seguridad sí avisa');
+  assert.equal(avisos[0].payload.message, 'planRequest falló con datos críticos; envío retenido');
+  assert.equal(String(avisos[0].payload.message).includes('4111'), false, 'sin valores del usuario');
+  assert.equal(eventos.filter((e) => e.payload?.stage === 'egress-blocked').length, 0);
+});

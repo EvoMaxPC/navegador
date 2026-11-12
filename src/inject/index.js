@@ -434,7 +434,9 @@ async function planFallido(input, init) {
   }
   if (!critico) return { chat: false };
   state.egress = { mode: 'enforce', action: 'block', reason: 'fail-safe', at: Date.now() };
-  return { chat: true, send: true, blocked: true };
+  // `red` distingue este bloqueo del que decide la puerta: la puerta ya avisa
+  // por `onDiagnostic` (egress-block), así que aquí no se repite el diagnóstico.
+  return { chat: true, send: true, blocked: true, red: true };
 }
 
 /**
@@ -943,9 +945,16 @@ if (!window.__NEXO_HOOKED__) {
     //    cancelación de red, que es el camino que la página ya sabe manejar
     //    («Detener»). Tampoco se anota como envío: no llegó a salir.
     if (prepared.blocked) {
-      const error = new DOMException('NEXO retuvo el envío', 'AbortError');
-      bridge.event('error', { stage: 'egress-blocked', message: String(state.egress?.reason || 'egress') });
-      throw error;
+      // Si retuvo la puerta, ya lo contó ella con su propio diagnóstico
+      // (`egress-block`, main/egressGate.js:30). Repetirlo acá daba dos entradas
+      // en el panel y la segunda con un título peor («Fallo de la mediación»).
+      if (prepared.red) {
+        bridge.event('error', {
+          stage: 'egress-fail-safe',
+          message: 'planRequest falló con datos críticos; envío retenido',
+        });
+      }
+      throw new DOMException('NEXO retuvo el envío', 'AbortError');
     }
 
     // Un envío se anota siempre: con o sin mediación, y aunque no se pueda leer
