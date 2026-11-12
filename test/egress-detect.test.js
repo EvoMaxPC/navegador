@@ -76,3 +76,37 @@ test('textos grandes en tiempo lineal', () => {
     assert.ok(performance.now() - t0 < 2000, 'demasiado lento');
   }
 });
+
+test('clave privada PEM: el bloque entero es un solo hallazgo', () => {
+  const pem = `-----BEGIN RSA PRIVATE KEY-----\n${'MIIEowIBAAKCAQEA'.repeat(20)}\n-----END RSA PRIVATE KEY-----`;
+  const t = `mira esto:\n${pem}\ngracias`;
+  const fs = detectSensitive(t);
+  assert.equal(fs.length, 1);
+  assert.equal(t.slice(fs[0].start, fs[0].end), pem);
+  assert.equal(fs[0].type, 'api_key');
+});
+
+test('clave privada sin cabecera RSA y sin END: al menos la cabecera', () => {
+  assert.equal(detectSensitive('-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----').length, 1);
+  assert.equal(detectSensitive('-----BEGIN OPENSSH PRIVATE KEY-----\nabc').length, 1);
+});
+
+test('clave pública y certificado no son claves privadas', () => {
+  assert.deepEqual(detectSensitive('-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----'), []);
+  assert.deepEqual(detectSensitive('-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----'), []);
+});
+
+test('muchas cabeceras PEM sin END: tiempo acotado', () => {
+  const t = '-----BEGIN RSA PRIVATE KEY-----\n'.repeat(3000);
+  const t0 = performance.now();
+  detectSensitive(t);
+  assert.ok(performance.now() - t0 < 2000, 'demasiado lento');
+});
+
+test('redactar una clave PEM no deja el cuerpo', async () => {
+  const { redact } = await import('../src/egress/redact.js');
+  const { createVault } = await import('../src/egress/vault.js');
+  const pem = `-----BEGIN RSA PRIVATE KEY-----\nSECRETOCUERPO123\n-----END RSA PRIVATE KEY-----`;
+  const out = redact(pem, detectSensitive(pem), createVault());
+  assert.equal(out, '[API_KEY_1]');
+});

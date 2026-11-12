@@ -22,7 +22,7 @@ const API_KEY_PATTERNS = [
   /(?<![A-Za-z0-9])xox[abprs]-[A-Za-z0-9-]{10,}/g,
   /(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{35}/g,
   /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
+  /-----BEGIN ([A-Z ]*)PRIVATE KEY-----[\s\S]{0,8000}?-----END \1PRIVATE KEY-----|-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
 ];
 
 // 14 a 19 dígitos, primer dígito 2-6, separadores simples. Con Luhn.
