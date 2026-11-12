@@ -24,6 +24,7 @@ import { detectSite, isChatRequest, isMediable, isResponseRequest, locateUserTex
 import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
 import { estimateTokens, fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
 import { normalizeEgress } from '../core/egressConfig.js';
+import { readBody } from '../core/readBody.js';
 import { detectSensitive } from '../egress/detect.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
@@ -408,6 +409,34 @@ function guardSlots(payload) {
   return [];
 }
 
+/** ¿Hay algo crítico en este texto? El mismo juicio que usa la puerta. */
+function hayCritico(texto) {
+  return detectSensitive(String(texto || '')).some((f) => f.severity === 'critical');
+}
+
+/**
+ * Red de seguridad para cuando `planRequest` lanza.
+ *
+ * `guardPrompt` está escrito para no lanzar, pero un fallo ANTES de que llegue a
+ * mirar el cuerpo dejaba la petición seguir hasta el `fetch` nativo con el dato
+ * dentro. En `enforce` se vuelve a leer el cuerpo con `readBody` (que no lo
+ * consume) y se decide con el detector local: sólo un hallazgo crítico retiene.
+ * En `observe` y `off` no cambia nada: nunca se ha retenido por esta vía.
+ */
+async function planFallido(input, init) {
+  if (normalizeEgress(state.settings?.egress).mode !== 'enforce') return { chat: false };
+  let critico = false;
+  try {
+    const { text } = await readBody(input, init);
+    critico = typeof text === 'string' && hayCritico(text);
+  } catch {
+    // Si la lectura falla y no se sabía nada, se deja pasar como siempre.
+  }
+  if (!critico) return { chat: false };
+  state.egress = { mode: 'enforce', action: 'block', reason: 'fail-safe', at: Date.now() };
+  return { chat: true, send: true, blocked: true };
+}
+
 /**
  * Consulta la puerta de salida antes de enviar. Nunca lanza: un guardián que
  * rompe el envío de la página es peor que uno que no interviene.
@@ -428,6 +457,8 @@ async function guardPrompt(text, { canRewrite = false, unreadable = null, slots 
     state.egress = { mode: cfg.mode, action: resultado.action, reason: resultado.reason || '', at: Date.now() };
     return resultado;
   };
+  // `cfg` ya viene de normalizeEgress: el tope de 600 000 y el mínimo de 5 000
+  // son los mismos que aplica la puerta, así que los dos esperan lo mismo.
   const espera = cfg.decisionTimeoutMs + MARGEN_EGRESS_MS;
 
   // Cuerpo ilegible: se declara el motivo y decide la puerta (`onUnreadable`).
@@ -559,8 +590,12 @@ async function planRequest(input, init) {
   // Guardián de salida ANTES de la mediación: redactar aquí deja el texto
   // saneado como base y el motor registra exactamente lo que se va a enviar.
   // `canRewrite` sólo si sabemos volver a poner el texto en el cuerpo.
-  const canRewrite = site.body?.kind === 'chatgpt-messages' || site.body?.kind === 'claude-prompt';
+  // Con más de un bloque no se puede reponer el texto sin adivinar cuál es cuál:
+  // no se ofrece redactar, para que el diálogo no prometa algo que después se
+  // quedaría en retención (ver el `length !== 1` de abajo).
   const slots = guardSlots(parsed);
+  const canRewrite = (site.body?.kind === 'chatgpt-messages' || site.body?.kind === 'claude-prompt') &&
+    slots.length <= 1;
   const guard = await guardPrompt(prompt, { canRewrite, slots });
   if (guard.action === 'block') return { chat: true, send: true, blocked: true, promptText: prompt, url };
   let outbound = prompt;
@@ -900,6 +935,8 @@ if (!window.__NEXO_HOOKED__) {
       prepared = await planRequest(input, init);
     } catch (error) {
       bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
+      // Última red: si el plan falló con datos críticos dentro, no sale igual.
+      prepared = await planFallido(input, init);
     }
 
     // 2) El guardián de salida retuvo el mensaje: no se envía y se simula una
