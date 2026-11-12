@@ -112,9 +112,13 @@ real de ChatGPT.
 
 ## Entrega
 
-- Fuentes: `deliveries/nexo-navegacion-profesional/FUENTES-navegacion-e3234d3.zip`
-  (301 archivos), SHA256
-  `dd3a0eddde48772ddcb5d07a5a0760df0775ef94c1508903c3eb9127f3a769a6`.
+- Fuentes: `deliveries/nexo-navegacion-profesional/FUENTES-navegacion-<commit>.zip`,
+  generado con `git archive` del commit de entrega; su SHA256 queda al lado en
+  el `.sha256` con el mismo nombre. El ZIP no se regenera solo: hay que rehacerlo
+  cuando cambie el commit.
+- Ejecutable de Windows: artefacto `Nexo-win32-x64` del flujo «Compilar para
+  Windows» (Windows x64, ~152 MB). La CI también guarda `Nexo-validacion` con
+  el informe de la sonda, el rendimiento y las capturas.
 
 ## Etapa 2 · interacción con la IA (2026-11)
 
