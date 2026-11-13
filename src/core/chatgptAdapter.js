@@ -28,10 +28,30 @@ const PRINT_LABEL_ROLES = new Map([
   ['You said:', 'user'],
   ['ChatGPT said:', 'assistant'],
 ]);
+// Claves de más larga a más corta: si dos coinciden por prefijo, gana la más
+// específica. Se calcula una vez; el `Map` conserva las cuatro etiquetas.
+const PRINT_LABEL_KEYS = [...PRINT_LABEL_ROLES.keys()].sort((a, b) => b.length - a.length);
+/**
+ * Rol de un encabezado visible.
+ *
+ * En el DOM medido el nombre de quien habla viaja pegado a la etiqueta dentro
+ * del mismo `h4` («Dijiste:Tú», «ChatGPT dijo:ChatGPT»), así que la igualdad
+ * exacta se queda corta. Se prueba primero la búsqueda de siempre —idéntica
+ * para las etiquetas limpias— y sólo si falla se acepta la etiqueta como
+ * prefijo de una de las cuatro claves conocidas. No se añaden claves ni
+ * idiomas, y una etiqueta que no empiece por ninguna no se reconoce: «Respuesta
+ * más reciente» sigue descartándose.
+ */
+function printLabelRole(label) {
+  const exacto = PRINT_LABEL_ROLES.get(label);
+  if (exacto) return exacto;
+  const clave = PRINT_LABEL_KEYS.find((item) => label.startsWith(item));
+  return clave ? PRINT_LABEL_ROLES.get(clave) : '';
+}
 function selectPrintLabelMessages(document) {
   const messages = queryAll(document, 'main h4').flatMap((header) => {
     const label = String(header.textContent ?? header.innerText ?? '').trim();
-    const role = PRINT_LABEL_ROLES.get(label) || '';
+    const role = printLabelRole(label);
     // En el DOM observado, el contenido es el hermano inmediato del encabezado h4.
     const node = header.nextElementSibling;
     return role && node ? [{ node, role }] : [];
