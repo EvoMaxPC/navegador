@@ -306,8 +306,10 @@ const AVISOS_DE_BLOQUEO = new Set(['egress-net-block', 'egress-injected-block'])
  * el tamaño de lo que llega por `stream-end`. Sin la variable no se calcula ni se
  * emite nada, y el retorno de cada canal es idéntico.
  *
- * Nunca lleva contenido del chat, la URL completa ni identificadores: sólo host,
- * conteos, nombres de estrategia y booleanos.
+ * Nunca lleva contenido del chat ni identificadores. Bajo `NEXO_DIAG=1` viaja el
+ * **pathname** de la conversación (`/c/…`), sin origen, sin query y sin hash:
+ * lo justo para separar «otra conversación» de «la misma recargada». El resto
+ * son conteos, nombres de estrategia y booleanos.
  */
 const diagOn = process.env.NEXO_DIAG === '1';
 /** Estos avisos no se deduplican: cada uno describe un hecho distinto. */
@@ -358,40 +360,105 @@ function diagStrategy(value) {
 }
 
 /**
+ * Recorte de una clave de acumulador (`conversation\0role\0id`) para el aviso.
+ *
+ * La conversación puede ser una URL con identificador: se publica sólo su ruta
+ * (`/c/<algo>` recortado) y nunca el host con query. El id se recorta a 12
+ * caracteres. No se publica texto del chat en ningún caso.
+ */
+function diagClave(key) {
+  const partes = String(key).split('\u0000');
+  const [conversation = '', role = '', id = ''] = partes;
+  let ruta = '(otra)';
+  try {
+    const url = new URL(conversation);
+    ruta = `${url.pathname.slice(0, 16)}${url.pathname.length > 16 ? '…' : ''}`;
+  } catch { /* conversación anónima: `origin+path#tab-N-gen` no es URL válida */ }
+  return `${ruta}:${role === 'user' ? 'u' : 'a'}:${String(id).slice(0, 12)}`;
+}
+
+/**
  * Aviso `diag-snapshot`: por qué salió (o no) cada snapshot de repetición, con
  * la estrategia del adaptador y los conteos por rol. La clave lleva la firma
  * completa para que dos snapshots distintos no se pisen y ninguno se descarte.
+ *
+ * Con `turnos` describe además, uno por línea, el rol, el id usado, cuántos
+ * caracteres y la clave del acumulador: es el dato que separa «el acumulador no
+ * reinicia» de «el id cambia y por eso suma de nuevo».
  */
-function noteDiagSnapshot({ motivo, strategy, user, assistant, observed, dom }) {
+function noteDiagSnapshot({ motivo, strategy, user, assistant, observed, dom, turnos = [], nuevas = null, total = null, href = null, hrefCambio = null }) {
   if (!diagOn) return null;
   const firma = [motivo, strategy, user, assistant, observed ? 1 : 0,
-    dom ? `${dom.ready ? 1 : 0}/${dom.inputTokens}/${dom.outputTokens}/${dom.partial ? 1 : 0}` : '-'].join('|');
+    dom ? `${dom.ready ? 1 : 0}/${dom.inputTokens}/${dom.outputTokens}/${dom.partial ? 1 : 0}` : '-',
+    nuevas === null ? '-' : nuevas, total === null ? '-' : total, hrefCambio === null ? '-' : hrefCambio ? 1 : 0].join('|');
   const title = `diag-snapshot: ${motivo}`;
   const partes = [`estrategia ${strategy}`, `user ${cuenta(user)}`, `assistant ${cuenta(assistant)}`,
     `observeDomTokens ${siNo(observed)}`];
   if (dom) partes.push(`ready ${siNo(dom.ready)}`, `dom ${cuenta(dom.inputTokens)}/${cuenta(dom.outputTokens)}`,
     `partial ${siNo(dom.partial)}`);
+  if (href !== null) {
+    let ruta = '(otra)';
+    try {
+      const url = new URL(href);
+      // Sólo la ruta: sin origen, sin query y sin hash. La ruta basta para
+      // distinguir una conversación de otra y evita que el host del proveedor
+      // viaje en un aviso de diagnóstico.
+      ruta = url.pathname.slice(0, 48) || '/';
+    } catch { /* href vacía o inválida */ }
+    partes.push(`href ${ruta}`, hrefCambio === null ? 'href-cambio sin-previa' : `href-cambio ${siNo(hrefCambio)}`);
+  }
+  if (nuevas !== null) partes.push(`claves nuevas ${cuenta(nuevas)}`, `registros ${cuenta(total)}`);
+  const detalleTurnos = turnos.map((turno, i) =>
+    `  ${i + 1}) ${turno.role} · id ${turno.id} · ${cuenta(turno.chars)} chars · clave ${turno.clave}`);
   return noteDiagnostic({
     code: 'diag-snapshot', key: `diag-snapshot|${firma}`, severity: 'info', title,
-    detail: partes.join(' · '),
+    detail: [...partes, ...detalleTurnos].join('\n'),
     meta: { motivo, strategy, user: Number(user) || 0, assistant: Number(assistant) || 0,
       observed: Boolean(observed), ready: dom ? Boolean(dom.ready) : null,
       inputTokens: dom ? Number(dom.inputTokens) || 0 : null,
       outputTokens: dom ? Number(dom.outputTokens) || 0 : null,
-      partial: dom ? Boolean(dom.partial) : null },
+      partial: dom ? Boolean(dom.partial) : null,
+      hrefCambio: hrefCambio === null ? null : Boolean(hrefCambio),
+      nuevasClaves: nuevas === null ? null : Number(nuevas) || 0,
+      registros: total === null ? null : Number(total) || 0,
+      turnos: turnos.map((turno) => ({ role: turno.role, id: turno.id, chars: Number(turno.chars) || 0, clave: turno.clave })) },
   });
 }
+
+/**
+ * Última firma publicada por `diag-contadores`.
+ *
+ * `diag-contadores` se emite desde `statsSnapshot()`, y esa función se llama en
+ * cada cambio de contadores, en cada navegación y en cada `nexo:stats`: sin este
+ * freno inunda el registro (400 entradas) y desaloja a `diag-snapshot`, que es el
+ * que explica por qué suben los números. Sólo se publica cuando la firma cambia.
+ */
+let diagContadoresFirma = null;
+/**
+ * Última ruta observada por `nexo:dom-tokens:snapshot` (la del respaldo directo
+ * de la shell), por pestaña. Sólo `origin + pathname`, nunca la URL completa y
+ * nunca el contenido: sirve para decir si la href cambió entre lecturas.
+ */
+const diagDirectoHref = new Map();
 
 /**
  * Aviso `diag-contadores`: lo que pinta la interfaz (DOM) frente a lo que midió
  * el motor. Sólo números y booleanos: es lo que decide si un cero viene de una
  * lectura vacía o de una fuente que no se está usando.
+ *
+ * La firma incluye TODO lo que viaja en el aviso, también los conteos de
+ * mensajes del DOM: si dos estados difieren sólo en `userMessages` o
+ * `assistantMessages`, el aviso tiene que salir igualmente.
  */
 function noteDiagContadores(stats) {
   if (!diagOn) return null;
   const dom = stats?.domTokens || {};
   const firma = [dom.ready ? 1 : 0, dom.inputTokens, dom.outputTokens, dom.partial ? 1 : 0,
+    dom.userMessages, dom.assistantMessages,
     stats?.messages, stats?.responses, stats?.inputTokens, stats?.outputTokens].join('|');
+  // Mismo estado que el último aviso: no se repite. La primera lectura sí sale.
+  if (firma === diagContadoresFirma) return null;
+  diagContadoresFirma = firma;
   return noteDiagnostic({
     code: 'diag-contadores', key: `diag-contadores|${firma}`, severity: 'info',
     title: `diag-contadores: dom ${dom.ready ? 'listo' : 'sin texto'}`,
@@ -1056,6 +1123,14 @@ function registerIpc() {
     repetitionSnapshots.set(sender.id, next);
     const ownedMainFrame = isUnderstandingSource(event);
     if (ownedMainFrame) domTokenSnapshots.set(sender.id, next);
+    // Diagnóstico: las claves se calculan ANTES de observar (es el mismo cálculo
+    // de `observe`, sin aplicarlo) y el total después, para saber cuántas son
+    // nuevas. Fuera de `NEXO_DIAG=1` no se pide nada.
+    const diagAntes = diagOn && ownedMainFrame
+      ? domTokenTotals.keysFor({ projectId: store?.settings?.memory?.projectId || 'default',
+        webContentsId: sender.id, href, turns: next.turns })
+      : null;
+    const diagRegistros = diagAntes ? domTokenTotals.records(store?.settings?.memory?.projectId || 'default') : null;
     const domChanged = ownedMainFrame ? observeDomTokens(sender, next) : false;
     const progress = engine.onRenderedConversation(sender.id, next, previous);
     if (diagOn) {
@@ -1066,8 +1141,12 @@ function registerIpc() {
         : null;
       const porRol = (role) => snapshot.turns.filter((turn) => turn.role === role).length;
       const motivo = !snapshot.turns.length ? 'sin-turnos' : ownedMainFrame ? 'ok' : 'no-owned';
+      const total = diagAntes ? domTokenTotals.records(store?.settings?.memory?.projectId || 'default') : null;
       noteDiagSnapshot({ motivo, strategy: diagStrategy(payload?.strategy),
-        user: porRol('user'), assistant: porRol('assistant'), observed: ownedMainFrame, dom });
+        user: porRol('user'), assistant: porRol('assistant'), observed: ownedMainFrame, dom,
+        turnos: (diagAntes || []).map((turno) => ({ ...turno, clave: diagClave(turno.clave) })),
+        nuevas: diagAntes ? total - diagRegistros : null, total,
+        href: ownedMainFrame ? href : null, hrefCambio: previous ? previous.href !== href : null });
     }
     publishRepetition(next);
     if (domChanged || progress?.updated) broadcast('nexo:stats-changed', statsSnapshot());
@@ -1086,7 +1165,24 @@ function registerIpc() {
     if (!snapshot) return { ok: false };
     const cached = domTokenSnapshots.get(sender.id);
     const sameDocument = cached?.href && new URL(cached.href).origin + new URL(cached.href).pathname === new URL(href).origin + new URL(href).pathname;
+    const observeThis = sameDocument && cached.turns.length ? cached : snapshot;
     const changed = sameDocument && cached.turns.length ? observeDomTokens(sender, cached) : observeDomTokens(sender, snapshot, 'direct');
+    if (diagOn) {
+      // Mismo detalle que la ruta del lector, con `source` en el motivo: esta
+      // ruta la pide la shell y hasta ahora no dejaba rastro en Actividad.
+      const registro = new URL(href).origin + new URL(href).pathname;
+      const previo = diagDirectoHref.get(sender.id);
+      diagDirectoHref.set(sender.id, registro);
+      const total = domTokenTotals.records(store?.settings?.memory?.projectId || 'default');
+      const claves = domTokenTotals.keysFor({ projectId: store?.settings?.memory?.projectId || 'default',
+        webContentsId: sender.id, href, turns: observeThis.turns });
+      noteDiagSnapshot({ motivo: 'ok-directo', strategy: diagStrategy(observeThis.strategy),
+        user: observeThis.turns.filter((turn) => turn.role === 'user').length,
+        assistant: observeThis.turns.filter((turn) => turn.role === 'assistant').length,
+        observed: true, dom: domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel()),
+        turnos: claves.map((turno) => ({ ...turno, clave: diagClave(turno.clave) })),
+        nuevas: null, total, href, hrefCambio: previo ? previo !== registro : null });
+    }
     if (changed) broadcast('nexo:stats-changed', statsSnapshot());
     return { ok: true };
   });

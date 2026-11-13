@@ -112,4 +112,23 @@ export class DomTokenTotals {
       partial: project.partial, model: project.model, encoding: project.encoding,
       method: 'dom-manual-tokenizer', scope: 'session-project-rendered-text', projectId };
   }
+  /** Cuántas claves (`conversation\0role\0id`) hay guardadas: sólo número. */
+  records(projectId = 'default') {
+    return this.project(projectId).records.size;
+  }
+  /**
+   * Claves que el acumulador usa para los turnos de un snapshot, en el mismo
+   * orden en que las calcula `observe`. Sólo lectura y sólo para diagnóstico:
+   * permite ver si el `id` cambia entre lecturas sin tocar los contadores.
+   */
+  keysFor({ projectId = 'default', webContentsId, href, turns = [] } = {}) {
+    const project = this.project(projectId);
+    const url = new URL(href);
+    const named = /^\/c\/[^/]+/.test(url.pathname);
+    const previousTab = project.tabs.get(webContentsId);
+    const conversation = named ? url.origin + url.pathname : previousTab?.anonymous && previousTab.path === url.origin + url.pathname
+      ? previousTab.conversation : `${url.origin}${url.pathname}#tab-${webContentsId}-${project.generation + 1}`;
+    return turns.map((turn) => ({ role: turn.role, id: turn.id,
+      chars: String(turn.content ?? '').length, clave: `${conversation}\u0000${turn.role}\u0000${turn.id}` }));
+  }
 }

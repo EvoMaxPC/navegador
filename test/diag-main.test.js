@@ -129,7 +129,23 @@ test('diag-contadores: compara DOM con motor en números', async () => {
     assert.equal(ahora, 0, 'sin la variable no se emite');
     return;
   }
-  assert.ok(ahora > nueva, 'statsSnapshot deja el aviso');
+  assert.ok(ahora >= nueva, 'statsSnapshot no puede perder avisos ya emitidos');
+  // `diag-contadores` sólo sale cuando cambia el estado que describe: si no, el
+  // registro de 400 se llena y desaloja a `diag-snapshot`, que es el que explica
+  // por qué suben los números. Tres pasos, sin depender de qué etapa dejó la
+  // firma el test anterior:
+  const cuentaContadores = async () => (await diagEntries()).filter((entry) => entry.code === 'diag-contadores').length;
+  await invoke('nexo:stats', shell);
+  const trasPrimera = await cuentaContadores();
+  await invoke('nexo:stats', shell);
+  assert.equal(await cuentaContadores(), trasPrimera, 'sin cambios no se repite');
+  // Los contadores cambian por una ruta que no llama a `statsSnapshot()`
+  // (`nexo:repetition:snapshot`, main.js:1115): el aviso tiene que salir en el
+  // siguiente `nexo:stats`.
+  const propia = journal.windows[0].attachWebview('https://chatgpt.com/c/contadores');
+  await invoke('nexo:repetition:snapshot', propia, { href: propia.url, turns, strategy: 'print-label' });
+  await invoke('nexo:stats', shell);
+  assert.ok(await cuentaContadores() > trasPrimera, 'con valores nuevos vuelve a salir');
   const ultimo = (await diagEntries()).filter((entry) => entry.code === 'diag-contadores').at(-1);
   for (const campo of ['ready', 'inputTokens', 'outputTokens', 'partial', 'messages', 'responses',
     'engineInputTokens', 'engineOutputTokens']) {
@@ -163,4 +179,138 @@ test('los diag-* no se deduplican: dos snapshots iguales dejan dos avisos', asyn
   }
   const despues = (await diagEntries()).filter((entry) => entry.code === 'diag-snapshot').length;
   assert.equal(despues - antes, DIAG ? 2 : 0, DIAG ? 'se ven los dos, sin dedup' : 'sin la variable, ninguno');
+});
+
+/* ------------------------- 7c-4a: detalle por turno ------------------------- */
+
+test('diag-snapshot: un renglón por turno con rol, id, caracteres y clave', async () => {
+  const propia = journal.windows[0].attachWebview('https://chatgpt.com/c/detalle');
+  await invoke('nexo:repetition:snapshot', propia, { href: propia.url, turns, strategy: 'print-label' });
+  const aviso = (await diagEntries()).find((entry) => entry.code === 'diag-snapshot' && entry.meta?.motivo === 'ok' &&
+    entry.meta?.registros !== null);
+  if (!DIAG) {
+    assert.equal(aviso, undefined, 'sin la variable no hay detalle');
+    return;
+  }
+  assert.ok(aviso, 'el snapshot con turnos deja detalle');
+  const [primera, ...resto] = aviso.meta.turnos;
+  assert.equal(primera.role, 'user');
+  assert.equal(primera.id, 'u1');
+  assert.equal(primera.chars, 'hola, ¿qué tal'.length, 'los caracteres son los del turno, no los tokens');
+  assert.match(primera.clave, /:u:u1$/, 'la clave lleva rol e id');
+  assert.equal(resto[0].role, 'assistant');
+  assert.match(resto[0].clave, /:a:a1$/);
+  assert.equal(typeof aviso.meta.nuevasClaves, 'number', 'cuántas claves añadió este observe');
+  assert.equal(typeof aviso.meta.registros, 'number', 'cuántos registros hay en total');
+  // El detalle va también en `detail`, no sólo en `meta`.
+  assert.match(aviso.detail, /1\) user · id u1 · 14 chars/);
+  // Y no arrastra el texto del chat.
+  assert.ok(!JSON.stringify(aviso.meta.turnos).includes(CENTINELA));
+  assert.ok(!aviso.detail.includes(CENTINELA));
+});
+
+test('diag-snapshot: repetir los mismos turnos no añade claves nuevas', async () => {
+  const propia = journal.windows[0].attachWebview('https://chatgpt.com/c/repetido');
+  const payload = { href: propia.url, turns, strategy: 'print-label' };
+  await invoke('nexo:repetition:snapshot', propia, payload);
+  await invoke('nexo:repetition:snapshot', propia, payload);
+  const avisos = (await diagEntries()).filter((entry) => entry.code === 'diag-snapshot' && entry.meta?.motivo === 'ok' &&
+    entry.meta?.registros !== null);
+  if (!DIAG) {
+    assert.equal(avisos.length, 0);
+    return;
+  }
+  const [segundo, primero] = avisos; // el registro guarda del más nuevo al más viejo
+  assert.equal(primero.meta.nuevasClaves, 2, 'la primera lectura crea las dos claves');
+  assert.equal(segundo.meta.nuevasClaves, 0, 'la segunda no añade ninguna');
+  assert.equal(segundo.meta.registros, primero.meta.registros, 'el total no crece');
+});
+
+test('diag-snapshot: informa la href como ruta sola y si cambió desde la lectura anterior', async () => {
+  const propia = journal.windows[0].attachWebview('https://chatgpt.com/c/primera');
+  await invoke('nexo:repetition:snapshot', propia, { href: propia.url, turns, strategy: 'print-label' });
+  propia.url = 'https://chatgpt.com/c/segunda?model=4o#frag';
+  await invoke('nexo:repetition:snapshot', propia, { href: propia.url, turns, strategy: 'print-label' });
+  const avisos = (await diagEntries()).filter((entry) => entry.code === 'diag-snapshot' && entry.meta?.motivo === 'ok' &&
+    String(entry.detail || '').includes('/c/primera') || String(entry.detail || '').includes('/c/segunda'));
+  if (!DIAG) {
+    assert.equal(avisos.length, 0);
+    return;
+  }
+  const [segunda, primera] = avisos;
+  assert.match(primera.detail, /\/c\/primera/);
+  assert.equal(primera.meta.hrefCambio, null, 'la primera lectura no tiene con qué comparar');
+  assert.equal(segunda.meta.hrefCambio, true, 'la segunda ve otra ruta');
+  assert.match(segunda.detail, /href \/c\/segunda/, 'sólo la ruta');
+  assert.ok(!segunda.detail.includes('chatgpt.com'), 'el origen no viaja');
+  assert.ok(!segunda.detail.includes('model=4o'), 'la query no viaja');
+  assert.ok(!segunda.detail.includes('frag'), 'el fragmento no viaja');
+});
+
+test('nexo:dom-tokens:snapshot también deja rastro de diagnóstico', async () => {
+  const propia = journal.windows[0].attachWebview('https://chatgpt.com/c/directo');
+  await invoke('nexo:dom-tokens:snapshot', shell, { href: propia.url, webContentsId: propia.id, turns, strategy: 'direct-console-injection' });
+  const aviso = (await diagEntries()).find((entry) => entry.code === 'diag-snapshot' && entry.meta?.motivo === 'ok-directo');
+  if (!DIAG) {
+    assert.equal(aviso, undefined, 'sin la variable esta ruta no deja aviso');
+    return;
+  }
+  assert.ok(aviso, 'la ruta de la shell deja el aviso que antes no dejaba');
+  assert.equal(aviso.meta.user, 1);
+  assert.equal(aviso.meta.assistant, 1);
+  // La estrategia del respaldo directo no está en `DIAG_STRATEGIES`, así que el
+  // aviso la declara inválida: es un dato honesto, no un fallo.
+  assert.equal(aviso.meta.strategy, 'no-valida');
+  assert.match(aviso.detail, /ok-directo|estrategia no-valida/);
+  assert.equal(aviso.meta.turnos.length, 2);
+});
+
+test('diag-contadores: mismo estado no repite; estado nuevo sí', async () => {
+  const cuenta = async () => (await diagEntries()).filter((entry) => entry.code === 'diag-contadores').length;
+  const propia = journal.windows[0].attachWebview('https://chatgpt.com/c/contadores-dedup');
+  await invoke('nexo:stats', shell);
+  const base = await cuenta();
+  await invoke('nexo:stats', shell);
+  await invoke('nexo:stats', shell);
+  if (!DIAG) {
+    assert.equal(base, 0, 'sin la variable no se emite');
+    return;
+  }
+  assert.equal(await cuenta(), base, 'tres lecturas del mismo estado dejan un solo aviso');
+  await invoke('nexo:repetition:snapshot', propia, { href: propia.url, turns, strategy: 'print-label' });
+  await invoke('nexo:stats', shell);
+  assert.ok(await cuenta() > base, 'con valores nuevos vuelve a salir');
+});
+
+test('ningún diag-* lleva el origen, la query ni el fragmento de la URL', async () => {
+  // Se provoca actividad con una URL que tiene query y fragmento y un origen
+  // reconocible: si el aviso publicara `origin+pathname` o la URL entera, aquí
+  // se vería. Sólo el pathname es aceptable.
+  const propia = journal.windows[0].attachWebview('https://chatgpt.com/c/origen?model=4o&x=1#frag');
+  propia.url = 'https://chatgpt.com/c/origen?model=4o&x=1#frag';
+  await invoke('nexo:repetition:snapshot', propia, { href: propia.url, turns, strategy: 'print-label' });
+  await invoke('nexo:dom-tokens:snapshot', shell, { href: propia.url, webContentsId: propia.id, turns });
+  const avisos = await diagEntries();
+  if (!DIAG) {
+    assert.equal(avisos.length, 0);
+    return;
+  }
+  const volcado = comoTexto(avisos);
+  assert.ok(!volcado.includes('https://'), 'el origen no viaja en ningún aviso');
+  assert.ok(!volcado.includes('model=4o'), 'la query no viaja');
+  assert.ok(!volcado.includes('x=1'), 'la query no viaja (2)');
+  assert.ok(!volcado.includes('#frag'), 'el fragmento no viaja');
+  // Ningún aviso puede contener los delimitadores de la URL: si apareciera una
+  // `?` o una `#`, es que algo de la query o del fragmento se coló.
+  for (const aviso of avisos) {
+    const texto = JSON.stringify({ title: aviso.title, detail: aviso.detail, meta: aviso.meta });
+    assert.ok(!texto.includes('?'), `${aviso.code} no lleva «?»`);
+    assert.ok(!texto.includes('#'), `${aviso.code} no lleva «#»`);
+  }
+  // Lo que SÍ debe verse es la ruta: es el dato de diagnóstico de esta etapa.
+  // Sólo los de esta prueba: el registro acumula los avisos de todo el fichero.
+  const conHref = avisos.filter((entry) => /^href \/c\/origen$/m.test(String(entry.detail || '')));
+  assert.ok(conHref.length > 0, 'hay avisos con href que revisar');
+  assert.ok(conHref.some((entry) => /^href \/c\/origen$/m.test(String(entry.detail))), 'la ruta sí viaja, sola');
+  assert.ok(!conHref.some((entry) => String(entry.detail).includes('chatgpt.com/c/origen')), 'pero sin el origen delante');
 });
