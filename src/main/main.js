@@ -296,7 +296,7 @@ const diagnosticSeen = new Map();
 // y lo retiene otra vez, tiene que verlo otra vez. Estos códigos no se
 // deduplican; el resto del registro sí, para que un reintento en bucle no lo
 // llene.
-const AVISOS_DE_BLOQUEO = new Set(['egress-net-block', 'egress-injected-block']);
+const AVISOS_DE_BLOQUEO = new Set(['egress-block', 'egress-error', 'egress-net-block', 'egress-injected-block']);
 /**
  * Instrumentación de diagnóstico, apagada por omisión.
  *
@@ -800,7 +800,14 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
     if (controller.signal.aborted) return 'timeout';
     return list[response] || 'cancel';
   } catch (error) {
-    return controller.signal.aborted ? 'timeout' : 'cancel';
+    if (controller.signal.aborted) return 'timeout';
+    // Si el diálogo revienta, el usuario nunca vio la pregunta: tiene que
+    // quedar dicho. Sólo el nombre del error (el mensaje puede traer el texto
+    // del envío, que es justo lo que no debe registrarse).
+    const nombre = String(error?.name || '').slice(0, 40) || 'desconocido';
+    noteDiagnostic({ code: 'egress-error', severity: 'warn', key: 'egress-error|dialogo',
+      title: 'NEXO no pudo decidir sobre un envío', detail: `Motivo: el diálogo falló (${nombre}).` });
+    return 'cancel';
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -1147,9 +1154,17 @@ function registerIpc() {
     try { host = new URL(event.sender?.getURL?.() || '').hostname; } catch { /* sin URL */ }
     if (!isUnderstandingSource(event) || !host || detectSite(host).id === 'generic') {
       egressGate?.noteUnauthorized();
+      // La capa se queda sin veredicto y decide ella sola: si bloquea, sin este
+      // aviso el envío desaparece sin rastro. Sin contenido, sólo el motivo.
+      noteDiagnostic({ code: 'egress-error', severity: 'warn', key: 'egress-error|emisor',
+        title: 'NEXO no pudo decidir sobre un envío', detail: 'Motivo: emisor no autorizado.' });
       return { action: 'error', reason: 'emisor' };
     }
-    if (!egressGate) return { action: 'error', reason: 'sin-puerta' };
+    if (!egressGate) {
+      noteDiagnostic({ code: 'egress-error', severity: 'warn', key: 'egress-error|sin-puerta',
+        title: 'NEXO no pudo decidir sobre un envío', detail: 'Motivo: sin puerta de salida.' });
+      return { action: 'error', reason: 'sin-puerta' };
+    }
     return egressGate.handle({ sender: event.sender, host, payload });
   });
   ipcMain.handle('nexo:turn-result', (event, payload) => {

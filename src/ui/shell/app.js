@@ -874,7 +874,7 @@ function pushIntervention(entry) {
 // Un envío retenido es lo único que el usuario no puede deducir de la página:
 // el mensaje no sale y no hay respuesta que lo explique. Se avisa en la franja
 // de la shell, que nunca queda debajo del webview.
-const AVISOS_RETENIDOS = new Set(['egress-net-block', 'egress-injected-block']);
+const AVISOS_RETENIDOS = new Set(['egress-block', 'egress-error', 'egress-net-block', 'egress-injected-block']);
 const EGRESS_BAR_MS = 20_000;
 let egressTimer = null;
 
