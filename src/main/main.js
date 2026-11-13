@@ -453,8 +453,11 @@ const diagDirectoHref = new Map();
 function noteDiagContadores(stats) {
   if (!diagOn) return null;
   const dom = stats?.domTokens || {};
+  // La ruta activa entra en la firma: si sólo cambia de conversación, el aviso
+  // también tiene que salir. `ruta` es un `pathname`, nunca la URL completa.
+  const activo = domTokenTotals.resumenActivo(store?.settings?.memory?.projectId || 'default');
   const firma = [dom.ready ? 1 : 0, dom.inputTokens, dom.outputTokens, dom.partial ? 1 : 0,
-    dom.userMessages, dom.assistantMessages,
+    dom.userMessages, dom.assistantMessages, activo.ruta, activo.obsoletos, activo.migrados,
     stats?.messages, stats?.responses, stats?.inputTokens, stats?.outputTokens].join('|');
   // Mismo estado que el último aviso: no se repite. La primera lectura sí sale.
   if (firma === diagContadoresFirma) return null;
@@ -464,11 +467,14 @@ function noteDiagContadores(stats) {
     title: `diag-contadores: dom ${dom.ready ? 'listo' : 'sin texto'}`,
     detail: `dom ready ${siNo(dom.ready)} · dom ${cuenta(dom.inputTokens)}/${cuenta(dom.outputTokens)}` +
       ` · parcial ${siNo(dom.partial)} · motor mensajes ${cuenta(stats?.messages)}` +
-      ` · respuestas ${cuenta(stats?.responses)} · motor ${cuenta(stats?.inputTokens)}/${cuenta(stats?.outputTokens)}`,
+      ` · respuestas ${cuenta(stats?.responses)} · motor ${cuenta(stats?.inputTokens)}/${cuenta(stats?.outputTokens)}` +
+      ` · activa ${activo.ruta ?? '—'} · ignorados ${cuenta(activo.obsoletos)} · migrados ${cuenta(activo.migrados)}`,
     meta: { ready: Boolean(dom.ready), inputTokens: Number(dom.inputTokens) || 0,
       outputTokens: Number(dom.outputTokens) || 0, partial: Boolean(dom.partial),
       messages: Number(stats?.messages) || 0, responses: Number(stats?.responses) || 0,
-      engineInputTokens: Number(stats?.inputTokens) || 0, engineOutputTokens: Number(stats?.outputTokens) || 0 },
+      engineInputTokens: Number(stats?.inputTokens) || 0, engineOutputTokens: Number(stats?.outputTokens) || 0,
+      // Sólo `pathname`: sin origen, sin query y sin hash.
+      conversationPath: activo.ruta, ignoredTurns: activo.obsoletos, migratedRecords: activo.migrados },
   });
 }
 
@@ -786,7 +792,9 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
 function statsSnapshot() {
   const stats = {
     ...engine.stats(),
-    domTokens: domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel()),
+    // Sólo la conversación activa: un chat nuevo arranca en 0/0 y volver a
+    // `/c/A` recupera su total. Los registros de las demás no se borran.
+    domTokens: domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel(), { soloActiva: true }),
     log: store.log.length,
     cdpObserver: cdp?.status() || null,
     captureDiagnosticFile,
