@@ -215,6 +215,9 @@ function resumirAnidado(anidado) {
       assistantNo: mensaje.assistantNo,
       otra: Boolean(mensaje.otra),
       descartes: mensaje.descartes.slice(0, 12),
+      ocultoLevantado: mensaje.ocultoLevantado,
+      removes: mensaje.removes.slice(0, 6),
+      removesOtra: Boolean(mensaje.removesOtra),
     },
     rutaTexto: { ...anidado.rutaTexto },
     noJson: anidado.noJson,
@@ -327,7 +330,8 @@ export function createStreamFilter(opts = {}) {
     mensaje: { roles: [], tipos: [], estados: [], canales: [],
       metadataClaves: [], descartados: 0, sinTexto: 0, aceptados: 0,
       causas: { rol: 0, tipo: 0, fragmento: 0, oculto: 0, canal: 0, otra: 0 },
-      assistantSi: 0, assistantNo: 0, vistos: 0, otra: false, descartes: [] },
+      assistantSi: 0, assistantNo: 0, vistos: 0, otra: false, descartes: [],
+      ocultoLevantado: 0, removes: [], removesOtra: false },
     // Forma de `v` en los eventos que apuntan a una parte de texto, y cuántos
     // de ellos dieron segmento.
     rutaTexto: { string: 0, array: 0, object: 0, otro: 0, conSegmento: 0 },
@@ -608,6 +612,17 @@ export function createStreamFilter(opts = {}) {
       for (const firma of plan.descartes) {
         if (anidado.mensaje.descartes.length >= 12) break;
         anidado.mensaje.descartes.push(firma);
+      }
+    }
+    if (plan.ocultoLevantado) anidado.mensaje.ocultoLevantado += plan.ocultoLevantado;
+    if (Array.isArray(plan.removes) && plan.removes.length) {
+      for (const ruta of plan.removes) {
+        if (anidado.mensaje.removes.length >= 6) break;
+        if (anidado.mensaje.removes.includes(ruta)) continue;
+        // Ruta normalizada o, si no encaja, `s<longitud>`: el resto se marca.
+        if (/^\/message\/[A-Za-z_/]{1,56}$/.test(ruta) || /^s\d{1,6}$/.test(ruta)) {
+          anidado.mensaje.removes.push(ruta);
+        } else anidado.mensaje.removesOtra = true;
       }
     }
     if (plan.assistantSi) anidado.mensaje.assistantSi += plan.assistantSi;

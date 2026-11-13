@@ -927,6 +927,9 @@ function textoEstructura(e) {
       ` · ${textoEtiquetas(e.anidado.mensaje)}` +
       ` · causas ${textoCausas(e.anidado.mensaje.causas)}` +
       ` · rutaTexto ${textoRutaTexto(e.anidado.rutaTexto)}` +
+      ` · ocultoLevantado ${e.anidado.mensaje.ocultoLevantado}` +
+      ` · removes ${e.anidado.mensaje.removes.length ? e.anidado.mensaje.removes.join(',') : '0'}` +
+      `${e.anidado.mensaje.removesOtra ? '+s<n>' : ''}` +
       ` · ${textoDescartes(e.anidado.mensaje.descartes)}` : '');
   return texto.slice(0, 1100);
 }
@@ -1086,6 +1089,10 @@ function diagAnidado(a) {
       assistantNo: numero(m.assistantNo),
       otra: Boolean(m.otra),
       descartes: Array.isArray(m.descartes) ? m.descartes.slice(0, 12).map(diagDescarte) : [],
+      ocultoLevantado: numero(m.ocultoLevantado),
+      removes: Array.isArray(m.removes)
+        ? [...new Set(m.removes)].filter((r) => /^\/message\/[A-Za-z_/]{1,60}$/.test(r)).slice(0, 6) : [],
+      removesOtra: Boolean(m.removesOtra),
     },
     rutaTexto: {
       string: numero(a.rutaTexto?.string), array: numero(a.rutaTexto?.array),
