@@ -900,6 +900,60 @@ function diagMime(payload) {
   return String(payload?.diag?.mime || '').split(';')[0].trim().toLowerCase().slice(0, 40) || '-';
 }
 
+/** Nombres que se publican: minúsculas y `_`, igual que el filtro. Lo demás es `otros`. */
+const NOMBRE_DIAG = /^[a-z_]{1,24}$/;
+
+/**
+ * El resumen en una línea, ya acotada: conteos, nombres de evento y de clave y
+ * tipos de `v`. Sin valores de ningún campo.
+ */
+function textoEstructura(e) {
+  if (!e) return '-';
+  const texto = `eventos ${cuenta(e.eventos)} · con datos ${cuenta(e.conDatos)}` +
+    ` · json ${cuenta(e.jsonValido)}/${cuenta(e.jsonValido + e.jsonInvalido)}` +
+    ` · done ${cuenta(e.dones)} · portadores ${cuenta(e.portadores)}` +
+    ` · tipos ${e.tiposV || '-'} · claves ${e.claves || '-'}` +
+    ` · eventos ${e.nombresEvento || '-'} · otros ${cuenta(e.clavesOtros)}`;
+  return texto.slice(0, 400);
+}
+
+/**
+ * Copia defensiva del resumen estructural que ya calculó el filtro: no inventa
+ * campos, no añade valores y acota lo que llega. Por si un nombre raro se
+ * colara antes, aquí se tira y se suma a `otros`.
+ */
+function diagEstructura(payload) {
+  const e = payload?.estructura ?? payload?.diag?.estructura;
+  if (!e || typeof e !== 'object') return null;
+  const lista = (valor) => {
+    const todos = String(valor || '').split(',').filter(Boolean);
+    const nombres = todos.filter((nombre) => NOMBRE_DIAG.test(nombre));
+    return {
+      texto: nombres.slice(0, 12).join(',').slice(0, 200),
+      // Los que no pasan la lista blanca o no caben no se publican: se cuentan.
+      fuera: todos.length - Math.min(nombres.length, 12),
+    };
+  };
+  const numero = (valor) => (Number.isFinite(Number(valor)) ? Number(valor) : 0);
+  const eventos = lista(e.nombresEvento);
+  const claves = lista(e.claves);
+  const tipos = lista(e.tiposV);
+  return {
+    eventos: numero(e.eventos),
+    conDatos: numero(e.conDatos),
+    jsonValido: numero(e.jsonValido),
+    jsonInvalido: numero(e.jsonInvalido),
+    sinEvento: numero(e.sinEvento),
+    dones: numero(e.dones),
+    nombresEvento: eventos.texto,
+    claves: claves.texto,
+    clavesOtros: numero(e.clavesOtros) + claves.fuera,
+    tiposV: tipos.texto,
+    portadores: numero(e.portadores),
+    lineas: numero(e.lineas),
+  };
+}
+
 /**
  * ¿El rechazo de la lectura llegó sin motivo? Es la cancelación del consumidor:
  * el valor del rechazo es `undefined`, así que `String(error?.message || error)`
@@ -1026,6 +1080,8 @@ function registerIpc() {
     if (diagOn) {
       const chars = Number(payload?.chars) || Number(payload?.deliveredChars) || 0;
       const vacio = !String(payload?.text || '').trim();
+      // Se copia y acota una sola vez; si la capa no lo mandó, no se publica.
+      const estructura = diagEstructura(payload);
       noteDiagnostic({
         code: 'diag-stream-end', severity: 'info', title: `diag-stream-end: ${vacio ? 'sin texto' : 'con texto'}`,
         key: `diag-stream-end|${chars}|${vacio ? 1 : 0}|${payload?.outcome || '-'}|${payload?.messageId ? 1 : 0}`,
@@ -1034,12 +1090,14 @@ function registerIpc() {
         detail: `chars ${cuenta(chars)} · vacío ${siNo(vacio)} · source ${String(payload?.source || '-')}` +
           ` · outcome ${String(payload?.outcome || '-')} · messageId ${siNo(Boolean(payload?.messageId))}` +
           ` · mime ${diagMime(payload)} · formato ${String(payload?.diag?.formato || '-')}` +
-          ` · trozos ${cuenta(payload?.diag?.trozos)} · bytes ${cuenta(payload?.diag?.bytes)}`,
+          ` · trozos ${cuenta(payload?.diag?.trozos)} · bytes ${cuenta(payload?.diag?.bytes)}` +
+          ` · estructura ${textoEstructura(estructura)}`,
         meta: { chars, empty: vacio, source: String(payload?.source || '').slice(0, 40),
           outcome: String(payload?.outcome || '').slice(0, 40), hasMessageId: Boolean(payload?.messageId),
           host: hostOf(payload?.documentUrl || ''),
           mime: diagMime(payload), formato: String(payload?.diag?.formato || '').slice(0, 20),
-          chunks: Number(payload?.diag?.trozos) || 0, bytes: Number(payload?.diag?.bytes) || 0 },
+          chunks: Number(payload?.diag?.trozos) || 0, bytes: Number(payload?.diag?.bytes) || 0,
+          ...(estructura ? { estructura } : {}) },
       });
     }
     // Texto tardío del mismo turno: reutilizar la absorción/deduplicación que

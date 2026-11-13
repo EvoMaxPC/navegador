@@ -1000,8 +1000,11 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
             text: clipped ? text.slice(0, MAX_CAPTURE_CHARS) : text,
             dropped: String(info.dropped || '').slice(0, 600),
             // Números, no contenido: el proceso principal sólo los publica con
-            // NEXO_DIAG=1.
+            // NEXO_DIAG=1. `diag` mantiene su contrato de números y etiquetas;
+            // el resumen de formas —nombres de evento y de clave, tipos de `v`,
+            // cuántos portadores— va al lado, no dentro.
             diag: { ...diagnostico },
+            ...(info.estructura ? { estructura: info.estructura } : {}),
           });
         };
         const text = String(info.text || '');

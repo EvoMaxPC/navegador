@@ -35,6 +35,69 @@ import { createAdapter } from './streamAdapters.js';
 const encoder = new TextEncoder();
 
 /**
+ * Resumen **estructural** del stream para el diagnóstico: cuenta formas, no
+ * valores. Lo publica el proceso principal sólo con `NEXO_DIAG=1`
+ * (`diag-stream-end`), y sirve para saber qué llegó cuando el acumulador saca 0
+ * caracteres: cuántos eventos, cuántos JSON, qué nombres de evento y de clave,
+ * qué tipo tiene `v` y cuántos eventos el extractor consideró portadores.
+ *
+ * Nunca guarda contenido: los nombres pasan por `LISTA_BLANCA` y lo que no
+ * encaja se cuenta como `otros`; las listas quedan acotadas en variedad y en
+ * longitud total.
+ */
+const LISTA_BLANCA = /^[a-z_]{1,24}$/;
+const TOPE_NOMBRES = 12;
+const TOPE_NOMBRES_RENDER = 2000;
+const TOPE_TIPOS_V = 40;
+const TOPE_SALIDA = 400;
+
+function contarNombre(lista, crudo, contador) {
+  const nombre = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
+  if (LISTA_BLANCA.test(nombre)) {
+    if (!lista.includes(nombre)) {
+      if (lista.length >= TOPE_NOMBRES) return;
+      lista.push(nombre);
+    }
+    return;
+  }
+  // Sin nombre utilizable: sólo se cuenta, nunca se guarda.
+  if (contador) contador.otros += 1;
+}
+
+function tipoDeV(valor) {
+  if (valor === null) return 'null';
+  if (Array.isArray(valor)) return 'array';
+  return typeof valor;
+}
+
+function resumirEstructura(resumen) {
+  const recorta = (lista) => {
+    const caben = [];
+    let total = 0;
+    for (const nombre of lista) {
+      if (total + nombre.length + 1 > TOPE_NOMBRES_RENDER) break;
+      caben.push(nombre);
+      total += nombre.length + 1;
+    }
+    return caben.join(',');
+  };
+  return {
+    eventos: resumen.eventos,
+    conDatos: resumen.conDatos,
+    jsonValido: resumen.jsonValido,
+    jsonInvalido: resumen.jsonInvalido,
+    sinEvento: resumen.sinEvento,
+    dones: resumen.dones,
+    nombresEvento: recorta(resumen.nombresEvento),
+    claves: recorta(resumen.claves),
+    clavesOtros: resumen.clavesOtros,
+    tiposV: recorta(resumen.tiposV),
+    portadores: resumen.portadores,
+    lineas: resumen.lineas,
+  };
+}
+
+/**
  * @param {{
  *   format?: 'sse'|'ndjson'|'auto',
  *   settings?: object,
@@ -75,6 +138,35 @@ export function createStreamFilter(opts = {}) {
     if (next && (!outcome || outcome === 'completed')) outcome = next;
     if (chatgpt && (next === 'failed' || next === 'cancelled')) protocolEnded = true;
   };
+  // Resumen estructural del stream (`diag-stream-end`). Se calcula siempre
+  // —es un contador de formas, sin contenido y sin coste apreciable— porque el
+  // filtro no conoce `NEXO_DIAG`; el proceso principal decide si lo publica.
+  const estructura = {
+    eventos: 0, conDatos: 0, jsonValido: 0, jsonInvalido: 0, sinEvento: 0, dones: 0,
+    nombresEvento: [], claves: [], clavesOtros: 0, tiposV: [], portadores: 0, lineas: 0,
+  };
+  const contarEvento = (evt) => {
+    estructura.eventos += 1;
+    if (!evt.hasData) return false;
+    estructura.conDatos += 1;
+    if (!evt.event) estructura.sinEvento += 1;
+    else contarNombre(estructura.nombresEvento, evt.event, null);
+    return true;
+  };
+  /** Cuenta la forma de un JSON ya leído. `portador` = el extractor sacó texto. */
+  const contarJson = (json, portador) => {
+    estructura.jsonValido += 1;
+    if (portador) estructura.portadores += 1;
+    if (Array.isArray(json)) return;                    // sin claves de primer nivel
+    if (!json || typeof json !== 'object') return;
+    for (const clave of Object.keys(json)) contarNombre(estructura.claves, clave, estructura);
+    if ('v' in json) {
+      const tipo = tipoDeV(json.v);
+      if (estructura.tiposV.length < TOPE_TIPOS_V && !estructura.tiposV.includes(tipo)) {
+        if (LISTA_BLANCA.test(tipo)) estructura.tiposV.push(tipo);
+      }
+    }
+  };
   const pendingChunks = [];
   let plainText = '';
   let lineText = '';
@@ -89,11 +181,14 @@ export function createStreamFilter(opts = {}) {
     const lines = buffered.split('\n');
     buffered = final ? '' : lines.pop();
     for (const line of lines) {
+      if (!line.trim()) continue;
+      estructura.lineas += 1;
       const json = safeJson(line);
-      if (!json) continue;
+      if (!json) { estructura.jsonInvalido += 1; continue; }
       observeOutcome(json);
       const plan = adapter.read(json);
       const delta = (plan.segments || []).map((segment) => segment.newText).join('');
+      contarJson(json, Boolean(delta));
       lineText += delta;
       reportText(delta);
       if (chatgpt && json.type === 'end') protocolEnded = true;
@@ -120,6 +215,7 @@ export function createStreamFilter(opts = {}) {
       outcome: outcome === 'failed' || outcome === 'cancelled' ? outcome
         : (interrupted || verdict.stopped) ? 'unknown' : outcome || 'completed',
       interrupted, model: adapter.model?.() || '',
+      estructura: resumirEstructura(estructura),
     });
   };
   let stoppedReported = false;
@@ -190,9 +286,11 @@ export function createStreamFilter(opts = {}) {
 
   /** Procesa un evento ya parseado y devuelve lo que hay que escribir en el cable. */
   const handleEvent = (evt) => {
+    contarEvento(evt);
     // ChatGPT recibe el fin lógico sin esperar EOF; primero liberar lo retenido.
     // Los otros proveedores conservan su cierre diferido.
     if (evt.data === '[DONE]' || evt.data === 'DONE') {
+      estructura.dones += 1;
       if (chatgpt) {
         protocolEnded = true;
         outcome ||= 'completed';
@@ -210,7 +308,10 @@ export function createStreamFilter(opts = {}) {
       protocolEnded = true;
     }
     const json = safeJson(evt.data);
-    if (!json) return passthroughSSE(evt);
+    if (!json) {
+      estructura.jsonInvalido += 1;
+      return passthroughSSE(evt);
+    }
 
     observeOutcome(json);
     const plan = adapter.read(json);
@@ -218,6 +319,7 @@ export function createStreamFilter(opts = {}) {
     // puede finalizar antes de que llegue la respuesta visible.
     if (chatgpt && json.type === 'message_stream_complete') protocolEnded = true;
     const segments = plan.segments || [];
+    contarJson(json, segments.length > 0);
 
     if (!segments.length) {
       // Evento de control. Si cierra un bloque o el mensaje, el texto retenido
