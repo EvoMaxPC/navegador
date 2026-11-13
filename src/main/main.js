@@ -297,6 +297,21 @@ const diagnosticSeen = new Map();
 // deduplican; el resto del registro sí, para que un reintento en bucle no lo
 // llene.
 const AVISOS_DE_BLOQUEO = new Set(['egress-net-block', 'egress-injected-block']);
+/**
+ * Instrumentación de diagnóstico, apagada por omisión.
+ *
+ * `NEXO_DIAG=1` (mismo estilo que `NEXO_NETWATCH`) publica avisos `diag-*` con
+ * lo que hace falta para separar «el lector no leyó» de «el motor no contó»:
+ * motivo de salida de cada snapshot, estrategia del adaptador, conteos por rol y
+ * el tamaño de lo que llega por `stream-end`. Sin la variable no se calcula ni se
+ * emite nada, y el retorno de cada canal es idéntico.
+ *
+ * Nunca lleva contenido del chat, la URL completa ni identificadores: sólo host,
+ * conteos, nombres de estrategia y booleanos.
+ */
+const diagOn = process.env.NEXO_DIAG === '1';
+/** Estos avisos no se deduplican: cada uno describe un hecho distinto. */
+const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores']);
 function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
   if (!store) return null;
   // La clave agrupa lo que es el mismo aviso. Por omisión, código y título; el
@@ -304,10 +319,13 @@ function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key
   // distintos del mismo proveedor no se pisen.
   const key = explicitKey || `${code}|${title}`;
   const now = Date.now();
-  if (!AVISOS_DE_BLOQUEO.has(code) && now - (diagnosticSeen.get(key) || 0) < 30_000) return null;
-  diagnosticSeen.set(key, now);
-  if (diagnosticSeen.size > 200) {
-    for (const [k, ts] of diagnosticSeen) if (now - ts > 120_000) diagnosticSeen.delete(k);
+  const sinDedup = AVISOS_DE_BLOQUEO.has(code) || AVISOS_DIAG.has(code);
+  if (!sinDedup && now - (diagnosticSeen.get(key) || 0) < 30_000) return null;
+  if (!sinDedup) {
+    diagnosticSeen.set(key, now);
+    if (diagnosticSeen.size > 200) {
+      for (const [k, ts] of diagnosticSeen) if (now - ts > 120_000) diagnosticSeen.delete(k);
+    }
   }
   const entry = { kind: 'system', code, severity, title, detail, meta, ts: now };
   store.pushLog(entry);
@@ -320,6 +338,71 @@ function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key
 
 function broadcast(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+
+/** Un booleano en texto, para que `detail` se lea sin abrir el meta. */
+const siNo = (value) => (value ? 'sí' : 'no');
+/** Un conteo sin decimales ni notación científica. */
+const cuenta = (value) => String(Number(value) || 0);
+
+/**
+ * Estrategias del adaptador de ChatGPT, en el orden en que las prueba
+ * `selectChatGptMessages`. Se usan sólo para partir la firma `a+b+c` que publica
+ * el lector; un nombre desconocido se conserva tal cual.
+ */
+const DIAG_STRATEGIES = ['print-label', 'author-role', 'data-turn', 'conversation-turn', 'article'];
+function diagStrategy(value) {
+  if (typeof value !== 'string' || !value) return 'sin-campo';
+  if (value === 'none') return 'none';
+  return value.split('+').every((part) => DIAG_STRATEGIES.includes(part)) ? value : 'no-valida';
+}
+
+/**
+ * Aviso `diag-snapshot`: por qué salió (o no) cada snapshot de repetición, con
+ * la estrategia del adaptador y los conteos por rol. La clave lleva la firma
+ * completa para que dos snapshots distintos no se pisen y ninguno se descarte.
+ */
+function noteDiagSnapshot({ motivo, strategy, user, assistant, observed, dom }) {
+  if (!diagOn) return null;
+  const firma = [motivo, strategy, user, assistant, observed ? 1 : 0,
+    dom ? `${dom.ready ? 1 : 0}/${dom.inputTokens}/${dom.outputTokens}/${dom.partial ? 1 : 0}` : '-'].join('|');
+  const title = `diag-snapshot: ${motivo}`;
+  const partes = [`estrategia ${strategy}`, `user ${cuenta(user)}`, `assistant ${cuenta(assistant)}`,
+    `observeDomTokens ${siNo(observed)}`];
+  if (dom) partes.push(`ready ${siNo(dom.ready)}`, `dom ${cuenta(dom.inputTokens)}/${cuenta(dom.outputTokens)}`,
+    `partial ${siNo(dom.partial)}`);
+  return noteDiagnostic({
+    code: 'diag-snapshot', key: `diag-snapshot|${firma}`, severity: 'info', title,
+    detail: partes.join(' · '),
+    meta: { motivo, strategy, user: Number(user) || 0, assistant: Number(assistant) || 0,
+      observed: Boolean(observed), ready: dom ? Boolean(dom.ready) : null,
+      inputTokens: dom ? Number(dom.inputTokens) || 0 : null,
+      outputTokens: dom ? Number(dom.outputTokens) || 0 : null,
+      partial: dom ? Boolean(dom.partial) : null },
+  });
+}
+
+/**
+ * Aviso `diag-contadores`: lo que pinta la interfaz (DOM) frente a lo que midió
+ * el motor. Sólo números y booleanos: es lo que decide si un cero viene de una
+ * lectura vacía o de una fuente que no se está usando.
+ */
+function noteDiagContadores(stats) {
+  if (!diagOn) return null;
+  const dom = stats?.domTokens || {};
+  const firma = [dom.ready ? 1 : 0, dom.inputTokens, dom.outputTokens, dom.partial ? 1 : 0,
+    stats?.messages, stats?.responses, stats?.inputTokens, stats?.outputTokens].join('|');
+  return noteDiagnostic({
+    code: 'diag-contadores', key: `diag-contadores|${firma}`, severity: 'info',
+    title: `diag-contadores: dom ${dom.ready ? 'listo' : 'sin texto'}`,
+    detail: `dom ready ${siNo(dom.ready)} · dom ${cuenta(dom.inputTokens)}/${cuenta(dom.outputTokens)}` +
+      ` · parcial ${siNo(dom.partial)} · motor mensajes ${cuenta(stats?.messages)}` +
+      ` · respuestas ${cuenta(stats?.responses)} · motor ${cuenta(stats?.inputTokens)}/${cuenta(stats?.outputTokens)}`,
+    meta: { ready: Boolean(dom.ready), inputTokens: Number(dom.inputTokens) || 0,
+      outputTokens: Number(dom.outputTokens) || 0, partial: Boolean(dom.partial),
+      messages: Number(stats?.messages) || 0, responses: Number(stats?.responses) || 0,
+      engineInputTokens: Number(stats?.inputTokens) || 0, engineOutputTokens: Number(stats?.outputTokens) || 0 },
+  });
 }
 
 /**
@@ -634,7 +717,7 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
 }
 
 function statsSnapshot() {
-  return {
+  const stats = {
     ...engine.stats(),
     domTokens: domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel()),
     log: store.log.length,
@@ -645,6 +728,9 @@ function statsSnapshot() {
     capture: { ...capture },
     egress: egressGate ? egressGate.stats() : null,
   };
+  // Instrumentación: fuera de `NEXO_DIAG=1` la función es exactamente la de antes.
+  if (diagOn) noteDiagContadores(stats);
+  return stats;
 }
 
 function refreshGuestSettings() {
@@ -795,6 +881,21 @@ function registerIpc() {
   });
   ipcMain.handle('nexo:stream-end', (event, payload) => {
     payload = { ...payload, documentUrl: event.sender?.getURL?.() || '' };
+    // Diagnóstico: si el texto llegó vacío, cualquier «respuesta contada» de acá
+    // hacia abajo viene sin una sola palabra. Sin contenido: sólo números.
+    if (diagOn) {
+      const chars = Number(payload?.chars) || Number(payload?.deliveredChars) || 0;
+      const vacio = !String(payload?.text || '').trim();
+      noteDiagnostic({
+        code: 'diag-stream-end', severity: 'info', title: `diag-stream-end: ${vacio ? 'sin texto' : 'con texto'}`,
+        key: `diag-stream-end|${chars}|${vacio ? 1 : 0}|${payload?.outcome || '-'}|${payload?.messageId ? 1 : 0}`,
+        detail: `chars ${cuenta(chars)} · vacío ${siNo(vacio)} · source ${String(payload?.source || '-')}` +
+          ` · outcome ${String(payload?.outcome || '-')} · messageId ${siNo(Boolean(payload?.messageId))}`,
+        meta: { chars, empty: vacio, source: String(payload?.source || '').slice(0, 40),
+          outcome: String(payload?.outcome || '').slice(0, 40), hasMessageId: Boolean(payload?.messageId),
+          host: hostOf(payload?.documentUrl || '') },
+      });
+    }
     // Texto tardío del mismo turno: reutilizar la absorción/deduplicación que
     // ya atiende CDP, sin volver a finalizar la memoria del guardián.
     const result = payload?.source === 'dom-recovery' && payload?.site === 'chatgpt'
@@ -935,10 +1036,20 @@ function registerIpc() {
   ipcMain.handle('nexo:repetition:snapshot', (event, payload) => {
     const sender = event.sender;
     const href = sender?.getURL?.() || '';
-    if (sender?.getType?.() !== 'webview' || !isChatGptMemoryUrl(href) || payload?.href !== href ||
-      (event.senderFrame && sender.mainFrame && event.senderFrame !== sender.mainFrame)) return { ok: false };
+    // Motivo de salida, en una palabra: es lo que el diagnóstico publica. El
+    // retorno de cada rama no cambia; sólo se añade el aviso cuando hay diag.
+    // La estrategia se lee del payload como texto, sin validarlo con el
+    // snapshot: así «no lo trae» y «no reconoció nada» no se confunden.
+    const rechazo = (motivo) => {
+      noteDiagSnapshot({ motivo, strategy: diagStrategy(payload?.strategy),
+        user: 0, assistant: 0, observed: false, dom: null });
+      return { ok: false };
+    };
+    if (sender?.getType?.() !== 'webview') return rechazo('no-webview');
+    if (event.senderFrame && sender.mainFrame && event.senderFrame !== sender.mainFrame) return rechazo('otro-frame');
+    if (!isChatGptMemoryUrl(href) || payload?.href !== href) return rechazo('href-distinto');
     const snapshot = repetitionSnapshot(payload);
-    if (!snapshot) return { ok: false };
+    if (!snapshot) return rechazo('null-snapshot');
     // Consumir la vista literal ya validada: existe aun con EVO desactivada.
     const next = { ...snapshot, href, webContentsId: sender.id };
     const previous = repetitionSnapshots.get(sender.id);
@@ -947,6 +1058,17 @@ function registerIpc() {
     if (ownedMainFrame) domTokenSnapshots.set(sender.id, next);
     const domChanged = ownedMainFrame ? observeDomTokens(sender, next) : false;
     const progress = engine.onRenderedConversation(sender.id, next, previous);
+    if (diagOn) {
+      // Tras observar: lo que quedó en los contadores del DOM. Sólo se lee el
+      // proyecto del DOM (no el motor) y no cambia nada de lo que se publica.
+      const dom = ownedMainFrame
+        ? domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel())
+        : null;
+      const porRol = (role) => snapshot.turns.filter((turn) => turn.role === role).length;
+      const motivo = !snapshot.turns.length ? 'sin-turnos' : ownedMainFrame ? 'ok' : 'no-owned';
+      noteDiagSnapshot({ motivo, strategy: diagStrategy(payload?.strategy),
+        user: porRol('user'), assistant: porRol('assistant'), observed: ownedMainFrame, dom });
+    }
     publishRepetition(next);
     if (domChanged || progress?.updated) broadcast('nexo:stats-changed', statsSnapshot());
     return { ok: true };
@@ -2083,6 +2205,18 @@ app.whenReady().then(async () => {
     } · contadores en la sesión.`,
     meta: { version: app.getVersion(), netwatch: process.env.NEXO_NETWATCH !== '0', cdp: process.env.NEXO_CDP !== '0' },
   });
+  // Instrumentación optativa: una sola línea que dice que está encendida. Sin
+  // `NEXO_DIAG=1` ni el aviso ni el coste existen.
+  if (diagOn) {
+    noteDiagnostic({
+      code: 'diag-inicio',
+      key: `diag-inicio|${app.getVersion()}`,
+      severity: 'info',
+      title: 'diag-inicio: instrumentación encendida',
+      detail: 'NEXO_DIAG=1 · se publican diag-snapshot, diag-stream-end y diag-contadores. Sin contenido del chat.',
+      meta: { version: app.getVersion() },
+    });
+  }
   promptStore = new PromptStore({ store });
   advancedBrowser = installAdvancedBrowser({getProfile:()=>profile,downloadItems,broadcast,
     onCaptureEvidence:(owner,contents,params)=>workDossier?.captureSelection(owner,contents,params),
