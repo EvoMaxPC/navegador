@@ -192,13 +192,21 @@ function chatgptChannelAdapter() {
   function read(json) {
     const segments = [];
     let terminal = null;
-    // Diagnóstico: cuántos mensajes se descartaron por el filtro de
-    // rol/tipo/fragmento/oculto y cuántas veces `assistantText` quedó en false.
-    // Son conteos; no cambian ninguna decisión.
+    // Diagnóstico: por qué se descarta un mensaje, con un cubo por causa, más
+    // los que se aceptan. Son conteos; no cambian ninguna decisión.
+    // `porEvento` y `segmentos` describen solamente los eventos cuya ruta es
+    // de texto (`/message/content/parts/N`).
     let descartados = 0;
     let sinTexto = 0;
+    let aceptados = 0;
+    let assistantSi = 0;
+    let assistantNo = 0;
+    const causas = { rol: 0, tipo: 0, fragmento: 0, oculto: 0, canal: 0, otra: 0 };
+    const porEvento = { string: 0, array: 0, object: 0, otro: 0 };
+    let segmentos = 0;
     const handled = isPlainObject(json) && Boolean(json.type || json.message || 'v' in json || 'p' in json || 'o' in json);
-    const result = () => ({ segments, terminal, handled, model, descartados, sinTexto });
+    const result = () => ({ segments, terminal, handled, model, descartados, sinTexto,
+      aceptados, assistantSi, assistantNo, causas, porEvento, segmentos });
     if (!isPlainObject(json)) return result();
 
     // Canal sin cuenta: no lleva message.content, sino markdown con revisiones.
@@ -230,7 +238,21 @@ function chatgptChannelAdapter() {
         (!message.channel || message.channel === 'final') &&
         !meta.is_message_fragment && !meta.is_visually_hidden_from_conversation;
       state.pathIsText = false;
-      if (!state.assistantText) { descartados += 1; sinTexto += 1; return; }
+      if (!state.assistantText) {
+        descartados += 1;
+        sinTexto += 1;
+        // Un solo cubo por mensaje: se informa la primera causa que falla, en
+        // el mismo orden en que las evalúa la condición de arriba.
+        if (role !== undefined && role !== 'assistant') causas.rol += 1;
+        else if (type && !TEXT_CONTENT_TYPES.has(type)) causas.tipo += 1;
+        else if (message.channel && message.channel !== 'final') causas.canal += 1;
+        else if (message.recipient && message.recipient !== 'all') causas.otra += 1;
+        else if (meta.is_message_fragment) causas.fragmento += 1;
+        else if (meta.is_visually_hidden_from_conversation) causas.oculto += 1;
+        else causas.otra += 1;
+        return;
+      }
+      aceptados += 1;
       const parts = message.content?.parts;
       if (Array.isArray(parts)) parts.forEach((part, i) => {
         if (typeof part !== 'string') return;
@@ -280,7 +302,8 @@ function chatgptChannelAdapter() {
       state.pathIsText = PARTS_PATH.test(target) && state.assistantText !== false;
       if (target === '/message/author/role') {
         state.assistantText = value === 'assistant';
-        if (!state.assistantText) sinTexto += 1;
+        if (state.assistantText) assistantSi += 1;
+        else { assistantNo += 1; sinTexto += 1; }
         return;
       }
       if (target === '/message/status' && CHATGPT_TERMINAL_STATUS.has(value)) terminal = 'message';
@@ -296,7 +319,20 @@ function chatgptChannelAdapter() {
     }
     if (typeof json.p === 'string') pointer = json.p;
     if (typeof json.o === 'string') operation = json.o;
-    if ('v' in json) readOperation(json, 'v', pointer, operation);
+    if ('v' in json) {
+      const antes = segments.length;
+      readOperation(json, 'v', pointer, operation);
+      // Sólo cuando la ruta del evento apunta a una parte de texto: qué forma
+      // traía `v` y si de ahí salió texto. Es el dato que separa «llegó en una
+      // forma que no entiendo» de «llegó bien pero el mensaje estaba oculto».
+      if (PARTS_PATH.test(String(json.p || ''))) {
+        if (typeof json.v === 'string') porEvento.string += 1;
+        else if (Array.isArray(json.v)) porEvento.array += 1;
+        else if (isPlainObject(json.v)) porEvento.object += 1;
+        else porEvento.otro += 1;
+        if (segments.length > antes) segmentos += 1;
+      }
+    }
     return result();
   }
 
