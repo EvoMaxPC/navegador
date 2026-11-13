@@ -312,6 +312,14 @@ const AVISOS_DE_BLOQUEO = new Set(['egress-block', 'egress-error', 'egress-net-b
  * son conteos, nombres de estrategia y booleanos.
  */
 const diagOn = process.env.NEXO_DIAG === '1';
+/**
+ * Margen para dar por buena una ausencia de respuestas al leer el historial.
+ * Mientras el DOM se pinta, dos lecturas seguidas separadas por menos de esto
+ * siguen siendo la misma carga: no se afirma nada hasta que el desenlace se
+ * repite. Por pestaña, y sólo del último desenlace (no se guarda contenido).
+ */
+const ESPERA_LECTURA_ESTABLE_MS = 1500;
+const lecturasDeConversacion = new Map();
 /** Estos avisos no se deduplican: cada uno describe un hecho distinto. */
 const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje', 'diag-cancelacion']);
 function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
@@ -1515,6 +1523,23 @@ function registerIpc() {
     const assistantTurns = payload.turns.filter((turn) => turn?.role === 'assistant').length;
     const assistantChars = payload.turns.reduce((sum, turn) =>
       sum + (turn?.role === 'assistant' ? String(turn.content || '').length : 0), 0);
+    // «No hay respuestas» sólo si se mantiene: mientras el DOM se pinta, una
+    // lectura puede ver los mensajes del usuario y ninguna respuesta todavía.
+    // Se exige el mismo desenlace dos veces seguidas, separadas por este
+    // margen; la primera vez no se afirma nada y la lectura no se pierde (el
+    // guardado de arriba ya ocurrió). Con una lectura a medias y otra completa
+    // (lo normal al cargar el historial) el aviso falso no llega a salir, y su
+    // deduplicación de 30 s ya no puede tapar la lectura buena.
+    const sinRespuestas = assistantTurns === 0;
+    const anterior = lecturasDeConversacion.get(event.sender.id);
+    lecturasDeConversacion.set(event.sender.id, { sinRespuestas, at: Date.now() });
+    const estable = Boolean(anterior) && anterior.sinRespuestas === sinRespuestas &&
+      Date.now() - anterior.at >= ESPERA_LECTURA_ESTABLE_MS;
+    if (!assistantTurns && !estable) {
+      // Ni aviso ni traza: la lectura aún no dice nada concluyente.
+      if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());
+      return { ...result, observed: false, assistantCaptures: undefined };
+    }
     noteDiagnostic({
       code: 'chatgpt-conversation-read',
       key: 'chatgpt-conversation-read',
