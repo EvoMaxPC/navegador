@@ -723,6 +723,19 @@ function registerIpc() {
         meta: { host: hostOf(String(payload?.url || '')) || '', types: result.redacted.types, count: result.redacted.count },
       });
     }
+    // El fail-safe del guardián no pudo limpiar el texto inyectado: el envío se
+    // retiene entero (la capa lanza el AbortError). Sin este aviso, el usuario
+    // sólo vería que su mensaje no sale.
+    if (result?.blocked === 'redaccion-inyectada') {
+      noteDiagnostic({
+        code: 'egress-injected-block',
+        severity: 'warn',
+        key: `egress-injected-block|${hostOf(String(payload?.url || '')) || 'sitio'}`,
+        title: 'NEXO retuvo un envío: no pudo ocultar un dato sensible de tu memoria',
+        detail: 'El dato sigue en tu memoria; el envío no salió. Revisá las memorias del proyecto antes de reintentar.',
+        meta: { host: hostOf(String(payload?.url || '')) || '', site: payload?.site || null, blocked: 'redaccion-inyectada' },
+      });
+    }
     // Lectura paralela, sin alterar el envío ni los motores de EVO.
     if(isUnderstandingSource(event)&&isChatGptMemoryUrl(event.sender.getURL())&&!isAuthRequest(String(payload?.url||'')))conversationOptimizer?.observePrompt(event.sender,payload?.prompt,payload?.model);
     // La capa de la página sólo pide mediación cuando ya reconoció una petición
