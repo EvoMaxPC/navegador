@@ -111,3 +111,13 @@
 .follow-up-copy small { color: #93b6d5; font-size: 10.5px; }
 .follow-up-bar .icon-label { flex: none; font-size: 10.5px; }
 @media (max-width: 720px) { .follow-up-copy small { display: none; } }
+
+/* Un envío retenido: se ve en la franja de la shell, nunca debajo del webview. */
+.egress-bar { display: flex; align-items: center; gap: 10px; margin: 4px 12px 6px; padding: 7px 10px; border: 1px solid #8f6a2b; border-radius: 9px; background: linear-gradient(100deg, #2a1f08, #1b1405); color: #ffe9c2; font-size: 11.5px; }
+.egress-bar[hidden] { display: none; }
+.egress-mark { color: #f5b544; font-size: 13px; }
+.egress-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.egress-copy strong { font-size: 12px; }
+.egress-copy small { color: #d3ab72; font-size: 10.5px; }
+.egress-bar .icon-label { flex: none; font-size: 10.5px; }
+@media (max-width: 720px) { .egress-copy small { display: none; } }

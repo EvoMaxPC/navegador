@@ -292,6 +292,11 @@ async function servirArchivo(request) {
  * no debe llenar el registro.
  */
 const diagnosticSeen = new Map();
+// Un envío retenido es un hecho, no un estado: si el usuario vuelve a intentar
+// y lo retiene otra vez, tiene que verlo otra vez. Estos códigos no se
+// deduplican; el resto del registro sí, para que un reintento en bucle no lo
+// llene.
+const AVISOS_DE_BLOQUEO = new Set(['egress-net-block', 'egress-injected-block']);
 function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
   if (!store) return null;
   // La clave agrupa lo que es el mismo aviso. Por omisión, código y título; el
@@ -299,7 +304,7 @@ function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key
   // distintos del mismo proveedor no se pisen.
   const key = explicitKey || `${code}|${title}`;
   const now = Date.now();
-  if (now - (diagnosticSeen.get(key) || 0) < 30_000) return null;
+  if (!AVISOS_DE_BLOQUEO.has(code) && now - (diagnosticSeen.get(key) || 0) < 30_000) return null;
   diagnosticSeen.set(key, now);
   if (diagnosticSeen.size > 200) {
     for (const [k, ts] of diagnosticSeen) if (now - ts > 120_000) diagnosticSeen.delete(k);

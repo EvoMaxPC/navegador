@@ -856,6 +856,41 @@ function pushIntervention(entry) {
   }
 }
 
+// Un envío retenido es lo único que el usuario no puede deducir de la página:
+// el mensaje no sale y no hay respuesta que lo explique. Se avisa en la franja
+// de la shell, que nunca queda debajo del webview.
+const AVISOS_RETENIDOS = new Set(['egress-net-block', 'egress-injected-block']);
+const EGRESS_BAR_MS = 20_000;
+let egressTimer = null;
+
+function markActivityUnread() {
+  const dot = document.querySelector('[data-activity-dot]');
+  if (dot) dot.hidden = false;
+}
+
+function clearActivityUnread() {
+  const dot = document.querySelector('[data-activity-dot]');
+  if (dot) dot.hidden = true;
+}
+
+function dismissEgressNotice() {
+  clearTimeout(egressTimer);
+  egressTimer = null;
+  const bar = document.getElementById('egressBar');
+  if (bar) bar.hidden = true;
+}
+
+function showEgressNotice() {
+  const bar = document.getElementById('egressBar');
+  if (!bar) return;
+  // Un bloqueo reemplaza al anterior: la barra es una sola y no se apila.
+  bar.hidden = false;
+  clearTimeout(egressTimer);
+  egressTimer = setTimeout(dismissEgressNotice, EGRESS_BAR_MS);
+}
+
+document.getElementById('egressDismiss')?.addEventListener('click', dismissEgressNotice);
+
 /** Formatea un número con separador de miles local (1.204, no 1204). */
 function num(value) {
   return Number(value || 0).toLocaleString('es-AR');
@@ -1536,6 +1571,7 @@ panelTabs.forEach((tab, index) => {
     browserTools?.refreshLayout();
     document.querySelectorAll('.rail-item[data-open-panel]').forEach((item) => item.classList.toggle('selected', item.dataset.openPanel === tab.dataset.panel));
     document.querySelector('[data-workspace-home]').classList.remove('selected');
+    if (tab.dataset.panel === 'activity') clearActivityUnread();
     refreshActivePanel();
   });
   tab.addEventListener('keydown', (event) => {
@@ -1565,6 +1601,11 @@ nexo.on('nexo:event', (message) => {
   if (message?.type === 'intervention' && message.payload) {
     pushIntervention(message.payload);
     refreshStats();
+    // Sólo los bloqueos: un cierre de turno o una redacción no interrumpen.
+    if (AVISOS_RETENIDOS.has(message.payload.code)) {
+      if (!isPanelActive('activity')) markActivityUnread();
+      showEgressNotice();
+    }
   }
 });
 
