@@ -22,6 +22,22 @@ function huellaDe(role, content) {
   return `${role}:${texto.length}:${(a >>> 0).toString(36)}${(b >>> 0).toString(36)}`;
 }
 
+/**
+ * Ruta provisional: `/c/local-chatgpt:<uuid>`.
+ *
+ * ChatGPT abre el chat con esa identidad mientras la URL real no existe y
+ * después la cambia a `/c/<id real>` **sin recargar**: los turnos siguen en
+ * pantalla y son los mismos. Para el contador no es «otro chat», así que se
+ * trata como la anónima: identidad provisional, migrable a la real.
+ *
+ * El prefijo se acepta codificado (`%3A`) o con los dos puntos literales, porque
+ * es lo que puede entregar Chromium. Medido una sola vez, en un chat: si el
+ * sitio dejara de usarlo, la ruta simplemente vuelve a ser un id normal.
+ */
+const PROVISIONAL_RE = /^\/c\/local-chatgpt(%3A|:)/i;
+/** ¿La conversación tiene identidad provisional? (nunca la anónima `#tab-`) */
+const esProvisional = (conversation) => PROVISIONAL_RE.test(new URL(conversation, 'https://x').pathname);
+
 /** Suma del texto literal del DOM con EXACTAMENTE la calculadora manual.
  * Los IDs separan mensajes: repetir un texto no lo deduplica. Un parcial con
  * el mismo ID reemplaza su aporte (no vuelve a sumarse entero).
@@ -93,11 +109,16 @@ export class DomTokenTotals {
     // El primer envío puede empezar en / y adquirir /c/id al guardarse.
     // Mover las identidades ya leídas, no sumar una copia de esos mensajes.
     //
-    // Caso 1: la identidad anterior era la ANÓNIMA de esta pestaña y el DOM trae
-    // algún turno que ya estaba registrado en ella. Se reconoce de dos formas:
-    // por `id` (lo de siempre) o por huella, que cubre el caso en que el sitio
-    // renumera los ids al guardar el chat (medido: visible-1 → visible-2).
-    const migraDesde = previousTab?.anonymous && previousTab.conversation !== conversation &&
+    // Caso 1: la identidad anterior NO era el nombre del chat y pasar a
+    // `/c/<id real>` es el mismo chat guardándose. Dos orígenes:
+    //  - `anonima`: la `/` de esta pestaña. Se reconoce por `id` (lo de siempre)
+    //    o por huella, que cubre el sitio renumerando los ids (visible-1 → visible-2).
+    //  - `provisional`: `/c/local-chatgpt:<uuid>` → `/c/<id real>`, sin recargar.
+    //    Sólo esa transición: provisional → provisional, o provisional → otra
+    //    ruta anónima, no migran.
+    const migrationOrigin = (previousTab?.anonymous ? 'anonima'
+      : named && esProvisional(previousTab?.conversation ?? '') ? 'provisional' : null);
+    const migraDesde = Boolean(migrationOrigin) && previousTab.conversation !== conversation &&
       turns.some((turn) => project.records.has(`${previousTab.conversation}\0${turn.role}\0${turn.id}`) ||
         (previousTab.huellas?.has(huellaDe(turn.role, turn.content)) ?? false))
       ? previousTab.conversation : null;
@@ -242,7 +263,11 @@ export class DomTokenTotals {
    */
   resumenActivo(projectId = 'default') {
     const project = this.project(projectId);
-    return { ruta: project.activaPath ?? null,
+    // La ruta provisional lleva el uuid dentro del pathname: se publica la ruta
+    // enmascarada, nunca el identificador. El resto de rutas, tal cual.
+    const ruta = project.activaPath == null ? null
+      : PROVISIONAL_RE.test(project.activaPath) ? '/c/<provisional>' : project.activaPath;
+    return { ruta,
       obsoletos: project.ultima?.obsoletos ?? 0, migrados: project.ultima?.migrados ?? 0 };
   }
   /** Cuántas claves (`conversation\0role\0id`) hay guardadas: sólo número. */
