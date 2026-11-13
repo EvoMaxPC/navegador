@@ -36,6 +36,13 @@ const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
+  // `nexo:settings:get` distingue la shell del resto: este test la usa como la
+  // usa la interfaz —leer el perfil y reenviar el parche completo—, así que el
+  // emisor es la ventana principal, no un identificador suelto.
+  if (channel === 'nexo:settings:get') {
+    const sender = journal.windows[0].webContents;
+    return handler({ sender, senderFrame: sender.mainFrame }, payload);
+  }
   return handler({ sender: { id: senderId } }, payload);
 }
 

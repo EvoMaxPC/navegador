@@ -7,6 +7,7 @@ import { PromptStore } from './promptStore.js';
 import { MAX_PROMPTS, PROMPT_VARIABLES } from '../core/prompts.js';
 import { repetitionSnapshot } from '../core/conversationRepetition.js';
 import { isPublicAssetPath } from './internalAssets.js';
+import { configForTab, settingsForTab } from './tabConfig.js';
 import { createCaptureDiagnostic } from './captureDiagnostic.js';
 import { isChatGptMemoryUrl } from '../core/chatgptConversation.js';
 /**
@@ -683,7 +684,10 @@ function isShellRequest(event) {
 function registerIpc() {
   ipcMain.handle('nexo:tokenizer:models', event => isShellRequest(event) ? tokenizerModels() : { ok: false, error: 'No autorizado.' });
   ipcMain.handle('nexo:tokenizer:count', (event, payload) => isShellRequest(event) ? calculateTokenizer(payload) : { ok: false, error: 'No autorizado.' });
-  ipcMain.handle('nexo:config', (_event, payload = {}) => engine.configFor(payload.host || ''));
+  // La configuración que sale de acá la consume una pestaña: se recorta a lo que
+  // la capa lee de verdad (`tabConfig.js`). El recorte va en el handler, no en
+  // `engine.configFor`: el proceso principal —guardián y motor— la usa entera.
+  ipcMain.handle('nexo:config', (_event, payload = {}) => configForTab(engine.configFor(payload.host || '')));
 
   // La misma configuración, pero síncrona: el preload de cada pestaña la
   // necesita ANTES de que la página registre su propio `fetch`. Es una llamada
@@ -691,7 +695,7 @@ function registerIpc() {
   ipcMain.on('nexo:config-sync', (event, payload = {}) => {
     const host = typeof payload?.host === 'string' ? payload.host : '';
     try {
-      event.returnValue = engine ? engine.configFor(host) : null;
+      event.returnValue = engine ? configForTab(engine.configFor(host)) : null;
     } catch (error) {
       // Un `sendSync` que se quede sin `returnValue` bloquea el renderer antes
       // de que la página exista: la pestaña se queda en blanco. Nunca se sale
@@ -841,7 +845,13 @@ function registerIpc() {
     return promptStore.render(payload.id, payload.values || {});
   });
 
-  ipcMain.handle('nexo:settings:get', () => store.settings);
+  // La shell lo usa completo para pintar Ajustes y para reenviar un parche. Una
+  // pestaña lo pide para un solo dato —`receiving.autoContinue`
+  // (preload/bridge.cjs:191-192)—: se le entrega recortado, sin atajos ni
+  // preferencias de privacidad.
+  ipcMain.handle('nexo:settings:get', (event) => (
+    isShellRequest(event) ? store.settings : settingsForTab(store.settings)
+  ));
   ipcMain.handle('nexo:storage:status', (event) => {
     if (!isShellRequest(event)) return { state: 'unauthorized' };
     return { ...store.loadStatus, error: store.lastError || store.loadError?.message || null };
