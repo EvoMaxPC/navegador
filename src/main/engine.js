@@ -17,6 +17,8 @@ import { countOutputTokens, inputTokenMeasurement } from './tokens.js';
 import { VisibleOutputTokens } from './visibleOutputTokens.js';
 import { TURN_OUTCOMES, turnOutcome } from '../core/turnOutcome.js';
 import { looksEncrypted } from '../memory/item.js';
+import { normalizeEgress } from '../core/egressConfig.js';
+import { redactInjected } from './injectedGuard.js';
 
 /** Cómo se llama cada canal en los textos que ve el usuario. */
 /**
@@ -260,17 +262,28 @@ export class Engine {
     guard.setSettings(settingsForHost(this.store.settings, host));
 
     const report = guard.preparePrompt(prompt);
+    // El guardián de la capa miró `prompt`, antes de que existieran los bloques;
+    // el respaldo de red frena el cuerpo entero y no puede dialogar. Los
+    // críticos que entran por la memoria se ocultan acá, con el perfil del host.
+    const inyectado = redactInjected({
+      original: prompt,
+      mediated: report.enhanced,
+      mode: normalizeEgress(settingsForHost(this.store.settings, host).egress).mode,
+    });
+    const mediated = inyectado.text;
     // Intervención real: el texto que viaja al modelo no es el que escribió el
     // usuario. Sin cambio, no hay intervención que contar.
     if (report.changed) this.counters.interventions += 1;
     this.#publish(guard);
+    if (mediated === null) return { text: null, blocked: 'redaccion-inyectada', lang: report.lang };
     return {
-      text: report.enhanced,
+      text: mediated,
       changed: report.changed,
       lang: report.lang,
       stats: report.stats,
       blocks: report.blocks.map((b) => ({ id: b.id, label: b.label })),
       findings: report.findings.map((f) => ({ id: f.id, level: f.level, title: f.title })),
+      redacted: inyectado.redacted,
       context: report.context
         ? {
             engine: report.context.engine || 'fold',

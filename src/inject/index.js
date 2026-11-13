@@ -765,6 +765,9 @@ async function continuarPlan({ input, init, parsed, prompt, url, canMediate, can
     input: desdeRequest ? new Request(input, { body: JSON.stringify(parsed) }) : input,
     init: desdeRequest ? init : { ...init, body: JSON.stringify(parsed) },
   };
+  // El proceso principal retuvo el texto mediado (no pudo ocultar un crítico
+  // de la memoria): se frena como un bloqueo, no se envía el original.
+  if (report?.blocked) return { chat: true, send: true, blocked: true, promptText: outbound, url };
   if (!report?.text) return { ...base, plan: planBase };
 
   // El texto no cambió: no hay nada que reescribir, pero el envío se registra y

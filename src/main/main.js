@@ -710,6 +710,19 @@ function registerIpc() {
   });
   ipcMain.handle('nexo:prepare', (event, payload) => {
     const result = engine.prepare(event.sender.id, payload);
+    // El motor ocultó críticos que venían en el texto inyectado (memoria EVO,
+    // protocolo) antes de que salieran. Se avisa acá, que es donde el aviso se
+    // registra y llega al panel; `engine.prepare` no tiene registro propio.
+    if (result?.redacted?.count) {
+      noteDiagnostic({
+        code: 'egress-injected-redact',
+        severity: 'info',
+        key: `egress-injected-redact|${hostOf(String(payload?.url || '')) || 'sitio'}`,
+        title: 'NEXO ocultó un dato sensible de tu memoria antes de enviar',
+        detail: `Tipos: ${result.redacted.types.map((t) => `${t}×1`).join(', ')}. El dato sigue en tu memoria; sólo no viaja.`,
+        meta: { host: hostOf(String(payload?.url || '')) || '', types: result.redacted.types, count: result.redacted.count },
+      });
+    }
     // Lectura paralela, sin alterar el envío ni los motores de EVO.
     if(isUnderstandingSource(event)&&isChatGptMemoryUrl(event.sender.getURL())&&!isAuthRequest(String(payload?.url||'')))conversationOptimizer?.observePrompt(event.sender,payload?.prompt,payload?.model);
     // La capa de la página sólo pide mediación cuando ya reconoció una petición
