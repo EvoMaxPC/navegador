@@ -51,6 +51,45 @@ const TOPE_NOMBRES_RENDER = 2000;
 const TOPE_TIPOS_V = 40;
 const TOPE_SALIDA = 400;
 
+/** Rutas `p` normalizadas: dígitos a `N`, sin nada más que esto. */
+const RUTA_DIAG = /^\/[a-z_/N]{1,48}$/;
+/** Valores de `o`: sólo letras y `_`, como los nombres. */
+const OPERACION_DIAG = /^[a-z_]{1,16}$/;
+const TOPE_ANIDADO = 12;
+
+/** Normaliza una ruta `p`: los índices numéricos pasan a `N`. */
+function normalizarRuta(crudo) {
+  const ruta = String(crudo === null || crudo === undefined ? '' : crudo).replace(/\d+/g, 'N');
+  return RUTA_DIAG.test(ruta) ? ruta.slice(0, 48) : 'otra';
+}
+
+/** Un valor de `o` publicable, o `otra`. */
+function normalizarOperacion(crudo) {
+  const valor = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
+  return OPERACION_DIAG.test(valor) ? valor : 'otra';
+}
+
+/**
+ * Clasifica un evento que no es JSON **sin guardar nada de su contenido**: sólo
+ * longitud, clase del primer carácter, si era el último y si equivale a `[DONE]`
+ * con espacios o CRLF.
+ */
+function clasificarNoJson(data, esUltimo) {
+  const crudo = String(data === null || data === undefined ? '' : data);
+  const limpio = crudo.trim();
+  const primero = limpio[0] || '';
+  const clase = !limpio ? 'vacio'
+    : /[a-zA-Z]/.test(primero) ? 'letra'
+      : /\d/.test(primero) ? 'digito' : 'simbolo';
+  return {
+    longitud: limpio.length,
+    clase,
+    ultimo: Boolean(esUltimo),
+    esDone: /^\[\s*DONE\s*\]$/i.test(limpio.replace(/\r\n/g, '\n')),
+    conCrlf: /\r/.test(crudo),
+  };
+}
+
 function contarNombre(lista, crudo, contador) {
   const nombre = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
   if (LISTA_BLANCA.test(nombre)) {
@@ -68,6 +107,38 @@ function tipoDeV(valor) {
   if (valor === null) return 'null';
   if (Array.isArray(valor)) return 'array';
   return typeof valor;
+}
+
+/**
+ * Cierra el nivel 2: listas renderizadas y acotadas, y banderas de "hubo algo
+ * fuera de la lista blanca". Sin un solo valor de texto.
+ */
+function resumirAnidado(anidado) {
+  const lista = (valores) => valores.slice(0, TOPE_ANIDADO).join(',').slice(0, 300);
+  const mensaje = anidado.mensaje;
+  return {
+    vArray: anidado.vArray,
+    elementos: anidado.elementos,
+    clavesElemento: lista(anidado.clavesElemento),
+    tiposElementoV: lista(anidado.tiposElementoV),
+    opsEvento: lista(anidado.opsEvento),
+    opsElemento: lista(anidado.opsElemento),
+    rutasParche: lista(anidado.rutasParche),
+    rutasEvento: lista(anidado.rutasEvento),
+    vObjetoClaves: lista(anidado.vObjetoClaves),
+    fueraDeLista: Boolean(anidado.opOtra || anidado.rutasOtra || anidado.rutasEventoOtra || anidado.vObjetoOtra),
+    mensaje: {
+      roles: lista(mensaje.roles),
+      tipos: lista(mensaje.tipos),
+      estados: lista(mensaje.estados),
+      canales: lista(mensaje.canales),
+      metadataClaves: lista(mensaje.metadataClaves),
+      descartados: mensaje.descartados,
+      sinTexto: mensaje.sinTexto,
+      otra: Boolean(mensaje.otra),
+    },
+    noJson: anidado.noJson,
+  };
 }
 
 function resumirEstructura(resumen) {
@@ -145,6 +216,21 @@ export function createStreamFilter(opts = {}) {
     eventos: 0, conDatos: 0, jsonValido: 0, jsonInvalido: 0, sinEvento: 0, dones: 0,
     nombresEvento: [], claves: [], clavesOtros: 0, tiposV: [], portadores: 0, lineas: 0,
   };
+  // Nivel 2: la forma de lo que va **dentro** de `v` (arrays de parches,
+  // mensajes anidados) y los descartes del adaptador. Sólo nombres, rutas
+  // normalizadas y conteos; nunca valores de texto.
+  const anidado = {
+    vArray: 0, elementos: 0, clavesElemento: [], tiposElementoV: [],
+    opsEvento: [], opsElemento: [], opOtra: false,
+    rutasParche: [], rutasOtra: false, rutasEvento: [], rutasEventoOtra: false,
+    vObjetoClaves: [], vObjetoOtra: false,
+    mensaje: { roles: [], tipos: [], estados: [], canales: [],
+      metadataClaves: [], descartados: 0, sinTexto: 0, otra: false },
+    noJson: null,
+  };
+  const empujar = (lista, valor, tope = TOPE_ANIDADO) => {
+    if (lista.length < tope && !lista.includes(valor)) lista.push(valor);
+  };
   const contarEvento = (evt) => {
     estructura.eventos += 1;
     if (!evt.hasData) return false;
@@ -164,6 +250,83 @@ export function createStreamFilter(opts = {}) {
       const tipo = tipoDeV(json.v);
       if (estructura.tiposV.length < TOPE_TIPOS_V && !estructura.tiposV.includes(tipo)) {
         if (LISTA_BLANCA.test(tipo)) estructura.tiposV.push(tipo);
+      }
+      contarAnidado(json);
+    }
+  };
+
+  /**
+   * Nivel 2: la forma de `v` cuando es array u objeto. Mira nombres de clave,
+   * tipos, rutas normalizadas y etiquetas del mensaje; **nunca** un valor de
+   * texto.
+   */
+  const contarAnidado = (json) => {
+    if (typeof json?.p === 'string') {
+      const ruta = normalizarRuta(json.p);
+      if (ruta === 'otra') anidado.rutasEventoOtra = true;
+      else empujar(anidado.rutasEvento, ruta);
+    }
+    if (typeof json?.o === 'string') {
+      const op = normalizarOperacion(json.o);
+      if (op === 'otra') anidado.opOtra = true;
+      else empujar(anidado.opsEvento, op);
+    }
+    const valor = json?.v;
+    if (Array.isArray(valor)) {
+      anidado.vArray += 1;
+      anidado.elementos += valor.length;
+      for (const elemento of valor.slice(0, 256)) {
+        if (!elemento || typeof elemento !== 'object' || Array.isArray(elemento)) continue;
+        for (const clave of Object.keys(elemento)) {
+          const nombre = String(clave).trim().toLowerCase();
+          if (LISTA_BLANCA.test(nombre)) empujar(anidado.clavesElemento, nombre);
+          else anidado.vObjetoOtra = true;
+        }
+        if ('v' in elemento) {
+          const tipoElemento = tipoDeV(elemento.v);
+          if (LISTA_BLANCA.test(tipoElemento)) empujar(anidado.tiposElementoV, tipoElemento);
+        }
+        if (typeof elemento.o === 'string') {
+          const op = normalizarOperacion(elemento.o);
+          if (op === 'otra') anidado.opOtra = true;
+          else empujar(anidado.opsElemento, op);
+        }
+        if (typeof elemento.p === 'string') {
+          const ruta = normalizarRuta(elemento.p);
+          if (ruta === 'otra') anidado.rutasOtra = true;
+          else empujar(anidado.rutasParche, ruta);
+        }
+      }
+      return;
+    }
+    if (!valor || typeof valor !== 'object') return;
+    for (const clave of Object.keys(valor)) {
+      const nombre = String(clave).trim().toLowerCase();
+      if (LISTA_BLANCA.test(nombre)) empujar(anidado.vObjetoClaves, nombre);
+      else anidado.vObjetoOtra = true;
+    }
+    // Hipótesis alternativa: ¿el mensaje se descartó por rol/tipo/fragmento?
+    // Sólo se miran sus etiquetas, nunca su texto.
+    const mensaje = valor.message;
+    if (!mensaje || typeof mensaje !== 'object' || Array.isArray(mensaje)) return;
+    const etiqueta = (crudo) => {
+      const texto = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
+      return LISTA_BLANCA.test(texto) ? texto : null;
+    };
+    const guardar = (lista, crudo) => {
+      if (crudo === undefined) return;
+      const texto = etiqueta(crudo);
+      if (texto) empujar(lista, texto); else anidado.mensaje.otra = true;
+    };
+    guardar(anidado.mensaje.roles, mensaje.author?.role);
+    guardar(anidado.mensaje.tipos, mensaje.content?.content_type);
+    guardar(anidado.mensaje.estados, mensaje.status);
+    guardar(anidado.mensaje.canales, mensaje.channel);
+    if (mensaje.metadata && typeof mensaje.metadata === 'object' && !Array.isArray(mensaje.metadata)) {
+      for (const clave of Object.keys(mensaje.metadata)) {
+        const nombre = String(clave).trim().toLowerCase();
+        if (LISTA_BLANCA.test(nombre)) empujar(anidado.mensaje.metadataClaves, nombre);
+        else anidado.mensaje.otra = true;
       }
     }
   };
@@ -215,7 +378,7 @@ export function createStreamFilter(opts = {}) {
       outcome: outcome === 'failed' || outcome === 'cancelled' ? outcome
         : (interrupted || verdict.stopped) ? 'unknown' : outcome || 'completed',
       interrupted, model: adapter.model?.() || '',
-      estructura: resumirEstructura(estructura),
+      estructura: { ...resumirEstructura(estructura), anidado: resumirAnidado(anidado) },
     });
   };
   let stoppedReported = false;
@@ -285,7 +448,7 @@ export function createStreamFilter(opts = {}) {
   };
 
   /** Procesa un evento ya parseado y devuelve lo que hay que escribir en el cable. */
-  const handleEvent = (evt) => {
+  const handleEvent = (evt, esUltimo = false) => {
     contarEvento(evt);
     // ChatGPT recibe el fin lógico sin esperar EOF; primero liberar lo retenido.
     // Los otros proveedores conservan su cierre diferido.
@@ -310,6 +473,8 @@ export function createStreamFilter(opts = {}) {
     const json = safeJson(evt.data);
     if (!json) {
       estructura.jsonInvalido += 1;
+      // Sin volcar contenido: longitud, clase del primer carácter y forma.
+      anidado.noJson ||= clasificarNoJson(evt.data, esUltimo);
       return passthroughSSE(evt);
     }
 
@@ -319,6 +484,8 @@ export function createStreamFilter(opts = {}) {
     // puede finalizar antes de que llegue la respuesta visible.
     if (chatgpt && json.type === 'message_stream_complete') protocolEnded = true;
     const segments = plan.segments || [];
+    if (plan.descartados) anidado.mensaje.descartados += plan.descartados;
+    if (plan.sinTexto) anidado.mensaje.sinTexto += plan.sinTexto;
     contarJson(json, segments.length > 0);
 
     if (!segments.length) {
@@ -351,9 +518,9 @@ export function createStreamFilter(opts = {}) {
    * llegó** y el fallo se informa una sola vez. La mediación puede entonces
    * quedarse sin efecto en ese evento, pero nunca romper la conversación.
    */
-  const safeHandle = (evt) => {
+  const safeHandle = (evt, esUltimo = false) => {
     try {
-      return handleEvent(evt);
+      return handleEvent(evt, esUltimo);
     } catch (error) {
       if (!failureReported) {
         failureReported = true;
@@ -397,7 +564,7 @@ export function createStreamFilter(opts = {}) {
       if (!events.length) return;
 
       let out = '';
-      for (const evt of events) out += safeHandle(evt);
+      events.forEach((evt, i) => { out += safeHandle(evt, i === events.length - 1); });
       if (out) controller.enqueue(encoder.encode(out));
       if (protocolEnded) finishCapture();
     },

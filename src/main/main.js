@@ -902,6 +902,8 @@ function diagMime(payload) {
 
 /** Nombres que se publican: minúsculas y `_`, igual que el filtro. Lo demás es `otros`. */
 const NOMBRE_DIAG = /^[a-z_]{1,24}$/;
+/** Rutas normalizadas del nivel 2: dígitos ya son `N` en la capa. */
+const RUTA_DIAG = /^\/[a-z_/N]{1,48}$/;
 
 /**
  * El resumen en una línea, ya acotada: conteos, nombres de evento y de clave y
@@ -913,8 +915,12 @@ function textoEstructura(e) {
     ` · json ${cuenta(e.jsonValido)}/${cuenta(e.jsonValido + e.jsonInvalido)}` +
     ` · done ${cuenta(e.dones)} · portadores ${cuenta(e.portadores)}` +
     ` · tipos ${e.tiposV || '-'} · claves ${e.claves || '-'}` +
-    ` · eventos ${e.nombresEvento || '-'} · otros ${cuenta(e.clavesOtros)}`;
-  return texto.slice(0, 400);
+    ` · eventos ${e.nombresEvento || '-'} · otros ${cuenta(e.clavesOtros)}` +
+    (e.anidado ? ` · v array ${cuenta(e.anidado.vArray)}/${cuenta(e.anidado.elementos)}` +
+      ` · rutas ${e.anidado.rutasParche || '-'} · ops ${e.anidado.opsEvento || '-'}` +
+      ` · descartes ${cuenta(e.anidado.mensaje.descartados)}` +
+      ` · noJson ${e.anidado.noJson ? `${e.anidado.noJson.clase}/${e.anidado.noJson.longitud}` : '-'}` : '');
+  return texto.slice(0, 900);
 }
 
 /**
@@ -951,6 +957,55 @@ function diagEstructura(payload) {
     tiposV: tipos.texto,
     portadores: numero(e.portadores),
     lineas: numero(e.lineas),
+    // Nivel 2: la forma de `v` cuando es array u objeto y los descartes del
+    // adaptador. Se copia tal cual, pero saneada: listas acotadas y sólo
+    // etiquetas. Ni un valor de texto.
+    ...(e.anidado ? { anidado: diagAnidado(e.anidado) } : {}),
+  };
+}
+
+/** Sanea el nivel 2: rutas, operaciones y etiquetas con su lista blanca. */
+function diagAnidado(a) {
+  if (!a || typeof a !== 'object') return null;
+  const lista = (valor, patron = NOMBRE_DIAG, tope = 12) => {
+    const todos = String(valor || '').split(',').filter(Boolean);
+    const validos = todos.filter((nombre) => patron.test(nombre));
+    return { texto: validos.slice(0, tope).join(',').slice(0, 300), fuera: todos.length - Math.min(validos.length, tope) };
+  };
+  const numero = (valor) => (Number.isFinite(Number(valor)) ? Number(valor) : 0);
+  // Rutas ya vienen normalizadas (`N` en vez de índices) y con `/` delante.
+  const rutas = lista(a.rutasParche, RUTA_DIAG);
+  const rutasEvento = lista(a.rutasEvento, RUTA_DIAG);
+  const m = a.mensaje && typeof a.mensaje === 'object' ? a.mensaje : {};
+  const noJson = a.noJson && typeof a.noJson === 'object' ? {
+    longitud: numero(a.noJson.longitud),
+    clase: ['letra', 'digito', 'simbolo', 'vacio'].includes(a.noJson.clase) ? a.noJson.clase : 'vacio',
+    ultimo: Boolean(a.noJson.ultimo),
+    esDone: Boolean(a.noJson.esDone),
+    conCrlf: Boolean(a.noJson.conCrlf),
+  } : null;
+  return {
+    vArray: numero(a.vArray),
+    elementos: numero(a.elementos),
+    clavesElemento: lista(a.clavesElemento).texto,
+    tiposElementoV: lista(a.tiposElementoV).texto,
+    opsEvento: lista(a.opsEvento).texto,
+    opsElemento: lista(a.opsElemento).texto,
+    rutasParche: rutas.texto,
+    rutasEvento: rutasEvento.texto,
+    vObjetoClaves: lista(a.vObjetoClaves).texto,
+    fueraDeLista: Boolean(a.fueraDeLista),
+    mensaje: {
+      roles: lista(m.roles).texto,
+      tipos: lista(m.tipos).texto,
+      estados: lista(m.estados).texto,
+      canales: lista(m.canales).texto,
+      metadataClaves: lista(m.metadataClaves).texto,
+      descartados: numero(m.descartados),
+      sinTexto: numero(m.sinTexto),
+      otra: Boolean(m.otra),
+    },
+    noJson,
   };
 }
 

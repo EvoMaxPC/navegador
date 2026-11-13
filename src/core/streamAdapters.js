@@ -192,8 +192,13 @@ function chatgptChannelAdapter() {
   function read(json) {
     const segments = [];
     let terminal = null;
+    // Diagnóstico: cuántos mensajes se descartaron por el filtro de
+    // rol/tipo/fragmento/oculto y cuántas veces `assistantText` quedó en false.
+    // Son conteos; no cambian ninguna decisión.
+    let descartados = 0;
+    let sinTexto = 0;
     const handled = isPlainObject(json) && Boolean(json.type || json.message || 'v' in json || 'p' in json || 'o' in json);
-    const result = () => ({ segments, terminal, handled, model });
+    const result = () => ({ segments, terminal, handled, model, descartados, sinTexto });
     if (!isPlainObject(json)) return result();
 
     // Canal sin cuenta: no lleva message.content, sino markdown con revisiones.
@@ -225,7 +230,7 @@ function chatgptChannelAdapter() {
         (!message.channel || message.channel === 'final') &&
         !meta.is_message_fragment && !meta.is_visually_hidden_from_conversation;
       state.pathIsText = false;
-      if (!state.assistantText) return;
+      if (!state.assistantText) { descartados += 1; sinTexto += 1; return; }
       const parts = message.content?.parts;
       if (Array.isArray(parts)) parts.forEach((part, i) => {
         if (typeof part !== 'string') return;
@@ -244,12 +249,21 @@ function chatgptChannelAdapter() {
       return result();
     }
 
-    function readOperation(op, valuePath, inheritedPointer, inheritedOperation) {
+    function readOperation(op, valuePath, inheritedPointer, inheritedOperation, depth = 0) {
       if (!isPlainObject(op)) return;
       const target = typeof op.p === 'string' ? op.p : inheritedPointer;
       const action = typeof op.o === 'string' ? op.o : inheritedOperation;
-      if (Array.isArray(op.v) && (action === 'patch' || op.v.every((item) => isPlainObject(item) && typeof item.p === 'string'))) {
-        op.v.forEach((child, i) => readOperation(child, `${valuePath}.${i}.v`, target, 'append'));
+      // Un array de parches puede mezclar elementos con `p` y elementos que no
+      // encajan (null, números, cadenas, objetos sin `p`). Basta con que **alguno**
+      // sea un parche para recorrerlo: los demás se ignoran sin lanzar. Exigir
+      // que todos encajaran descartaba el array entero y el turno salía con 0
+      // caracteres aunque el texto estuviera ahí.
+      const traeParche = Array.isArray(op.v) &&
+        (action === 'patch' || op.v.some((item) => isPlainObject(item) && typeof item.p === 'string'));
+      // Tope de elementos y profundidad: un `o:'patch'` dentro de un elemento
+      // puede recursar una vez más, nunca sin límite.
+      if (traeParche && depth < 2) {
+        op.v.slice(0, 256).forEach((child, i) => readOperation(child, `${valuePath}.${i}.v`, target, 'append', depth + 1));
         return;
       }
       const value = op.v;
@@ -266,6 +280,7 @@ function chatgptChannelAdapter() {
       state.pathIsText = PARTS_PATH.test(target) && state.assistantText !== false;
       if (target === '/message/author/role') {
         state.assistantText = value === 'assistant';
+        if (!state.assistantText) sinTexto += 1;
         return;
       }
       if (target === '/message/status' && CHATGPT_TERMINAL_STATUS.has(value)) terminal = 'message';
