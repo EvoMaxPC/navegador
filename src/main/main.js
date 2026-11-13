@@ -313,7 +313,7 @@ const AVISOS_DE_BLOQUEO = new Set(['egress-net-block', 'egress-injected-block'])
  */
 const diagOn = process.env.NEXO_DIAG === '1';
 /** Estos avisos no se deduplican: cada uno describe un hecho distinto. */
-const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje']);
+const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje', 'diag-cancelacion']);
 function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
   if (!store) return null;
   // La clave agrupa lo que es el mismo aviso. Por omisión, código y título; el
@@ -892,6 +892,24 @@ function noteDiagMensaje({ source, messageId, counted, messages }) {
   });
 }
 
+/**
+ * Sólo tipo/subtipo del MIME que la capa ya leyó: sin parámetros (`; charset=`)
+ * ni otras cabeceras ni URL. `-` si la capa no lo mandó.
+ */
+function diagMime(payload) {
+  return String(payload?.diag?.mime || '').split(';')[0].trim().toLowerCase().slice(0, 40) || '-';
+}
+
+/**
+ * ¿El rechazo de la lectura llegó sin motivo? Es la cancelación del consumidor:
+ * el valor del rechazo es `undefined`, así que `String(error?.message || error)`
+ * produce justo la cadena «undefined». Se exige que la capa lo haya declarado
+ * (`sinMotivo`) para no confundirlo con un error cuyo texto sea esa palabra.
+ */
+const sinMotivoDeCancelacion = (payload) =>
+  payload?.stage === 'stream-interrupted' &&
+  (payload?.sinMotivo === true || String(payload?.message || '') === 'undefined');
+
 function isShellRequest(event) {
   return Boolean(event?.sender && event.senderFrame===event.sender.mainFrame &&
     event.sender.getURL()==='nexo://app/src/ui/shell/index.html' &&
@@ -1011,11 +1029,17 @@ function registerIpc() {
       noteDiagnostic({
         code: 'diag-stream-end', severity: 'info', title: `diag-stream-end: ${vacio ? 'sin texto' : 'con texto'}`,
         key: `diag-stream-end|${chars}|${vacio ? 1 : 0}|${payload?.outcome || '-'}|${payload?.messageId ? 1 : 0}`,
+        // Números de la lectura, para saber si un cierre sin texto viene de un
+        // formato mal detectado. Sólo tipo/subtipo del MIME y conteos.
         detail: `chars ${cuenta(chars)} · vacío ${siNo(vacio)} · source ${String(payload?.source || '-')}` +
-          ` · outcome ${String(payload?.outcome || '-')} · messageId ${siNo(Boolean(payload?.messageId))}`,
+          ` · outcome ${String(payload?.outcome || '-')} · messageId ${siNo(Boolean(payload?.messageId))}` +
+          ` · mime ${diagMime(payload)} · formato ${String(payload?.diag?.formato || '-')}` +
+          ` · trozos ${cuenta(payload?.diag?.trozos)} · bytes ${cuenta(payload?.diag?.bytes)}`,
         meta: { chars, empty: vacio, source: String(payload?.source || '').slice(0, 40),
           outcome: String(payload?.outcome || '').slice(0, 40), hasMessageId: Boolean(payload?.messageId),
-          host: hostOf(payload?.documentUrl || '') },
+          host: hostOf(payload?.documentUrl || ''),
+          mime: diagMime(payload), formato: String(payload?.diag?.formato || '').slice(0, 20),
+          chunks: Number(payload?.diag?.trozos) || 0, bytes: Number(payload?.diag?.bytes) || 0 },
       });
     }
     // Texto tardío del mismo turno: reutilizar la absorción/deduplicación que
@@ -1381,6 +1405,25 @@ function registerIpc() {
     // interfaz, que sólo escucha `intervention`, así que se perdía: el usuario
     // notaba el síntoma («no conecta») sin la causa.
     if (clean.type === 'error') {
+      // Un rechazo sin motivo es la cancelación del cuerpo por parte de la
+      // página, no un fallo de la mediación: no se anuncia como error. Sólo se
+      // anota, y sólo con NEXO_DIAG=1. Un error con mensaje o un AbortError
+      // siguen por el camino de siempre.
+      if (sinMotivoDeCancelacion(clean.payload)) {
+        if (diagOn) {
+          noteDiagnostic({
+            code: 'diag-cancelacion', severity: 'info',
+            title: 'diag-cancelacion: lectura cancelada sin motivo',
+            detail: `stage ${String(clean.payload.stage || '-').slice(0, 40)} · messageId ${siNo(Boolean(clean.payload.messageId))}` +
+              ` · outcome ${String(clean.payload.outcome || '-').slice(0, 20)}`,
+            meta: { stage: String(clean.payload.stage || '').slice(0, 40),
+              hasMessageId: Boolean(clean.payload.messageId),
+              outcome: String(clean.payload.outcome || '').slice(0, 20),
+              host: hostOf(href) },
+          });
+        }
+        return;
+      }
       noteDiagnostic({
         code: 'page-error',
         severity: 'info',

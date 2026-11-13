@@ -949,9 +949,19 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
   if (!response || !response.body || (!looksLikeStream(response.headers) && !jsonUpdates)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
+  const formato = site.id === 'chatgpt' && /ndjson|jsonl|application[/]json/i.test(mime) ? 'ndjson'
+    : site.id === 'chatgpt' && /text\/plain/i.test(mime) ? 'auto' : 'sse';
+  // Diagnóstico: el formato elegido y cuánto se leyó. Sirve para saber si un
+  // cierre sin texto viene de haber leído otro formato (`diag-stream-end`).
+  // Sólo tipo/subtipo del MIME: sin parámetros ni otras cabeceras.
+  const diagnostico = {
+    formato,
+    mime: String(mime.split(';')[0] || '').trim().toLowerCase().slice(0, 40),
+    trozos: 0,
+    bytes: 0,
+  };
   const filter = createStreamFilter({
-      format: site.id === 'chatgpt' && /ndjson|jsonl|application[/]json/i.test(mime) ? 'ndjson'
-        : site.id === 'chatgpt' && /text\/plain/i.test(mime) ? 'auto' : 'sse',
+      format: formato,
       settings: state.settings,
       adapter: site.streamAdapter || null,
       deltaPaths: site.deltaPaths,
@@ -989,6 +999,9 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
             chars: text.length, tokens: estimateTokens(text), clipped,
             text: clipped ? text.slice(0, MAX_CAPTURE_CHARS) : text,
             dropped: String(info.dropped || '').slice(0, 600),
+            // Números, no contenido: el proceso principal sólo los publica con
+            // NEXO_DIAG=1.
+            diag: { ...diagnostico },
           });
         };
         const text = String(info.text || '');
@@ -1008,9 +1021,23 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
         } else if (state.response === generation) state.response = null;
       },
     });
-  response.body.pipeTo(filter.writable).catch((error) => {
+  const contador = new TransformStream({
+    transform(chunk, controller) {
+      diagnostico.trozos += 1;
+      diagnostico.bytes += chunk?.byteLength ?? chunk?.length ?? 0;
+      controller.enqueue(chunk);
+    },
+  });
+  response.body.pipeThrough(contador).pipeTo(filter.writable).catch((error) => {
     filter.finishInterrupted();
-    bridge.event('error', { stage: 'stream-interrupted', message: String(error?.message || error) });
+    // El mensaje exacto del rechazo viaja aparte: `message` mezcla el motivo
+    // con el valor (`String(undefined)`), y el proceso principal necesita
+    // distinguir «cancelación sin motivo» de un error de verdad.
+    const motivo = String(error?.message || '');
+    const tipo = String(error?.name || '');
+    bridge.event('error', { stage: 'stream-interrupted', message: String(error?.message || error),
+      ...(motivo || tipo ? { motivo: motivo.slice(0, 200), errorName: tipo.slice(0, 40) }
+        : { sinMotivo: true }) });
   });
   const filtered = filter.readable;
 
