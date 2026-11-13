@@ -313,7 +313,7 @@ const AVISOS_DE_BLOQUEO = new Set(['egress-net-block', 'egress-injected-block'])
  */
 const diagOn = process.env.NEXO_DIAG === '1';
 /** Estos avisos no se deduplican: cada uno describe un hecho distinto. */
-const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores']);
+const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje']);
 function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
   if (!store) return null;
   // La clave agrupa lo que es el mismo aviso. Por omisión, código y título; el
@@ -707,6 +707,23 @@ function createWindow() {
   return win;
 }
 
+/**
+ * Gancho de diagnóstico del motor: `engine.onUserMessage` avisa aquí con el
+ * resultado de contar (o descartar) el mensaje. Sólo observa; el conteo no se
+ * toca. El camino de red y el de la capa pasan por sus propios puntos.
+ */
+function hookDiagMensaje(instance) {
+  if (!instance || typeof instance.onUserMessage !== 'function') return instance;
+  const original = instance.onUserMessage.bind(instance);
+  instance.onUserMessage = (webContentsId, payload = {}) => {
+    const counted = original(webContentsId, payload);
+    noteDiagMensaje({ source: String(payload?.source || 'request'), messageId: payload?.messageId,
+      counted, messages: instance.stats?.().messages });
+    return counted;
+  };
+  return instance;
+}
+
 function domTokenModel() {
   const configured = store?.settings?.tokenCounting?.model;
   return tokenizerModels().models.some(item => item.id === configured) ? configured : tokenizerModels().defaultModel;
@@ -845,6 +862,36 @@ function turnFollowUp(result) {
   return { fixes, suggestions, next, truncated: Boolean(repaired.truncated), refusal: Boolean(repaired.refusal) };
 }
 
+/**
+ * Aviso `diag-mensaje` (sólo con `NEXO_DIAG=1`): por qué camino se contó (o se
+ * descartó) un mensaje del usuario en el motor. Existe porque el panel llegó a
+ * mostrar 3 mensajes tras 2 envíos limpios y no había forma de ver la causa.
+ *
+ * Nunca publica el texto ni el id: del id sólo un resumen de 6 caracteres, para
+ * emparejar avisos del mismo envío sin revelarlo.
+ */
+function noteDiagMensaje({ source, messageId, counted, messages }) {
+  if (!diagOn) return null;
+  const id = String(messageId || '');
+  // Resumen estable de 6 caracteres del id: no es reversible ni el id completo.
+  let resumen = '';
+  let h = 0x811c9dc5 | 0;
+  for (let i = 0; i < id.length; i += 1) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) | 0;
+  resumen = (h >>> 0).toString(36).padStart(6, '0').slice(0, 6);
+  const duplicado = Boolean(counted?.duplicate);
+  return noteDiagnostic({
+    code: 'diag-mensaje', severity: 'info',
+    title: `diag-mensaje: ${duplicado ? 'duplicado' : 'contado'}`,
+    // La clave lleva el resumen del id: dos envíos distintos nunca se pisan
+    // (y `AVISOS_DIAG` ya lo saca de la ventana de 30 s).
+    key: `diag-mensaje|${String(source || '').slice(0, 20)}|${resumen}`,
+    detail: `source ${String(source || '-').slice(0, 20)} · messageId ${id ? 'sí' : 'no'} ${resumen}` +
+      ` · ${duplicado ? 'duplicado' : 'contado'} · mensajes del motor ${Number(messages) || 0}`,
+    meta: { source: String(source || '').slice(0, 20), hasMessageId: Boolean(id), messageIdHash: resumen,
+      duplicate: duplicado, messages: Number(messages) || 0 },
+  });
+}
+
 function isShellRequest(event) {
   return Boolean(event?.sender && event.senderFrame===event.sender.mainFrame &&
     event.sender.getURL()==='nexo://app/src/ui/shell/index.html' &&
@@ -976,6 +1023,18 @@ function registerIpc() {
     const result = payload?.source === 'dom-recovery' && payload?.site === 'chatgpt'
       ? { counted: engine.onCdpCapture(event.sender.id, payload), nextAction: null }
       : engine.onStreamEnd(event.sender.id, payload);
+    // Recuperación por DOM del mismo turno: el texto llegó, así que un aviso de
+    // «quedó cortada» ya mostrado (por un stream-end sin texto) es falso. Se
+    // retira, y nunca se publica uno nuevo. Sin texto no se retira nada.
+    // `counted.duplicate` no lo impide: es lo habitual (el mismo turno ya contado)
+    // y el texto igualmente llegó. Pero si el turno viene marcado como cortado
+    // (`truncated`), el aviso es cierto: se conserva y no se retira nada.
+    const recuperaTexto = payload?.source === 'dom-recovery' &&
+      Boolean(String(payload?.text || '').trim()) &&
+      payload?.truncated !== true && result?.repaired?.truncated !== true;
+    // Mismo canal con `cleared`: la shell ya lo escucha y no hace falta un
+    // canal nuevo (ni tocar el preload).
+    if (recuperaTexto) broadcast('nexo:turn-followup', { webContentsId: event.sender.id, cleared: true });
     writeCaptureTrace('response-delivered', { capture: payload, source: payload?.source || 'request',
       memory: result?.memory || result?.counted?.memory || null,
       duplicate: Boolean(result?.counted?.duplicate) });
@@ -1012,6 +1071,8 @@ function registerIpc() {
     // Lo que el motor detectó al cerrar el turno (reparaciones, sugerencias y
     // continuación) se publica como evento: antes se calculaba y se descartaba
     // en la interfaz, que no tenía forma de ofrecer el siguiente paso.
+    // Un turno recuperado y completo no tiene `next` (el motor ya no propone
+    // continuar), así que aquí basta con no publicar nada si no hay nada.
     const followUp = turnFollowUp(result);
     if (followUp) broadcast('nexo:turn-followup', { webContentsId: event.sender.id, ...followUp });
     return result;
@@ -1829,8 +1890,9 @@ function noteUserMessageFromNetwork(details = {}) {
   }
 
   const measurement = located ? inputTokenMeasurement(text, model, site.id) : {tokens:null,tokenExact:false,tokenMethod:'unreadable',tokenEncoding:null,model};
+  const messageIdRed = `net-${details.id ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`}`;
   const counted = engine.onUserMessage(tabId, {
-    messageId: `net-${details.id ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`}`,
+    messageId: messageIdRed,
     submissionId: userMessageIdentity(json),
     source: 'network',
     site: site.id,
@@ -2186,6 +2248,9 @@ app.whenReady().then(async () => {
       if (entry.code === 'turn-result') broadcast('nexo:stats-changed', statsSnapshot());
     },
   });
+  // Diagnóstico: envuelve `onUserMessage` (no cambia el conteo). Cubre los tres
+  // caminos —capa, red y CDP— porque todos pasan por el mismo método.
+  hookDiagMensaje(engine);
   mark('motor');
   cdp = new CdpObserver({
     engine,

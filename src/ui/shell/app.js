@@ -830,14 +830,29 @@ function renderLog() {
     .join('');
 }
 
-function pushLocalNotice(text) {
+function pushLocalNotice(text, code = 'notice') {
   pushIntervention({
     kind: 'system',
-    code: 'notice',
+    code,
     severity: 'info',
     title: text,
     ts: Date.now(),
   });
+}
+
+/**
+ * Retira un aviso local ya mostrado.
+ *
+ * Se usa cuando la recuperación por DOM trae el texto del turno que se creía
+ * cortado: el aviso dejó de ser cierto y no debe quedar en Actividad. No toca
+ * las entradas del proceso principal (esas son su registro, no este aviso).
+ */
+function clearLocalNotice(code = 'notice') {
+  const antes = state.logs.length;
+  state.logs = state.logs.filter((entry) => !(entry.kind === 'system' && entry.code === code));
+  if (state.logs.length === antes) return false;
+  if (isPanelActive('activity')) uiTasks.schedule('log', renderLog);
+  return true;
 }
 
 function pushIntervention(entry) {
@@ -1634,6 +1649,14 @@ nexo.onTurnFollowUp?.((payload) => {
     try { return t.view.getWebContentsId() === id; } catch { return false; }
   });
   if (!tab) return;
+  // El texto del turno llegó por otra vía: lo que se avisó como corte era
+  // falso. Se retira el aviso y la acción de continuación, sin dejar rastro.
+  if (payload?.cleared) {
+    if (tab.followUp?.kind === 'continue') tab.followUp = null;
+    clearLocalNotice('followup-truncated');
+    if (tab.id === state.activeId) refreshFollowUp();
+    return;
+  }
   const touchesActive = tab.id === state.activeId;
   const fixes = Array.isArray(payload.fixes) ? payload.fixes : [];
   if (fixes.length) {
@@ -1644,7 +1667,7 @@ nexo.onTurnFollowUp?.((payload) => {
   if (fixes.length) pushLocalNotice(`Respuesta reparada al vuelo: ${fixes.join(', ')}.`);
   if (payload.next?.prompt) {
     tab.followUp = { kind: 'continue', label: payload.next.label || 'Continuar la respuesta', prompt: payload.next.prompt };
-    pushLocalNotice(`La respuesta quedó cortada. Menú del navegador → Continuar la respuesta para seguir donde terminó.`);
+    pushLocalNotice(`La respuesta quedó cortada. Menú del navegador → Continuar la respuesta para seguir donde terminó.`, 'followup-truncated');
   } else if (Array.isArray(payload.suggestions) && payload.suggestions.length) {
     tab.followUp = { kind: 'suggestion', ...payload.suggestions[0] };
   }

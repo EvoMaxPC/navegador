@@ -291,7 +291,7 @@ export class ConversationGuard {
               ? 'Retake the task with another approach (2nd loop)'
               : 'Retomar con otro enfoque (2.º bucle)',
       };
-    } else if (repaired.needsContinue) {
+    } else if (repaired.needsContinue && (repaired.truncated || !repaired.empty)) {
       nextAction = {
         type: 'continue',
         count: 1,
