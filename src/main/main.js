@@ -867,7 +867,8 @@ function registerIpc() {
   });
 
   ipcMain.handle('nexo:log', () => store.log);
-  ipcMain.handle('nexo:log:clear', () => {
+  ipcMain.handle('nexo:log:clear', (event) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     store.clearLog();
     return [];
   });
@@ -1139,7 +1140,8 @@ function registerIpc() {
 
   /* ---------------- navegador: perfil ---------------- */
   ipcMain.handle('nexo:profile:stats', () => profile?.stats() || null);
-  ipcMain.handle('nexo:profile:clear', (_event, scope = {}) => {
+  ipcMain.handle('nexo:profile:clear', (event, scope = {}) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     const result = profile?.clear(scope) || {};
     broadcast('nexo:profile-changed', profile?.stats() || null);
     return result;
@@ -1253,7 +1255,8 @@ function registerIpc() {
   ipcMain.handle('nexo:zoom:list', () => profile?.zoom.list() || []);
 
   /* ---------------- datos del sitio ---------------- */
-  ipcMain.handle('nexo:data:clear', async (_event, scope = {}) => {
+  ipcMain.handle('nexo:data:clear', async (event, scope = {}) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     const target = session.fromPartition('persist:nexo');
     const done = { ok: true, cookies: false, cache: false };
     try {
@@ -1280,7 +1283,10 @@ function registerIpc() {
     return { ok: true };
   });
   ipcMain.handle('nexo:session:restore', () => profile?.session.restore() || null);
-  ipcMain.on('nexo:session:save-now', (_event, payload = {}) => {
+  ipcMain.on('nexo:session:save-now', (event, payload = {}) => {
+    // Sin respuesta posible (`send`): un emisor ajeno se descarta con un retorno
+    // temprano silencioso, igual que el resto de eventos que no exigen shell.
+    if (!isShellRequest(event)) return;
     try {
       profile?.session.capture(sessionPayload(payload).windows);
     } catch (error) {

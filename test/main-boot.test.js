@@ -28,7 +28,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
-  if(channel.startsWith('nexo:downloads:') || channel.startsWith('nexo:work:') || channel.startsWith('nexo:advanced:')) {const sender=journal.windows[0].webContents;return handler({sender,senderFrame:sender.mainFrame},payload);}
+  if(channel.startsWith('nexo:downloads:') || channel.startsWith('nexo:work:') || channel.startsWith('nexo:advanced:') || channel === 'nexo:profile:clear' || channel === 'nexo:data:clear') {const sender=journal.windows[0].webContents;return handler({sender,senderFrame:sender.mainFrame},payload);}
   return handler({ sender: { id: senderId } }, payload);
 }
 
