@@ -216,6 +216,7 @@ function resumirAnidado(anidado) {
       otra: Boolean(mensaje.otra),
       descartes: mensaje.descartes.slice(0, 12),
       ocultoLevantado: mensaje.ocultoLevantado,
+      cierre: Boolean(mensaje.cierre),
       removes: mensaje.removes.slice(0, 6),
       removesOtra: Boolean(mensaje.removesOtra),
     },
@@ -331,7 +332,7 @@ export function createStreamFilter(opts = {}) {
       metadataClaves: [], descartados: 0, sinTexto: 0, aceptados: 0,
       causas: { rol: 0, tipo: 0, fragmento: 0, oculto: 0, canal: 0, otra: 0 },
       assistantSi: 0, assistantNo: 0, vistos: 0, otra: false, descartes: [],
-      ocultoLevantado: 0, removes: [], removesOtra: false },
+      ocultoLevantado: 0, removes: [], removesOtra: false, cierre: false },
     // Forma de `v` en los eventos que apuntan a una parte de texto, y cuántos
     // de ellos dieron segmento.
     rutaTexto: { string: 0, array: 0, object: 0, otro: 0, conSegmento: 0 },
@@ -484,13 +485,19 @@ export function createStreamFilter(opts = {}) {
     ended = true;
     if (format === 'ndjson') consumeLines(true);
     const verdict = sentinel.finish();
+    // El proveedor dijo que el mensaje del asistente terminó (status final +
+    // `end_turn`). Con eso, la heurística de puntuación no marca «cortada»: una
+    // respuesta completa que acaba sin punto no lo está. Sólo cuenta si el
+    // stream cerró como completado; cortado, abortado o interrumpido, igual.
+    const cierreSeguro = anidado.mensaje.cierre && outcome !== 'failed' && outcome !== 'cancelled' && !interrupted;
     const text = format === 'ndjson' ? (adapter.snapshot?.() ?? lineText)
       : format === 'text' ? plainText : verdict.delivered;
     opts.onEnd?.({
       stopped: format === 'sse' && verdict.stopped,
       code: interrupted ? 'stream-interrupted' : verdict.stopReason,
-      truncated: interrupted || (format === 'sse' && verdict.truncated),
-      truncationReason: interrupted ? 'stream-interrupted' : verdict.truncationReason,
+      truncated: interrupted || (format === 'sse' && verdict.truncated && !cierreSeguro),
+      truncationReason: interrupted ? 'stream-interrupted'
+        : (cierreSeguro ? null : verdict.truncationReason),
       deliveredChars: text.length,
       droppedChars: format === 'sse' ? verdict.droppedChars : 0,
       text, dropped: format === 'sse' ? verdict.dropped : '',
@@ -614,6 +621,7 @@ export function createStreamFilter(opts = {}) {
         anidado.mensaje.descartes.push(firma);
       }
     }
+    if (plan.cierre) anidado.mensaje.cierre = true;
     if (plan.ocultoLevantado) anidado.mensaje.ocultoLevantado += plan.ocultoLevantado;
     if (Array.isArray(plan.removes) && plan.removes.length) {
       for (const ruta of plan.removes) {

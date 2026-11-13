@@ -193,8 +193,27 @@ function chatgptChannelAdapter() {
   const aceptables = new Map();
   /** Ruta exacta que levanta la marca: la misma clave que lee el criterio. */
   const RUTA_OCULTO = '/message/metadata/is_visually_hidden_from_conversation';
+  // Cierre del protocolo del mensaje ACEPTADO: `status finished_successfully`
+  // y `end_turn: true`. Lo pone el propio proveedor; es más fiable que la
+  // puntuación del texto, que marca «cortada» una respuesta completa.
+  const cierres = new Map();
   let ocultoLevantado = 0;
   const removes = [];
+
+  /**
+   * Veredicto de cierre del mensaje vigente, con las dos señales juntas.
+   * `end_turn` puede llegar por parche (`/message/end_turn`) o dentro del
+   * mensaje; el estado terminal, por cualquiera de las dos vías.
+   */
+  function marcarCierre(estado, finDeTurno) {
+    const clave = String(messageId || '');
+    if (!clave) return;
+    const previo = cierres.get(clave) || { estado: false, fin: false };
+    cierres.set(clave, {
+      estado: previo.estado || estado === true,
+      fin: previo.fin || finDeTurno === true,
+    });
+  }
 
   function remember(key, full, path, cumulative = true) {
     const previous = texts.get(key) || '';
@@ -230,7 +249,10 @@ function chatgptChannelAdapter() {
     const handled = isPlainObject(json) && Boolean(json.type || json.message || 'v' in json || 'p' in json || 'o' in json);
     const result = () => ({ segments, terminal, handled, model, descartados, sinTexto,
       aceptados, assistantSi, assistantNo, causas, porEvento, segmentos, descartes,
-      ocultoLevantado: ocultoLevantado - levantadoAntes, removes });
+      ocultoLevantado: ocultoLevantado - levantadoAntes, removes,
+      // Sólo el mensaje ACEPTADO (assistant, sin marca de oculto) cuenta.
+      cierre: Boolean(aceptables.get(String(messageId || '')) && ocultos.get(String(messageId || '')) === false &&
+        cierres.get(String(messageId || ''))?.estado && cierres.get(String(messageId || ''))?.fin) });
     if (!isPlainObject(json)) return result();
 
     // Canal sin cuenta: no lleva message.content, sino markdown con revisiones.
@@ -343,6 +365,7 @@ function chatgptChannelAdapter() {
       });
       state.lastMessage = prefix === 'message' ? message : null;
       if (CHATGPT_TERMINAL_STATUS.has(message.status)) terminal = 'message';
+      if (CHATGPT_TERMINAL_STATUS.has(message.status) && message.end_turn === true) marcarCierre(true, true);
     }
 
     if (isPlainObject(json.message)) {
@@ -402,7 +425,11 @@ function chatgptChannelAdapter() {
         else { assistantNo += 1; sinTexto += 1; }
         return;
       }
-      if (target === '/message/status' && CHATGPT_TERMINAL_STATUS.has(value)) terminal = 'message';
+      if (target === '/message/status' && CHATGPT_TERMINAL_STATUS.has(value)) {
+        terminal = 'message';
+        marcarCierre(true, false);
+      }
+      if (target === '/message/end_turn' && value === true) marcarCierre(false, true);
       // El texto de un mensaje que aún está marcado como oculto no se entrega
       // todavía: la marca puede levantarse más adelante EN ESTE MISMO evento.
       // Se queda pendiente con su ruta y su operación, y sale al final si la
