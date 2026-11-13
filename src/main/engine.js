@@ -324,7 +324,18 @@ export class Engine {
         (!submissionId || !previo.submissionId || submissionId === previo.submissionId)) {
       const candidate = this.inputRecords.get(`${webContentsId}|${previo.messageId}`);
       const sameHash = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
-      if (candidate && sameHash && !candidate.sources.has(source)) { record = candidate; correlatedByFallback = true; }
+      // La red lee el texto YA mediado (protocolo, memoria): su huella no puede
+      // coincidir con la del cuadro, que lleva el texto original. Sin este
+      // puente, un solo envío se contaba dos veces. Sólo une capa↔red, sólo el
+      // último envío de la pestaña y sólo fuentes que aún no estaban: dos
+      // envíos seguidos —iguales o no— no se funden nunca.
+      const puente = Boolean(candidate) && !candidate.sources.has(source) &&
+        ((source === 'network' && (candidate.sources.has('composer') || candidate.sources.has('request'))) ||
+         ((source === 'composer' || source === 'request') && candidate.sources.has('network')));
+      if (candidate && (sameHash || puente) && !candidate.sources.has(source)) {
+        record = candidate;
+        correlatedByFallback = true;
+      }
     }
     if (record) {
       record.sources.add(source);
@@ -337,7 +348,11 @@ export class Engine {
       this.#inputMeasurement(record, payload);
       const waiting = this.awaiting.get(webContentsId);
       if (waiting?.messageId === record.messageId && payload.model) waiting.model = payload.model;
-      return {ok:true,duplicate:true,merged:true,messageId:record.messageId};
+      // `superseded`: el registro lo abrió otra fuente con OTRO texto (el
+      // original del cuadro frente al mediado de la red). Quien llama no debe
+      // publicar un segundo «Mensaje enviado» por el mismo envío.
+      if (hash && record.hash && hash !== record.hash) record.superseded = true;
+      return {ok:true,duplicate:true,merged:true,messageId:record.messageId,superseded:Boolean(record.superseded)};
     }
 
     this.seenMessages.set(key, now);
@@ -361,7 +376,7 @@ export class Engine {
     const chars = Math.max(0, Number(payload.chars) || 0);
     const tokens = Number.isFinite(Number(payload.tokens)) ? Math.max(0, Number(payload.tokens)) : 0;
     this.counters.messages += 1;
-    const inputRecord = {messageId, sources:new Set([source]), measurement:null, unverifiedCorrelation:!submissionKey};
+    const inputRecord = {messageId, hash, superseded:false, sources:new Set([source]), measurement:null, unverifiedCorrelation:!submissionKey};
     if (!submissionKey) this.counters.inputCorrelationUnverified += 1;
     this.inputRecords.set(key, inputRecord);
     if (submissionKey) this.submissions.set(submissionKey, key);
@@ -384,7 +399,7 @@ export class Engine {
       model: payload.model || '',
     });
 
-    return { ok: true, duplicate: false, messageId, chars, tokens };
+    return { ok: true, duplicate: false, messageId, chars, tokens, superseded: false };
   }
 
   /** No mezclar BPE visible con estimaciones heredadas o texto/modelo desconocido. */

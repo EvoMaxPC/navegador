@@ -1631,6 +1631,10 @@ function registerIpc() {
       // Contador de mensajes del usuario: se cuenta acá, no en `prepare()`.
       const counted = engine.onUserMessage(event.sender.id, clean.payload);
       if (counted?.duplicate) { broadcast('nexo:stats-changed', statsSnapshot()); return; }
+      // Un solo envío, un solo «Mensaje enviado»: si la red ya lo contó con el
+      // cuerpo real, este aviso no se repite. `counted.superseded` distingue
+      // esta fusión (misma petición, otro texto) de un envío nuevo.
+      if (counted?.superseded) { broadcast('nexo:stats-changed', statsSnapshot()); return; }
       writeCaptureTrace('request-detected', { ...clean.payload, duplicate: Boolean(counted?.duplicate) });
       const entry = {
         kind: 'sending',
@@ -1641,7 +1645,12 @@ function registerIpc() {
           ? 'El texto salió mediado por el motor.'
           : clean.payload.textFound === false
             ? 'Envío contado: la petición salió, pero su texto no se pudo leer.'
-            : 'El texto salió sin cambios: el motor no modificó este mensaje.',
+            // `chars` distinto del texto que se leyó en la red = el motor SÍ
+            // cambió este mensaje (protocolo, memoria): no puede decir «sin
+            // cambios». Las cifras del gesto son del texto original.
+            : clean.payload.mediated || (Number(clean.payload.chars) || 0) !== (Number(clean.payload.networkChars) || 0)
+              ? 'El texto salió mediado por el motor.'
+              : 'El texto salió sin cambios: el motor no modificó este mensaje.',
         meta: {
           host,
           site: clean.payload.site || null,
@@ -2117,9 +2126,29 @@ function noteUserMessageFromNetwork(details = {}) {
     promptHash: text ? fingerprint(text) : '',
     textFound: Boolean(text),
   });
-  if (counted?.duplicate) {
+  // Antes que `duplicate`: una fusión con otro texto es un duplicado, pero de
+  // los que sustituyen el aviso en vez de dejar el de la capa.
+  if (counted?.duplicate && !counted?.superseded) {
     broadcast('nexo:stats-changed', statsSnapshot());
     return { seen: true, counted: false, conversation: true };
+  }
+  // La capa ya describió este envío con el texto del cuadro; el cuerpo real
+  // manda. Se retira su aviso (mismo `messageId`) para que quede UNO solo y se
+  // vuelve a publicar debajo con lo que de verdad viajó. No es un mensaje nuevo.
+  const sustituye = Boolean(counted?.superseded) && Boolean(store);
+  if (sustituye) {
+    // `save()` NO publica el estado en RAM (`store.js:64`, el estado se cambia
+    // con `pushLog`/`clearLog`): se retira el aviso del registro vivo y se
+    // vuelve a guardar, igual que `clearLog` pero quitando una sola entrada.
+    // El identificador del envío viaja en `meta.messageId`, no en la raíz de
+    // la entrada (ver el aviso de arriba).
+    const vivo = store.log;
+    const queda = vivo.filter((e) => (e?.meta?.messageId ?? e?.messageId) !== counted.messageId);
+    if (queda.length !== vivo.length) {
+      vivo.length = 0;
+      vivo.push(...queda);
+      store.save();
+    }
   }
 
   const entry = {
@@ -2135,6 +2164,9 @@ function noteUserMessageFromNetwork(details = {}) {
       site: site.id,
       url: shortPath(url),
       source: 'network',
+      // Mismo identificador que el aviso de la capa: permite ver que son el
+      // mismo envío (y sustituir uno por otro sin duplicar).
+      messageId: counted?.messageId || null,
       chars: text.length,
       ...measurement,
       conversationId: null,
