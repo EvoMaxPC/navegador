@@ -646,7 +646,11 @@ function refreshGuestSettings() {
   for (const contents of webContents.getAllWebContents()) {
     const host = hostOf(contents.getURL());
     if (!contents.isDestroyed() && contents.getType() === 'webview' && isAiHost(host)) {
-      contents.send('nexo:settings', engine.configFor(host));
+      // Es un envío hacia la pestaña, no una respuesta a la shell: el payload se
+      // recorta con el mismo criterio que `nexo:config`/`config-sync`
+      // (`tabConfig.js`), porque el bridge lo reenvía tal cual al mundo principal
+      // de la página (preload/bridge.cjs:212-214 → inject/index.js:1350).
+      contents.send('nexo:settings', configForTab(engine.configFor(host)));
     }
   }
 }
