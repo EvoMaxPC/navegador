@@ -1005,6 +1005,10 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
             // cuántos portadores— va al lado, no dentro.
             diag: { ...diagnostico },
             ...(info.estructura ? { estructura: info.estructura } : {}),
+            // Esqueleto del stream: una firma por evento, ya sin texto. Se
+            // calcula siempre en el filtro y viaja con el cierre, como la
+            // estructura; main decide si lo publica (`diag-stream-forma`).
+            ...(info.esqueleto && info.esqueleto.length ? { esqueleto: info.esqueleto } : {}),
           });
         };
         const text = String(info.text || '');

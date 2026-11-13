@@ -214,6 +214,7 @@ function resumirAnidado(anidado) {
       assistantSi: mensaje.assistantSi,
       assistantNo: mensaje.assistantNo,
       otra: Boolean(mensaje.otra),
+      descartes: mensaje.descartes.slice(0, 12),
     },
     rutaTexto: { ...anidado.rutaTexto },
     noJson: anidado.noJson,
@@ -326,7 +327,7 @@ export function createStreamFilter(opts = {}) {
     mensaje: { roles: [], tipos: [], estados: [], canales: [],
       metadataClaves: [], descartados: 0, sinTexto: 0, aceptados: 0,
       causas: { rol: 0, tipo: 0, fragmento: 0, oculto: 0, canal: 0, otra: 0 },
-      assistantSi: 0, assistantNo: 0, vistos: 0, otra: false },
+      assistantSi: 0, assistantNo: 0, vistos: 0, otra: false, descartes: [] },
     // Forma de `v` en los eventos que apuntan a una parte de texto, y cuántos
     // de ellos dieron segmento.
     rutaTexto: { string: 0, array: 0, object: 0, otro: 0, conSegmento: 0 },
@@ -602,6 +603,13 @@ export function createStreamFilter(opts = {}) {
     if (plan.descartados) anidado.mensaje.descartados += plan.descartados;
     if (plan.sinTexto) anidado.mensaje.sinTexto += plan.sinTexto;
     if (plan.aceptados) anidado.mensaje.aceptados += plan.aceptados;
+    if (Array.isArray(plan.descartes) && plan.descartes.length) {
+      // Tope de 12 por stream: son firmas, no un registro completo.
+      for (const firma of plan.descartes) {
+        if (anidado.mensaje.descartes.length >= 12) break;
+        anidado.mensaje.descartes.push(firma);
+      }
+    }
     if (plan.assistantSi) anidado.mensaje.assistantSi += plan.assistantSi;
     if (plan.assistantNo) anidado.mensaje.assistantNo += plan.assistantNo;
     if (plan.causas) {

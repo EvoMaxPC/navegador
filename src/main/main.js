@@ -904,7 +904,7 @@ function diagMime(payload) {
 /** Nombres que se publican: minúsculas y `_`, igual que el filtro. Lo demás es `otros`. */
 const NOMBRE_DIAG = /^[a-z_]{1,24}$/;
 /** Una firma de esqueleto publicable: formas y longitudes, nunca texto libre. */
-const ESQUELETO_SEGURO = /^[a-z_/0-9s<>{},:\[\]…+.\- ]*$/;
+const ESQUELETO_SEGURO = /^[a-z_/0-9s<>{},:\[\]…+.\- ?]*$/;
 
 /** Rutas normalizadas del nivel 2: dígitos ya son `N` en la capa. */
 const RUTA_DIAG = /^\/[a-z_/N]{1,48}$/;
@@ -926,7 +926,8 @@ function textoEstructura(e) {
       ` · noJson ${e.anidado.noJson ? `${e.anidado.noJson.clase}/${e.anidado.noJson.longitud}` : '-'}` +
       ` · ${textoEtiquetas(e.anidado.mensaje)}` +
       ` · causas ${textoCausas(e.anidado.mensaje.causas)}` +
-      ` · rutaTexto ${textoRutaTexto(e.anidado.rutaTexto)}` : '');
+      ` · rutaTexto ${textoRutaTexto(e.anidado.rutaTexto)}` +
+      ` · ${textoDescartes(e.anidado.mensaje.descartes)}` : '');
   return texto.slice(0, 1100);
 }
 
@@ -1003,6 +1004,38 @@ function diagEstructura(payload) {
   };
 }
 
+/** Sanea una firma de descarte: etiquetas con su lista blanca, nada de texto. */
+function diagDescarte(d) {
+  if (!d || typeof d !== 'object') return null;
+  const texto = (valor) => {
+    const nombre = String(valor || '').trim().toLowerCase();
+    if (nombre === '-' || nombre === 'otro' || nombre === 'otra') return nombre;
+    return NOMBRE_DIAG.test(nombre) ? nombre : 'otra';
+  };
+  const numero = (valor) => (Number.isFinite(Number(valor)) ? Number(valor) : 0);
+  const causa = ['rol', 'tipo', 'canal', 'fragmento', 'oculto', 'otra'].includes(d.causa) ? d.causa : 'otra';
+  return {
+    causa,
+    role: texto(d.role), content_type: texto(d.content_type), status: texto(d.status),
+    channel: texto(d.channel), recipient: texto(d.recipient),
+    fragmento: texto(d.fragmento), oculto: texto(d.oculto),
+    // `parts0` sólo puede ser `s<n>` (longitud de la primera parte) o `-`.
+    parts0: /^s\d{1,9}$/.test(String(d.parts0 || '')) ? String(d.parts0) : '-',
+    partsN: numero(d.partsN),
+  };
+}
+
+/**
+ * Las firmas de descarte en una línea: por qué se cayó cada mensaje y con qué
+ * valores lo decidió el criterio.
+ */
+function textoDescartes(descartes) {
+  if (!Array.isArray(descartes) || !descartes.length) return 'descartes 0';
+  return descartes.map((d, i) => `#${i + 1} ${d.causa}` +
+    ` rol:${d.role} tipo:${d.content_type} canal:${d.channel} recip:${d.recipient}` +
+    ` frag:${d.fragmento} ocul:${d.oculto} parts0:${d.parts0} partsN:${d.partsN}`).join(' | ');
+}
+
 /** Sanea el nivel 2: rutas, operaciones y etiquetas con su lista blanca. */
 function diagAnidado(a) {
   if (!a || typeof a !== 'object') return null;
@@ -1052,6 +1085,7 @@ function diagAnidado(a) {
       assistantSi: numero(m.assistantSi),
       assistantNo: numero(m.assistantNo),
       otra: Boolean(m.otra),
+      descartes: Array.isArray(m.descartes) ? m.descartes.slice(0, 12).map(diagDescarte) : [],
     },
     rutaTexto: {
       string: numero(a.rutaTexto?.string), array: numero(a.rutaTexto?.array),

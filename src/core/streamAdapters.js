@@ -102,6 +102,8 @@ function genericAdapter({ deltaPaths = null } = {}) {
 /* ------------------------------------------------------------------ */
 
 const PARTS_PATH = /^\/message\/content\/parts\/(\d+)$/;
+/** Etiquetas publicables: minúsculas y `_`, igual que en el diagnóstico del filtro. */
+const LISTA_BLANCA = /^[a-z_]{1,24}$/;
 const TEXT_CONTENT_TYPES = new Set(['text', 'multimodal_text']);
 /** Estados de `/message/status` que significan «el mensaje terminó». */
 const CHATGPT_TERMINAL_STATUS = new Set([
@@ -202,11 +204,13 @@ function chatgptChannelAdapter() {
     let assistantSi = 0;
     let assistantNo = 0;
     const causas = { rol: 0, tipo: 0, fragmento: 0, oculto: 0, canal: 0, otra: 0 };
+    /** Una firma por mensaje descartado (tope 12): causa y etiquetas, sin texto. */
+    const descartes = [];
     const porEvento = { string: 0, array: 0, object: 0, otro: 0 };
     let segmentos = 0;
     const handled = isPlainObject(json) && Boolean(json.type || json.message || 'v' in json || 'p' in json || 'o' in json);
     const result = () => ({ segments, terminal, handled, model, descartados, sinTexto,
-      aceptados, assistantSi, assistantNo, causas, porEvento, segmentos });
+      aceptados, assistantSi, assistantNo, causas, porEvento, segmentos, descartes });
     if (!isPlainObject(json)) return result();
 
     // Canal sin cuenta: no lleva message.content, sino markdown con revisiones.
@@ -225,6 +229,45 @@ function chatgptChannelAdapter() {
     if (json.type === 'end' || json.type === 'message_stream_complete' ||
         (json.type === 'control' && json.detail?.kind === 'terminal-received')) terminal = 'message';
 
+    /**
+     * Firma de un mensaje descartado: causa, etiquetas y los booleanos/propiedades
+     * que evalúa el criterio de "oculto" (`readMessage`, más abajo). Todo pasa por
+     * la lista blanca de etiquetas; nada de texto.
+     */
+    function firmarDescarte(message, role, type) {
+      const meta = message.metadata && typeof message.metadata === 'object' ? message.metadata : {};
+      const etiqueta = (crudo) => {
+        const texto = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
+        return LISTA_BLANCA.test(texto) ? texto : 'otra';
+      };
+      const booleano = (crudo) => {
+        if (typeof crudo === 'boolean') return String(crudo);
+        if (crudo === undefined || crudo === null) return '-';
+        return etiqueta(crudo) === 'otra' ? 'otro' : String(crudo).toLowerCase();
+      };
+      const parts = message.content?.parts;
+      const primera = Array.isArray(parts) && typeof parts[0] === 'string' ? parts[0].length : -1;
+      // Precedencia: la misma que el orden de la condición y de los cubos.
+      const causa = role !== undefined && role !== 'assistant' ? 'rol'
+        : type && !TEXT_CONTENT_TYPES.has(type) ? 'tipo'
+          : message.channel && message.channel !== 'final' ? 'canal'
+            : message.recipient && message.recipient !== 'all' ? 'otra'
+              : meta.is_message_fragment ? 'fragmento'
+                : meta.is_visually_hidden_from_conversation ? 'oculto' : 'otra';
+      return {
+        causa,
+        role: etiqueta(role),
+        content_type: etiqueta(type),
+        status: etiqueta(message.status),
+        channel: etiqueta(message.channel),
+        recipient: etiqueta(message.recipient),
+        fragmento: booleano(meta.is_message_fragment),
+        oculto: booleano(meta.is_visually_hidden_from_conversation),
+        parts0: primera < 0 ? '-' : `s${primera}`,
+        partsN: Array.isArray(parts) ? parts.length : 0,
+      };
+    }
+
     function readMessage(message, prefix) {
       if (!isPlainObject(message)) return;
       const role = message.author?.role;
@@ -241,6 +284,9 @@ function chatgptChannelAdapter() {
       if (!state.assistantText) {
         descartados += 1;
         sinTexto += 1;
+        // Firma del descarte: la causa, las etiquetas y los valores EXACTOS que
+        // lee el criterio (`:231-235`), para no tener que adivinar cuál saltó.
+        if (descartes.length < 12) descartes.push(firmarDescarte(message, role, type));
         // Un solo cubo por mensaje: se informa la primera causa que falla, en
         // el mismo orden en que las evalúa la condición de arriba.
         if (role !== undefined && role !== 'assistant') causas.rol += 1;
