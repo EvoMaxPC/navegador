@@ -57,79 +57,6 @@ const RUTA_DIAG = /^\/[a-z_/N]{1,48}$/;
 const OPERACION_DIAG = /^[a-z_]{1,16}$/;
 const TOPE_ANIDADO = 12;
 
-/* --- esqueleto por evento: la FORMA del stream, nunca sus valores ---------- */
-
-/** Profundidad máxima que se recorre al dibujar el esqueleto. */
-const ESQ_PROFUNDIDAD = 4;
-/** Claves y elementos por objeto/array antes de resumir con «+N». */
-const ESQ_ANCHO = 8;
-/** Eventos que se dibujan: los primeros de cada stream. */
-const ESQ_EVENTOS = 24;
-/** A partir de aquí, el aviso se parte en varios en vez de cortarse. */
-const ESQ_TROZO = 2400;
-
-/** Claves que sí se imprimen literales, y sólo si pasan la lista blanca. */
-const ESQ_LITERALES = new Set(['p', 'o', 'type', 'kind', 'event', 'role', 'content_type', 'status', 'channel', 'marker']);
-/** Un literal publicable: dígitos a N y sólo letras, `_` y `/`. */
-const ESQ_LITERAL = /^[a-z_/]{1,48}$/;
-
-/**
- * Dibuja la forma de un valor: nombres de clave, tipos y longitudes de cadena.
- * **Ningún texto sale de aquí** salvo los literales de `ESQ_LITERALES` que
- * pasen la lista blanca; el resto es `s<longitud>`.
- */
-function dibujar(valor, clave, profundidad, salida) {
-  if (typeof valor === 'string') {
-    const literal = ESQ_LITERALES.has(clave) ? valor.replace(/\d+/g, 'N').toLowerCase() : '';
-    salida.push(literal && ESQ_LITERAL.test(literal) ? literal : `s${valor.length}`);
-    return;
-  }
-  if (typeof valor === 'number') { salida.push('n'); return; }
-  if (typeof valor === 'boolean') { salida.push(String(valor)); return; }
-  if (valor === null || valor === undefined) { salida.push(String(valor)); return; }
-  if (profundidad >= ESQ_PROFUNDIDAD) { salida.push(Array.isArray(valor) ? '[…]' : '{…}'); return; }
-
-  if (Array.isArray(valor)) {
-    salida.push('[');
-    const vistos = valor.slice(0, ESQ_ANCHO);
-    vistos.forEach((item, i) => {
-      if (i) salida.push(',');
-      dibujar(item, '', profundidad + 1, salida);
-    });
-    if (valor.length > ESQ_ANCHO) salida.push(`,+${valor.length - ESQ_ANCHO}`);
-    salida.push(']');
-    return;
-  }
-
-  salida.push('{');
-  const claves = Object.keys(valor);
-  claves.slice(0, ESQ_ANCHO).forEach((original, i) => {
-    const nombre = String(original).trim().toLowerCase();
-    const publicable = LISTA_BLANCA.test(nombre) ? nombre : 'k?';
-    if (i) salida.push(',');
-    salida.push(`${publicable}:`);
-    dibujar(valor[original], publicable, profundidad + 1, salida);
-  });
-  if (claves.length > ESQ_ANCHO) salida.push(`,+${claves.length - ESQ_ANCHO}`);
-  salida.push('}');
-}
-
-/** Una firma por evento: nombre SSE + forma del JSON, o clasificación del no-JSON. */
-function firmaEvento(evt, data) {
-  const salida = [];
-  const nombre = String(evt.event || '').trim().toLowerCase();
-  salida.push(nombre && LISTA_BLANCA.test(nombre) ? `${nombre} ` : '');
-  const json = safeJson(data);
-  if (!json) {
-    const c = clasificarNoJson(data, false);
-    return `${salida.join('')}nojson:${c.longitud}:${c.clase}`;
-  }
-  salida.push('<');
-  dibujar(json, '', 0, salida);
-  salida.push('>');
-  return salida.join('');
-}
-
 /** Normaliza una ruta `p`: los índices numéricos pasan a `N`. */
 function normalizarRuta(crudo) {
   const ruta = String(crudo === null || crudo === undefined ? '' : crudo).replace(/\d+/g, 'N');
@@ -208,13 +135,7 @@ function resumirAnidado(anidado) {
       metadataClaves: lista(mensaje.metadataClaves),
       descartados: mensaje.descartados,
       sinTexto: mensaje.sinTexto,
-      aceptados: mensaje.aceptados,
-      vistos: mensaje.vistos,
-      causas: { ...mensaje.causas },
-      assistantSi: mensaje.assistantSi,
-      assistantNo: mensaje.assistantNo,
       otra: Boolean(mensaje.otra),
-      descartes: mensaje.descartes.slice(0, 12),
       ocultoLevantado: mensaje.ocultoLevantado,
       cierre: Boolean(mensaje.cierre),
       removes: mensaje.removes.slice(0, 6),
@@ -223,26 +144,6 @@ function resumirAnidado(anidado) {
     rutaTexto: { ...anidado.rutaTexto },
     noJson: anidado.noJson,
   };
-}
-
-/**
- * Reparte el esqueleto en trozos de `ESQ_TROZO` caracteres, sin cortar ningún
- * evento por la mitad. Devuelve el texto de cada aviso.
- */
-export function trocearEsqueleto(firmas, tope = ESQ_TROZO) {
-  const trozos = [];
-  let actual = '';
-  for (const firma of firmas) {
-    const pieza = actual ? ` | ${firma}` : firma;
-    if (actual && actual.length + pieza.length > tope) {
-      trozos.push(actual);
-      actual = firma;
-    } else {
-      actual += pieza;
-    }
-  }
-  if (actual) trozos.push(actual);
-  return trozos;
 }
 
 function resumirEstructura(resumen) {
@@ -329,28 +230,18 @@ export function createStreamFilter(opts = {}) {
     rutasParche: [], rutasOtra: false, rutasEvento: [], rutasEventoOtra: false,
     vObjetoClaves: [], vObjetoOtra: false,
     mensaje: { roles: [], tipos: [], estados: [], canales: [],
-      metadataClaves: [], descartados: 0, sinTexto: 0, aceptados: 0,
-      causas: { rol: 0, tipo: 0, fragmento: 0, oculto: 0, canal: 0, otra: 0 },
-      assistantSi: 0, assistantNo: 0, vistos: 0, otra: false, descartes: [],
+      metadataClaves: [], descartados: 0, sinTexto: 0, otra: false,
       ocultoLevantado: 0, removes: [], removesOtra: false, cierre: false },
     // Forma de `v` en los eventos que apuntan a una parte de texto, y cuántos
     // de ellos dieron segmento.
     rutaTexto: { string: 0, array: 0, object: 0, otro: 0, conSegmento: 0 },
     noJson: null,
   };
-  // Esqueleto de los primeros eventos. Se calcula siempre —es una pasada de
-  // formas sobre datos ya parseados— y main decide si lo publica.
-  const esqueleto = [];
-  const anotarEsqueleto = (evt) => {
-    if (esqueleto.length >= ESQ_EVENTOS) return;
-    esqueleto.push(firmaEvento(evt, evt.data));
-  };
   const empujar = (lista, valor, tope = TOPE_ANIDADO) => {
     if (lista.length < tope && !lista.includes(valor)) lista.push(valor);
   };
   const contarEvento = (evt) => {
     estructura.eventos += 1;
-    anotarEsqueleto(evt);
     if (!evt.hasData) return false;
     estructura.conDatos += 1;
     if (!evt.event) estructura.sinEvento += 1;
@@ -428,7 +319,6 @@ export function createStreamFilter(opts = {}) {
     const mensaje = valor.message;
     if (!mensaje || typeof mensaje !== 'object' || Array.isArray(mensaje)) return;
     // Se deja constancia de que el mensaje llegó, aunque después se descarte.
-    anidado.mensaje.vistos += 1;
     const etiqueta = (crudo) => {
       const texto = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
       return LISTA_BLANCA.test(texto) ? texto : null;
@@ -505,7 +395,6 @@ export function createStreamFilter(opts = {}) {
         : (interrupted || verdict.stopped) ? 'unknown' : outcome || 'completed',
       interrupted, model: adapter.model?.() || '',
       estructura: { ...resumirEstructura(estructura), anidado: resumirAnidado(anidado) },
-      esqueleto: esqueleto.slice(),
     });
   };
   let stoppedReported = false;
@@ -613,14 +502,6 @@ export function createStreamFilter(opts = {}) {
     const segments = plan.segments || [];
     if (plan.descartados) anidado.mensaje.descartados += plan.descartados;
     if (plan.sinTexto) anidado.mensaje.sinTexto += plan.sinTexto;
-    if (plan.aceptados) anidado.mensaje.aceptados += plan.aceptados;
-    if (Array.isArray(plan.descartes) && plan.descartes.length) {
-      // Tope de 12 por stream: son firmas, no un registro completo.
-      for (const firma of plan.descartes) {
-        if (anidado.mensaje.descartes.length >= 12) break;
-        anidado.mensaje.descartes.push(firma);
-      }
-    }
     if (plan.cierre) anidado.mensaje.cierre = true;
     if (plan.ocultoLevantado) anidado.mensaje.ocultoLevantado += plan.ocultoLevantado;
     if (Array.isArray(plan.removes) && plan.removes.length) {
@@ -631,13 +512,6 @@ export function createStreamFilter(opts = {}) {
         if (/^\/message\/[A-Za-z_/]{1,56}$/.test(ruta) || /^s\d{1,6}$/.test(ruta)) {
           anidado.mensaje.removes.push(ruta);
         } else anidado.mensaje.removesOtra = true;
-      }
-    }
-    if (plan.assistantSi) anidado.mensaje.assistantSi += plan.assistantSi;
-    if (plan.assistantNo) anidado.mensaje.assistantNo += plan.assistantNo;
-    if (plan.causas) {
-      for (const causa of Object.keys(anidado.mensaje.causas)) {
-        if (plan.causas[causa]) anidado.mensaje.causas[causa] += plan.causas[causa];
       }
     }
     if (plan.porEvento) {

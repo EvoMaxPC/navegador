@@ -72,68 +72,6 @@ const anidadoDe = async (cuerpo) => (await correr(cuerpo)).estructura.anidado;
 /* 1. un cubo por causa                                               */
 /* ------------------------------------------------------------------ */
 
-test('(1) cada causa de descarte cae en su propio cubo', async () => {
-  const casos = [
-    ['rol', mensaje({ role: 'user' })],
-    ['tipo', mensaje({ tipo: 'code' })],
-    ['fragmento', mensaje({ metadata: { is_message_fragment: true } })],
-    ['oculto', mensaje({ metadata: { is_visually_hidden_from_conversation: true } })],
-    ['canal', mensaje({ extra: { channel: 'commentary' } })],
-    ['otra', mensaje({ extra: { recipient: 'web.run' } })],
-  ];
-  for (const [causa, base] of casos) {
-    const a = await anidadoDe(sse({ event: 'message', data: base }, { data: '[DONE]' }));
-    assert.equal(a.mensaje.causas[causa], 1, `la causa ${causa} se cuenta en su cubo`);
-    const otras = Object.entries(a.mensaje.causas).filter(([nombre, n]) => nombre !== causa && n > 0);
-    assert.deepEqual(otras, [], `la causa ${causa} no se suma también a otras`);
-    assert.equal(a.mensaje.descartados, 1, `${causa}: un descarte`);
-    assert.equal(a.mensaje.aceptados, 0, `${causa}: ninguno aceptado`);
-  }
-});
-
-test('(2) un mensaje assistant aceptado no suma descartes', async () => {
-  const a = await anidadoDe(sse(
-    { event: 'message', data: mensaje() },
-    { data: { p: PARTE, o: 'append', v: 'hola' } },
-    { data: '[DONE]' },
-  ));
-  assert.equal(a.mensaje.aceptados, 1, 'se cuenta como aceptado');
-  assert.equal(a.mensaje.descartados, 0, 'y no como descarte');
-  assert.deepEqual(a.mensaje.causas, { rol: 0, tipo: 0, fragmento: 0, oculto: 0, canal: 0, otra: 0 },
-    'ningún cubo se mueve');
-  assert.equal(a.mensaje.vistos, 1, 'y el mensaje se vio');
-});
-
-test('(3) un mismo stream suma los cubos de todos sus mensajes', async () => {
-  // Lo que pasaba en el PC: varios `readMessage` por stream, no uno.
-  const a = await anidadoDe(sse(
-    { event: 'message', data: mensaje({ role: 'user' }) },
-    { event: 'message', data: mensaje({ role: 'system' }) },
-    { event: 'message', data: mensaje({ role: 'user' }) },
-    { event: 'message', data: mensaje() },
-    { data: '[DONE]' },
-  ));
-  assert.equal(a.mensaje.causas.rol, 3, 'tres descartes por rol');
-  assert.equal(a.mensaje.aceptados, 1, 'uno aceptado');
-  assert.equal(a.mensaje.descartados, 3);
-  assert.equal(a.mensaje.vistos, 4, 'los cuatro mensajes llegaron');
-});
-
-test('(4) assistantText se cuenta en true y en false', async () => {
-  const a = await anidadoDe(sse(
-    // El estado se fija con el parche de rol que el protocolo ya emite.
-    { data: { p: '/message/author/role', o: 'replace', v: 'assistant' } },
-    { data: { p: '/message/author/role', o: 'replace', v: 'user' } },
-    { data: '[DONE]' },
-  ));
-  assert.equal(a.mensaje.assistantSi, 1, 'una vez en true');
-  assert.equal(a.mensaje.assistantNo, 1, 'una vez en false');
-});
-
-/* ------------------------------------------------------------------ */
-/* 5. la forma de `v` en la ruta de texto                             */
-/* ------------------------------------------------------------------ */
-
 test('(5) `v` string, array, object y otro se clasifican en la ruta de texto', async () => {
   const a = await anidadoDe(sse(
     { event: 'message', data: mensaje() },
@@ -156,7 +94,6 @@ test('(6) un `p` que no es ruta de texto no entra en la clasificación', async (
   ));
   assert.deepEqual(a.rutaTexto, { string: 0, array: 0, object: 0, otro: 0, conSegmento: 0 },
     'sólo cuenta /message/content/parts/N');
-  assert.equal(a.mensaje.aceptados, 1);
 });
 
 /* ------------------------------------------------------------------ */
@@ -247,8 +184,6 @@ test('(7) las etiquetas del mensaje se ven en la línea publicada', async () => 
   assert.match(aviso.detail, /estado in_progress/);
   assert.match(aviso.detail, /canal final/);
   assert.match(aviso.detail, /meta model_slug/, 'y los nombres de claves de metadata');
-  assert.match(aviso.detail, /aceptados 0 · vistos 14/, 'con los conteos del mensaje');
-  assert.match(aviso.detail, /assistant 1\/2/, 'y assistantText true/false');
 });
 
 test('(8) sin ninguna etiqueta se publica «etiquetas 0», no silencio', async () => {
@@ -258,12 +193,12 @@ test('(8) sin ninguna etiqueta se publica «etiquetas 0», no silencio', async (
   assert.match(aviso.detail, /etiquetas 0/, 'se dice explícitamente');
 });
 
-test('(9) los cubos de descarte se ven en la línea', async () => {
+test('(9) la forma de `v` en la ruta de texto se ve en la línea', async () => {
+  // Los cubos por causa se retiraron en 7c-15; `rutaTexto` se conserva.
   const aviso = await cerrar(anidadoBase());
-  assert.match(aviso.detail, /causas rol 3 tipo 0 fragmento 0 oculto 0 canal 0 otra 8/,
-    'cada causa con su cuenta');
   assert.match(aviso.detail, /rutaTexto string 0 array 2 object 0 otro 0 · con segmento 0/,
-    'y la forma de v en la ruta de texto');
+    'la forma de v en la ruta de texto');
+  assert.ok(!/causas /.test(aviso.detail), 'y los cubos ya no se imprimen');
 });
 
 test('(10) la marca no aparece en ninguna cadena publicada', async () => {

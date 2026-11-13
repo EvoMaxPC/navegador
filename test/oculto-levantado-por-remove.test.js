@@ -149,8 +149,6 @@ test('T2 assistant oculto cuyo remove nunca llega: 0 caracteres', async () => {
   ));
   assert.equal(fin.text, '', 'la protección contra mensajes ocultos reales se mantiene');
   assert.equal(fin.estructura.anidado.mensaje.ocultoLevantado, 0);
-  // Y el descarte queda contado con su causa.
-  assert.equal(fin.estructura.anidado.mensaje.causas.oculto, 1);
 });
 
 /* ------------------------------------------------------------------ */
@@ -164,7 +162,6 @@ test('T3 un system con la marca y su remove sigue sin publicar texto', async () 
     '[DONE]',
   ));
   assert.equal(fin.text, '', 'el rol manda: la marca no reabre un mensaje del sistema');
-  assert.equal(fin.estructura.anidado.mensaje.causas.rol, 1);
 });
 
 test('T3b un user con la marca y su remove tampoco', async () => {
@@ -174,7 +171,6 @@ test('T3b un user con la marca y su remove tampoco', async () => {
     '[DONE]',
   ));
   assert.equal(fin.text, '');
-  assert.equal(fin.estructura.anidado.mensaje.causas.rol, 1);
 });
 
 test('T3c un assistant con fragmento y su remove tampoco', async () => {
@@ -184,7 +180,6 @@ test('T3c un assistant con fragmento y su remove tampoco', async () => {
     '[DONE]',
   ));
   assert.equal(fin.text, '', 'los demás filtros siguen mandando');
-  assert.equal(fin.estructura.anidado.mensaje.causas.fragmento, 1);
 });
 
 /* ------------------------------------------------------------------ */

@@ -6,7 +6,6 @@ import { installAdvancedBrowser } from './advancedBrowser.js';
 import { PromptStore } from './promptStore.js';
 import { MAX_PROMPTS, PROMPT_VARIABLES } from '../core/prompts.js';
 import { repetitionSnapshot } from '../core/conversationRepetition.js';
-import { trocearEsqueleto } from '../core/streamFilter.js';
 import { isPublicAssetPath } from './internalAssets.js';
 import { configForTab, settingsForTab } from './tabConfig.js';
 import { createCaptureDiagnostic } from './captureDiagnostic.js';
@@ -314,7 +313,7 @@ const AVISOS_DE_BLOQUEO = new Set(['egress-net-block', 'egress-injected-block'])
  */
 const diagOn = process.env.NEXO_DIAG === '1';
 /** Estos avisos no se deduplican: cada uno describe un hecho distinto. */
-const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje', 'diag-cancelacion', 'diag-stream-forma']);
+const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje', 'diag-cancelacion']);
 function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
   if (!store) return null;
   // La clave agrupa lo que es el mismo aviso. Por omisión, código y título; el
@@ -903,8 +902,6 @@ function diagMime(payload) {
 
 /** Nombres que se publican: minúsculas y `_`, igual que el filtro. Lo demás es `otros`. */
 const NOMBRE_DIAG = /^[a-z_]{1,24}$/;
-/** Una firma de esqueleto publicable: formas y longitudes, nunca texto libre. */
-const ESQUELETO_SEGURO = /^[a-z_/0-9s<>{},:\[\]…+.\- ?]*$/;
 
 /** Rutas normalizadas del nivel 2: dígitos ya son `N` en la capa. */
 const RUTA_DIAG = /^\/[a-z_/N]{1,48}$/;
@@ -925,13 +922,12 @@ function textoEstructura(e) {
       ` · descartes ${cuenta(e.anidado.mensaje.descartados)}` +
       ` · noJson ${e.anidado.noJson ? `${e.anidado.noJson.clase}/${e.anidado.noJson.longitud}` : '-'}` +
       ` · ${textoEtiquetas(e.anidado.mensaje)}` +
-      ` · causas ${textoCausas(e.anidado.mensaje.causas)}` +
       ` · rutaTexto ${textoRutaTexto(e.anidado.rutaTexto)}` +
       ` · cierre ${e.anidado.mensaje.cierre ? 'si' : 'no'}` +
       ` · ocultoLevantado ${e.anidado.mensaje.ocultoLevantado}` +
       ` · removes ${e.anidado.mensaje.removes.length ? e.anidado.mensaje.removes.join(',') : '0'}` +
       `${e.anidado.mensaje.removesOtra ? '+s<n>' : ''}` +
-      ` · ${textoDescartes(e.anidado.mensaje.descartes)}` : '');
+      `` : '');
   return texto.slice(0, 1100);
 }
 
@@ -948,16 +944,7 @@ function textoEtiquetas(m) {
   if (lista(m.estados)) partes.push(`estado ${lista(m.estados)}`);
   if (lista(m.canales)) partes.push(`canal ${lista(m.canales)}`);
   if (lista(m.metadataClaves)) partes.push(`meta ${lista(m.metadataClaves)}`);
-  const cuerpo = partes.length ? partes.join(' · ') : 'etiquetas 0';
-  return `${cuerpo} · aceptados ${cuenta(m.aceptados)} · vistos ${cuenta(m.vistos || 0)}` +
-    ` · assistant ${cuenta(m.assistantSi)}/${cuenta(m.assistantNo)}`;
-}
-
-/** Los cubos de descarte, con nombre y cuenta. */
-function textoCausas(causas) {
-  const c = causas || {};
-  return ['rol', 'tipo', 'fragmento', 'oculto', 'canal', 'otra']
-    .map((nombre) => `${nombre} ${cuenta(c[nombre])}`).join(' ');
+  return partes.length ? partes.join(' · ') : 'etiquetas 0';
 }
 
 /** Formas de `v` en la ruta de texto, y cuántas dieron segmento. */
@@ -1008,38 +995,6 @@ function diagEstructura(payload) {
   };
 }
 
-/** Sanea una firma de descarte: etiquetas con su lista blanca, nada de texto. */
-function diagDescarte(d) {
-  if (!d || typeof d !== 'object') return null;
-  const texto = (valor) => {
-    const nombre = String(valor || '').trim().toLowerCase();
-    if (nombre === '-' || nombre === 'otro' || nombre === 'otra') return nombre;
-    return NOMBRE_DIAG.test(nombre) ? nombre : 'otra';
-  };
-  const numero = (valor) => (Number.isFinite(Number(valor)) ? Number(valor) : 0);
-  const causa = ['rol', 'tipo', 'canal', 'fragmento', 'oculto', 'otra'].includes(d.causa) ? d.causa : 'otra';
-  return {
-    causa,
-    role: texto(d.role), content_type: texto(d.content_type), status: texto(d.status),
-    channel: texto(d.channel), recipient: texto(d.recipient),
-    fragmento: texto(d.fragmento), oculto: texto(d.oculto),
-    // `parts0` sólo puede ser `s<n>` (longitud de la primera parte) o `-`.
-    parts0: /^s\d{1,9}$/.test(String(d.parts0 || '')) ? String(d.parts0) : '-',
-    partsN: numero(d.partsN),
-  };
-}
-
-/**
- * Las firmas de descarte en una línea: por qué se cayó cada mensaje y con qué
- * valores lo decidió el criterio.
- */
-function textoDescartes(descartes) {
-  if (!Array.isArray(descartes) || !descartes.length) return 'descartes 0';
-  return descartes.map((d, i) => `#${i + 1} ${d.causa}` +
-    ` rol:${d.role} tipo:${d.content_type} canal:${d.channel} recip:${d.recipient}` +
-    ` frag:${d.fragmento} ocul:${d.oculto} parts0:${d.parts0} partsN:${d.partsN}`).join(' | ');
-}
-
 /** Sanea el nivel 2: rutas, operaciones y etiquetas con su lista blanca. */
 function diagAnidado(a) {
   if (!a || typeof a !== 'object') return null;
@@ -1079,17 +1034,7 @@ function diagAnidado(a) {
       metadataClaves: lista(m.metadataClaves).texto,
       descartados: numero(m.descartados),
       sinTexto: numero(m.sinTexto),
-      aceptados: numero(m.aceptados),
-      vistos: numero(m.vistos),
-      causas: {
-        rol: numero(m.causas?.rol), tipo: numero(m.causas?.tipo),
-        fragmento: numero(m.causas?.fragmento), oculto: numero(m.causas?.oculto),
-        canal: numero(m.causas?.canal), otra: numero(m.causas?.otra),
-      },
-      assistantSi: numero(m.assistantSi),
-      assistantNo: numero(m.assistantNo),
       otra: Boolean(m.otra),
-      descartes: Array.isArray(m.descartes) ? m.descartes.slice(0, 12).map(diagDescarte) : [],
       ocultoLevantado: numero(m.ocultoLevantado),
       cierre: Boolean(m.cierre),
       removes: Array.isArray(m.removes)
@@ -1249,29 +1194,6 @@ function registerIpc() {
           mime: diagMime(payload), formato: String(payload?.diag?.formato || '').slice(0, 20),
           chunks: Number(payload?.diag?.trozos) || 0, bytes: Number(payload?.diag?.bytes) || 0,
           ...(estructura ? { estructura } : {}) },
-      });
-    }
-    // Esqueleto del stream: una firma por evento, sin un solo valor de texto
-    // (`streamFilter.js`, `firmaEvento`). Va en avisos numerados: es preferible
-    // partir el informe a cortar la prueba por la mitad.
-    if (diagOn && Array.isArray(payload?.esqueleto) && payload.esqueleto.length) {
-      // El payload cruza un límite de confianza: el esqueleto se vuelve a
-      // sanear aquí. Una firma sólo puede tener letras, `_`, `/`, dígitos,
-      // `s<n>`, `<>{},:[]…` y `+n`; cualquier otra cosa se descarta entera.
-      const firmas = payload.esqueleto
-        .filter((firma) => typeof firma === 'string' && firma.length <= 4000 && ESQUELETO_SEGURO.test(firma))
-        .slice(0, 24);
-      const trozos = trocearEsqueleto(firmas);
-      const total = trozos.length;
-      trozos.forEach((texto, i) => {
-        noteDiagnostic({
-          code: 'diag-stream-forma', severity: 'info',
-          title: `diag-stream-forma: ${i + 1}/${total} · ${firmas.length} eventos`,
-          key: `diag-stream-forma|${i}|${firmas.length}|${texto.length}`,
-          // Ya viene saneado: nombres de clave, tipos y `s<longitud>`.
-          detail: total > 1 ? `[${i + 1}/${total}] ${texto}` : texto,
-          meta: { parte: i + 1, partes: total, eventos: firmas.length, caracteres: texto.length },
-        });
       });
     }
     // Texto tardío del mismo turno: reutilizar la absorción/deduplicación que

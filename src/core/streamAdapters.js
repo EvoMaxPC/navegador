@@ -226,18 +226,8 @@ function chatgptChannelAdapter() {
   function read(json) {
     const segments = [];
     let terminal = null;
-    // Diagnóstico: por qué se descarta un mensaje, con un cubo por causa, más
-    // los que se aceptan. Son conteos; no cambian ninguna decisión.
-    // `porEvento` y `segmentos` describen solamente los eventos cuya ruta es
-    // de texto (`/message/content/parts/N`).
     let descartados = 0;
     let sinTexto = 0;
-    let aceptados = 0;
-    let assistantSi = 0;
-    let assistantNo = 0;
-    const causas = { rol: 0, tipo: 0, fragmento: 0, oculto: 0, canal: 0, otra: 0 };
-    /** Una firma por mensaje descartado (tope 12): causa y etiquetas, sin texto. */
-    const descartes = [];
     const porEvento = { string: 0, array: 0, object: 0, otro: 0 };
     let segmentos = 0;
     /** Textos retenidos por la marca de oculto, a la espera de un `remove`. */
@@ -248,7 +238,7 @@ function chatgptChannelAdapter() {
     let conSegmentoTexto = false;
     const handled = isPlainObject(json) && Boolean(json.type || json.message || 'v' in json || 'p' in json || 'o' in json);
     const result = () => ({ segments, terminal, handled, model, descartados, sinTexto,
-      aceptados, assistantSi, assistantNo, causas, porEvento, segmentos, descartes,
+      porEvento, segmentos,
       ocultoLevantado: ocultoLevantado - levantadoAntes, removes,
       // Sólo el mensaje ACEPTADO (assistant, sin marca de oculto) cuenta.
       cierre: Boolean(aceptables.get(String(messageId || '')) && ocultos.get(String(messageId || '')) === false &&
@@ -270,48 +260,6 @@ function chatgptChannelAdapter() {
     }
     if (json.type === 'end' || json.type === 'message_stream_complete' ||
         (json.type === 'control' && json.detail?.kind === 'terminal-received')) terminal = 'message';
-
-    /**
-     * Firma de un mensaje descartado: causa, etiquetas y los booleanos/propiedades
-     * que evalúa el criterio de "oculto" (`readMessage`, más abajo). Todo pasa por
-     * la lista blanca de etiquetas; nada de texto.
-     */
-    function firmarDescarte(message, role, type) {
-      const meta = message.metadata && typeof message.metadata === 'object' ? message.metadata : {};
-      const etiqueta = (crudo) => {
-        const texto = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
-        return LISTA_BLANCA.test(texto) ? texto : 'otra';
-      };
-      const booleano = (crudo) => {
-        if (typeof crudo === 'boolean') return String(crudo);
-        if (crudo === undefined || crudo === null) return '-';
-        return etiqueta(crudo) === 'otra' ? 'otro' : String(crudo).toLowerCase();
-      };
-      const parts = message.content?.parts;
-      const primera = Array.isArray(parts) && typeof parts[0] === 'string' ? parts[0].length : -1;
-      // Precedencia: la misma que el orden de la condición y de los cubos.
-      // La marca, con su valor VIGENTE: si un `remove` ya la levantó, el
-      // mensaje no se descarta por ella y el cubo no debe decir lo contrario.
-      const marca = ocultos.get(messageId) ?? Boolean(meta.is_visually_hidden_from_conversation);
-      const causa = role !== undefined && role !== 'assistant' ? 'rol'
-        : type && !TEXT_CONTENT_TYPES.has(type) ? 'tipo'
-          : message.channel && message.channel !== 'final' ? 'canal'
-            : message.recipient && message.recipient !== 'all' ? 'otra'
-              : meta.is_message_fragment ? 'fragmento'
-                : marca ? 'oculto' : 'otra';
-      return {
-        causa,
-        role: etiqueta(role),
-        content_type: etiqueta(type),
-        status: etiqueta(message.status),
-        channel: etiqueta(message.channel),
-        recipient: etiqueta(message.recipient),
-        fragmento: booleano(meta.is_message_fragment),
-        oculto: booleano(marca),
-        parts0: primera < 0 ? '-' : `s${primera}`,
-        partsN: Array.isArray(parts) ? parts.length : 0,
-      };
-    }
 
     function readMessage(message, prefix) {
       if (!isPlainObject(message)) return;
@@ -339,21 +287,8 @@ function chatgptChannelAdapter() {
       if (!state.assistantText) {
         descartados += 1;
         sinTexto += 1;
-        // Firma del descarte: la causa, las etiquetas y los valores EXACTOS que
-        // lee el criterio (`:231-235`), para no tener que adivinar cuál saltó.
-        if (descartes.length < 12) descartes.push(firmarDescarte(message, role, type));
-        // Un solo cubo por mensaje: se informa la primera causa que falla, en
-        // el mismo orden en que las evalúa la condición de arriba.
-        if (role !== undefined && role !== 'assistant') causas.rol += 1;
-        else if (type && !TEXT_CONTENT_TYPES.has(type)) causas.tipo += 1;
-        else if (message.channel && message.channel !== 'final') causas.canal += 1;
-        else if (message.recipient && message.recipient !== 'all') causas.otra += 1;
-        else if (meta.is_message_fragment) causas.fragmento += 1;
-        else if (meta.is_visually_hidden_from_conversation) causas.oculto += 1;
-        else causas.otra += 1;
         return;
       }
-      aceptados += 1;
       const parts = message.content?.parts;
       if (Array.isArray(parts)) parts.forEach((part, i) => {
         if (typeof part !== 'string') return;
@@ -421,8 +356,7 @@ function chatgptChannelAdapter() {
       state.pathIsText = PARTS_PATH.test(target) && state.assistantText !== false;
       if (target === '/message/author/role') {
         state.assistantText = value === 'assistant';
-        if (state.assistantText) assistantSi += 1;
-        else { assistantNo += 1; sinTexto += 1; }
+        if (!state.assistantText) sinTexto += 1;
         return;
       }
       if (target === '/message/status' && CHATGPT_TERMINAL_STATUS.has(value)) {
