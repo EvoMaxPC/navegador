@@ -333,7 +333,7 @@ const lecturasDeConversacion = new Map();
  */
 const egressEnCurso = new Map();
 /** Estos avisos no se deduplican: cada uno describe un hecho distinto. */
-const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje', 'diag-cancelacion']);
+const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje', 'diag-cancelacion', 'diag-respuesta-contada', 'diag-dom-nodos']);
 function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
   if (!store) return null;
   // La clave agrupa lo que es el mismo aviso. Por omisión, código y título; el
@@ -454,6 +454,34 @@ function noteDiagSnapshot({ motivo, strategy, user, assistant, observed, dom, tu
  * que explica por qué suben los números. Sólo se publica cuando la firma cambia.
  */
 let diagContadoresFirma = null;
+
+/**
+ * Aviso `diag-respuesta-contada`: qué hizo el motor cuando se le entregó una
+ * respuesta, camino por camino, y si eso dejó aviso en el panel.
+ *
+ * Existe porque el contador de respuestas y las entradas de Actividad pueden
+ * separarse: un camino puede sumar sin avisar (`dom`), o no sumar porque el
+ * turno ya estaba contado (`stream-end` con `duplicate`). Sin este aviso, esa
+ * diferencia sólo se ve comparando números a mano. Sólo números y booleanos:
+ * nunca texto ni URL.
+ *
+ * @param {'stream-end'|'dom'|'red'|'cdp'} camino
+ * @param {{conto: boolean, aviso: boolean, chars: number}} datos
+ */
+function noteDiagRespuestaContada(camino, { conto, aviso, chars }) {
+  if (!diagOn) return null;
+  const n = Math.max(0, Number(chars) || 0);
+  const si = cuenta(conto ? 1 : 0);
+  const siAviso = cuenta(aviso ? 1 : 0);
+  return noteDiagnostic({
+    code: 'diag-respuesta-contada', severity: 'info',
+    key: `diag-respuesta-contada|${camino}|${si}|${siAviso}|${n}`,
+    title: `diag-respuesta-contada: ${camino}`,
+    detail: `camino ${camino} · contó ${siNo(conto)} · aviso ${siNo(aviso)} · chars ${cuenta(n)}`,
+    meta: { camino, conto: Boolean(conto), aviso: Boolean(aviso), chars: n },
+  });
+}
+
 /**
  * Última ruta observada por `nexo:dom-tokens:snapshot` (la del respaldo directo
  * de la shell), por pestaña. Sólo `origin + pathname`, nunca la URL completa y
@@ -1244,6 +1272,9 @@ function registerIpc() {
     }
     // Texto tardío del mismo turno: reutilizar la absorción/deduplicación que
     // ya atiende CDP, sin volver a finalizar la memoria del guardián.
+    // Diagnóstico: el contador antes y después, para poder decir si este camino
+    // sumó y si además dejó aviso. Se lee el contador público del motor.
+    const respuestasAntesStream = diagOn ? engine.stats().responses : 0;
     const result = payload?.source === 'dom-recovery' && payload?.site === 'chatgpt'
       ? { counted: engine.onCdpCapture(event.sender.id, payload), nextAction: null }
       : engine.onStreamEnd(event.sender.id, payload);
@@ -1263,7 +1294,15 @@ function registerIpc() {
       memory: result?.memory || result?.counted?.memory || null,
       duplicate: Boolean(result?.counted?.duplicate) });
     const chars = Number(payload?.chars) || Number(payload?.deliveredChars) || 0;
-    if (chars > 0 && !result?.counted?.duplicate) {
+    const avisaStream = chars > 0 && !result?.counted?.duplicate;
+    if (diagOn) {
+      // Se publica también cuando NO contó (duplicado): ese es justamente el
+      // caso que deja al panel sin aviso y que hay que poder explicar.
+      noteDiagRespuestaContada('stream-end', {
+        conto: engine.stats().responses > respuestasAntesStream, aviso: avisaStream, chars,
+      });
+    }
+    if (avisaStream) {
       const host = String(payload?.host || payload?.site || 'el sitio');
       const cortada = Boolean(payload?.stopped || payload?.truncated);
       const entry = {
@@ -1431,25 +1470,27 @@ function registerIpc() {
     const respuestasAntes = engine.stats().responses;
     const progress = engine.onRenderedConversation(sender.id, next, previous);
     const contoLaLectura = engine.stats().responses > respuestasAntes;
+    // Caracteres del último turno del assistant de esta lectura: es el único
+    // número que describe lo que llegó, y no necesita el texto.
+    const ultimoTurno = [...next.turns].reverse().find((turn) => turn?.role === 'assistant');
+    const charsLectura = String(ultimoTurno?.content ?? '').length;
     if (contoLaLectura) {
       // Camino del DOM: hasta acá contaba sin dejar rastro en el panel. El aviso
       // es el mismo hecho que `incoming`, con su propio código para no
       // confundirlo con el cierre del stream. Sólo números: nunca el texto.
-      const host = hostOf(href);
-      const ultimo = [...next.turns].reverse().find((turn) => turn?.role === 'assistant');
-      const chars = String(ultimo?.content ?? '').length;
       const entry = {
         kind: 'receiving',
         code: 'incoming-dom',
         severity: 'info',
-        title: `Respuesta recibida en ${host}`,
-        detail: `${chars} caracteres llegaron a la pantalla.`,
-        meta: { host, site: 'chatgpt', chars },
+        title: `Respuesta recibida en ${hostOf(href)}`,
+        detail: `${charsLectura} caracteres llegaron a la pantalla.`,
+        meta: { host: hostOf(href), site: 'chatgpt', chars: charsLectura },
         ts: Date.now(),
       };
       if (store) store.pushLog(entry);
       broadcast('nexo:event', { type: 'intervention', payload: entry });
     }
+    noteDiagRespuestaContada('dom', { conto: contoLaLectura, aviso: contoLaLectura, chars: charsLectura });
     if (diagOn) {
       // Tras observar: lo que quedó en los contadores del DOM. Sólo se lee el
       // proyecto del DOM (no el motor) y no cambia nada de lo que se publica.
@@ -2385,7 +2426,14 @@ function watchProviderNetwork(s) {
               // Cuando el cierre viene correlacionado por identificador de
               // petición, esa correlación ya resolvió el turno.
               if (!asociada && engine.currentSendId(tabId) !== esperaba) return;
+              const respuestasAntesRed = diagOn ? engine.stats().responses : 0;
               const contada = engine.onNetworkResponse(tabId, { host, url, messageId: esperaba });
+              if (diagOn) {
+                noteDiagRespuestaContada('red', {
+                  conto: engine.stats().responses > respuestasAntesRed,
+                  aviso: Boolean(contada?.counted), chars: 0,
+                });
+              }
               if (!contada?.counted) return;
               const entry = {
                 kind: 'receiving',
@@ -2632,6 +2680,14 @@ app.whenReady().then(async () => {
           broadcast('nexo:event', { type: 'intervention', payload: entry });
         } else if (event?.type === 'capture') {
           const captureData = event.capture || {};
+          // Diagnóstico: CDP cuenta dentro del motor; el aviso depende de
+          // `event.duplicate`. Se comparan las dos cosas en el mismo renglón.
+          if (diagOn) {
+            noteDiagRespuestaContada('cdp', {
+              conto: !event.duplicate, aviso: !event.duplicate,
+              chars: String(captureData.text || '').length,
+            });
+          }
           writeCaptureTrace('response-delivered', {
             capture: captureData, duplicate: Boolean(event.duplicate), paired: Boolean(event.paired),
             messageId: event.messageId || captureData.messageId,
