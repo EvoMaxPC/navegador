@@ -1425,7 +1425,31 @@ function registerIpc() {
       : null;
     const diagRegistros = diagAntes ? domTokenTotals.records(store?.settings?.memory?.projectId || 'default') : null;
     const domChanged = ownedMainFrame ? observeDomTokens(sender, next) : false;
+    // El contador de respuestas del motor es la única señal pública de que la
+    // lectura contó un turno (`engine.stats()`, sin tocar el motor). Se lee antes
+    // y después: la diferencia decide si hay que avisar.
+    const respuestasAntes = engine.stats().responses;
     const progress = engine.onRenderedConversation(sender.id, next, previous);
+    const contoLaLectura = engine.stats().responses > respuestasAntes;
+    if (contoLaLectura) {
+      // Camino del DOM: hasta acá contaba sin dejar rastro en el panel. El aviso
+      // es el mismo hecho que `incoming`, con su propio código para no
+      // confundirlo con el cierre del stream. Sólo números: nunca el texto.
+      const host = hostOf(href);
+      const ultimo = [...next.turns].reverse().find((turn) => turn?.role === 'assistant');
+      const chars = String(ultimo?.content ?? '').length;
+      const entry = {
+        kind: 'receiving',
+        code: 'incoming-dom',
+        severity: 'info',
+        title: `Respuesta recibida en ${host}`,
+        detail: `${chars} caracteres llegaron a la pantalla.`,
+        meta: { host, site: 'chatgpt', chars },
+        ts: Date.now(),
+      };
+      if (store) store.pushLog(entry);
+      broadcast('nexo:event', { type: 'intervention', payload: entry });
+    }
     if (diagOn) {
       // Tras observar: lo que quedó en los contadores del DOM. Sólo se lee el
       // proyecto del DOM (no el motor) y no cambia nada de lo que se publica.
