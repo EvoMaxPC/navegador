@@ -320,6 +320,18 @@ const diagOn = process.env.NEXO_DIAG === '1';
  */
 const ESPERA_LECTURA_ESTABLE_MS = 1500;
 const lecturasDeConversacion = new Map();
+/**
+ * Pestañas con un envío retenido ahora mismo: la puerta de salida abrió el
+ * diálogo y todavía no hay veredicto (`askNativeEgress`). Se marca antes de
+ * abrir el cuadro y se desmarca al cerrarlo, también cuando falla.
+ *
+ * Mientras está marcada, la pestaña no puede afirmar «no encontró respuestas»:
+ * el mensaje del usuario está en pantalla pero no salió, así que cero
+ * respuestas es el estado esperado, no un hecho sobre la conversación. Es la
+ * señal que el proceso principal ya tiene en la mano; no hace falta ningún
+ * canal nuevo ni leer el DOM de la página.
+ */
+const egressEnCurso = new Map();
 /** Estos avisos no se deduplican: cada uno describe un hecho distinto. */
 const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje', 'diag-cancelacion']);
 function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
@@ -776,9 +788,13 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
       detail: 'No se encontró la ventana de la pestaña; el envío se bloqueó.' });
     return 'cancel';
   }
+  // Desde acá hasta el veredicto el envío está retenido: la pestaña lo sabe
+  // para no convertir «todavía no salió» en «no hay respuestas». El conteo por
+  // pestaña cubre el caso de dos envíos encadenados.
+  const tabIdRetenido = sender?.id;
+  egressEnCurso.set(tabIdRetenido, (egressEnCurso.get(tabIdRetenido) || 0) + 1);
   const buttons = list.map((choice) => EGRESS_BUTTONS[choice] || EGRESS_BUTTONS.cancel);
-  const cancelId = Math.max(0, list.indexOf('cancel'));
-  const detail = (Array.isArray(summary) ? summary : [])
+  const cancelId = Math.max(0, list.indexOf('cancel'));  const detail = (Array.isArray(summary) ? summary : [])
     .map((s) => `• ${EGRESS_TYPE_LABELS[s?.type] || String(s?.type || 'dato')}: ${Number(s?.count) || 0}`)
     .join('\n');
   // Electron 45 admite `signal` en MessageBoxOptions: es el timeout real del
@@ -818,6 +834,11 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
     return 'cancel';
   } finally {
     if (timer) clearTimeout(timer);
+    // El veredicto ya está: la pestaña puede volver a afirmar lo que lea. Si el
+    // contador no existiera (doble liberación), no se inventa uno.
+    const quedan = (egressEnCurso.get(tabIdRetenido) || 1) - 1;
+    if (quedan > 0) egressEnCurso.set(tabIdRetenido, quedan);
+    else egressEnCurso.delete(tabIdRetenido);
   }
 }
 
@@ -1531,6 +1552,16 @@ function registerIpc() {
     // (lo normal al cargar el historial) el aviso falso no llega a salir, y su
     // deduplicación de 30 s ya no puede tapar la lectura buena.
     const sinRespuestas = assistantTurns === 0;
+    // Envío retenido en esta pestaña: el mensaje del usuario está en pantalla
+    // pero no viajó. Cero respuestas es lo que corresponde y no se afirma nada
+    // (la lectura se guarda igual, arriba). No se toca el desenlace anterior:
+    // cuando el envío se resuelve, la primera lectura vuelve a esperar su
+    // margen en vez de heredar una confirmación que no era de este momento.
+    if (sinRespuestas && egressEnCurso.has(event.sender.id)) {
+      lecturasDeConversacion.delete(event.sender.id);
+      if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());
+      return { ...result, observed: false, assistantCaptures: undefined };
+    }
     const anterior = lecturasDeConversacion.get(event.sender.id);
     lecturasDeConversacion.set(event.sender.id, { sinRespuestas, at: Date.now() });
     const estable = Boolean(anterior) && anterior.sinRespuestas === sinRespuestas &&
