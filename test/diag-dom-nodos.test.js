@@ -94,7 +94,7 @@ test('con NEXO_DIAG=1 se pide el recuento y se publica con números', async () =
   }
 
   assert.equal(view.llamadas.length, 1, 'una sola llamada para un snapshot');
-  assert.equal(view.llamadas[0].gesto, true, 'sin gesto de usuario');
+  assert.equal(view.llamadas[0].gesto, false, 'no simula gesto de usuario');
   // El script es de sólo lectura: no escribe, no navega, no toca el composer.
   const script = view.llamadas[0].script;
   for (const prohibido of ['innerHTML', 'appendChild', 'insertBefore', 'click(', 'scrollIntoView',

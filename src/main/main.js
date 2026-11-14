@@ -577,7 +577,7 @@ async function noteDiagDomNodos(sender) {
   let temporizador = null;
   try {
     const resultado = await Promise.race([
-      Promise.resolve(ejecutar.call(sender, DIAG_DOM_NODOS_SCRIPT, true)),
+      Promise.resolve(ejecutar.call(sender, DIAG_DOM_NODOS_SCRIPT, false)),
       new Promise((resolve) => {
         temporizador = setTimeout(() => resolve({ __agotado: true }), DIAG_DOM_NODOS_TIMEOUT_MS);
       }),
