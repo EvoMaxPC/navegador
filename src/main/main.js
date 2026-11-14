@@ -489,6 +489,132 @@ function noteDiagRespuestaContada(camino, { conto, aviso, chars }) {
  */
 const diagDirectoHref = new Map();
 
+/* ---------------------- diag-dom-nodos (sólo lectura) ---------------------- */
+
+/**
+ * Último instante en que se pidió `diag-dom-nodos` por pestaña.
+ *
+ * La lectura del DOM se ejecuta en la página y cuesta: una vez cada 3 s por
+ * pestaña es suficiente para ver si los nodos que el lector no reconoce están
+ * ocultos, y evita inundar el registro (400 entradas) que es donde viven los
+ * `diag-snapshot` que explican el resto.
+ */
+const diagDomNodosAt = new Map();
+const DIAG_DOM_NODOS_MS = 3_000;
+const DIAG_DOM_NODOS_TIMEOUT_MS = 1_500;
+
+/**
+ * Script de SÓLO LECTURA que replica la selección `print-label`.
+ *
+ * Es una réplica deliberada de `src/core/chatgptAdapter.js:51-60`
+ * (`selectPrintLabelMessages`): el proceso principal no puede importar el
+ * adaptador porque ese código corre en la página, y esta etapa no toca
+ * `src/core`. **Puede divergir** si el adaptador cambia; si eso pasa, este aviso
+ * describirá una selección que ya no es la del lector.
+ *
+ * Devuelve sólo números y booleanos: ni texto, ni atributos, ni URLs.
+ */
+const DIAG_DOM_NODOS_SCRIPT = `(() => {
+  const ETIQUETAS = new Map([['Dijiste:', 'user'], ['ChatGPT dijo:', 'assistant'], ['You said:', 'user'], ['ChatGPT said:', 'assistant']]);
+  const claves = [...ETIQUETAS.keys()].sort((a, b) => b.length - a.length);
+  const rolDe = (etiqueta) => {
+    const exacto = ETIQUETAS.get(etiqueta);
+    if (exacto) return exacto;
+    const clave = claves.find((item) => etiqueta.startsWith(item));
+    return clave ? ETIQUETAS.get(clave) : '';
+  };
+  const h4 = Array.from(document.querySelectorAll('main h4'));
+  const nodos = [];
+  for (const header of h4) {
+    const etiqueta = String(header.textContent || '').trim();
+    const rol = rolDe(etiqueta);
+    if (!rol) continue;
+    const nodo = header.nextElementSibling;
+    if (!nodo) continue;
+    let oculto = false;
+    for (let padre = nodo; padre; padre = padre.parentElement) {
+      if (padre.hasAttribute && (padre.hasAttribute('hidden') || padre.getAttribute('aria-hidden') === 'true' || padre.hasAttribute('inert'))) {
+        oculto = true;
+        break;
+      }
+    }
+    nodos.push({
+      indice: nodos.length,
+      rol,
+      chars: String(nodo.innerText ?? nodo.textContent ?? '').length,
+      visible: typeof nodo.checkVisibility === 'function' ? nodo.checkVisibility() : null,
+      oculto,
+      rects: typeof nodo.getClientRects === 'function' ? nodo.getClientRects().length : 0,
+    });
+  }
+  return { h4: h4.length, conEtiqueta: nodos.length, nodos: nodos.slice(0, 12) };
+})()`;
+
+/** Un `sí`/`no`/`n.d.` para el ternario de `checkVisibility`. */
+const siNoNd = (value) => (value === null || value === undefined ? 'n.d.' : (value ? 'sí' : 'no'));
+
+/**
+ * Con `NEXO_DIAG=1`, pide a la página un recuento de los nodos que su lector
+ * reconocería. Sólo lectura y sólo números; cualquier fallo se publica como «no
+ * disponible» con el motivo, sin datos de la página.
+ *
+ * Fuera de `NEXO_DIAG=1` no se llama a la página ni una vez.
+ */
+async function noteDiagDomNodos(sender) {
+  if (!diagOn || !sender) return null;
+  const ahora = Date.now();
+  if (ahora - (diagDomNodosAt.get(sender.id) || 0) < DIAG_DOM_NODOS_MS) return null;
+  diagDomNodosAt.set(sender.id, ahora);
+  const noDisponible = (motivo) => noteDiagnostic({
+    code: 'diag-dom-nodos', severity: 'info',
+    key: `diag-dom-nodos|no|${motivo}|${ahora}`,
+    title: 'diag-dom-nodos: no disponible',
+    detail: `motivo ${motivo} · sin datos de la página`,
+    meta: { disponible: false, motivo },
+  });
+  const ejecutar = sender.executeJavaScript;
+  if (typeof ejecutar !== 'function') return noDisponible('sin-ejecutor');
+  let temporizador = null;
+  try {
+    const resultado = await Promise.race([
+      Promise.resolve(ejecutar.call(sender, DIAG_DOM_NODOS_SCRIPT, true)),
+      new Promise((resolve) => {
+        temporizador = setTimeout(() => resolve({ __agotado: true }), DIAG_DOM_NODOS_TIMEOUT_MS);
+      }),
+    ]);
+    if (resultado?.__agotado) return noDisponible('timeout');
+    if (!resultado || !Array.isArray(resultado.nodos)) return noDisponible('formato');
+    const nodos = resultado.nodos.slice(0, 12);
+    const filas = nodos.map((nodo) =>
+      `${cuenta(nodo?.indice)} ${String(nodo?.rol || '?').slice(0, 9)} ${cuenta(nodo?.chars)}c ` +
+      `vis ${siNoNd(nodo?.visible)} oculto ${siNo(nodo?.oculto)} rects ${cuenta(nodo?.rects)}`);
+    return noteDiagnostic({
+      code: 'diag-dom-nodos', severity: 'info',
+      key: `diag-dom-nodos|${cuenta(resultado.h4)}|${cuenta(resultado.conEtiqueta)}|${ahora}`,
+      title: `diag-dom-nodos: ${cuenta(nodos.length)} nodos`,
+      detail: [`main h4 ${cuenta(resultado.h4)} · con etiqueta ${cuenta(resultado.conEtiqueta)}`, ...filas].join('\n'),
+      meta: {
+        disponible: true,
+        h4: Number(resultado.h4) || 0,
+        conEtiqueta: Number(resultado.conEtiqueta) || 0,
+        nodos: nodos.map((nodo) => ({
+          indice: Number(nodo?.indice) || 0,
+          rol: String(nodo?.rol || '').slice(0, 9),
+          chars: Number(nodo?.chars) || 0,
+          visible: nodo?.visible === null || nodo?.visible === undefined ? null : Boolean(nodo.visible),
+          oculto: Boolean(nodo?.oculto),
+          rects: Number(nodo?.rects) || 0,
+        })),
+      },
+    });
+  } catch (error) {
+    // El nombre del error, nunca su mensaje: puede traer texto de la página.
+    return noDisponible(`error-${String(error?.name || 'desconocido').slice(0, 24)}`);
+  } finally {
+    if (temporizador) clearTimeout(temporizador);
+  }
+}
+
 /**
  * Aviso `diag-contadores`: lo que pinta la interfaz (DOM) frente a lo que midió
  * el motor. Sólo números y booleanos: es lo que decide si un cero viene de una
@@ -1506,6 +1632,11 @@ function registerIpc() {
         nuevas: diagAntes ? total - diagRegistros : null, total,
         href: ownedMainFrame ? href : null, hrefCambio: previous ? previous.href !== href : null });
     }
+    // Con el snapshot ya publicado, se pregunta a la página qué nodos ve su
+    // lector. No se espera: la lectura del DOM no puede retrasar el snapshot ni
+    // el panel. La ÚNICA puerta de `NEXO_DIAG=1` está en `noteDiagDomNodos`, que
+    // sale antes de tocar la página cuando la variable está apagada.
+    void noteDiagDomNodos(sender);
     publishRepetition(next);
     if (domChanged || progress?.updated) broadcast('nexo:stats-changed', statsSnapshot());
     return { ok: true };
