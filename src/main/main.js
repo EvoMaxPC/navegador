@@ -788,11 +788,9 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
       detail: 'No se encontró la ventana de la pestaña; el envío se bloqueó.' });
     return 'cancel';
   }
-  // Desde acá hasta el veredicto el envío está retenido: la pestaña lo sabe
-  // para no convertir «todavía no salió» en «no hay respuestas». El conteo por
-  // pestaña cubre el caso de dos envíos encadenados.
+  // La pestaña lo sabe para no convertir «todavía no salió» en «no hay
+  // respuestas». El conteo por pestaña cubre el caso de dos envíos encadenados.
   const tabIdRetenido = sender?.id;
-  egressEnCurso.set(tabIdRetenido, (egressEnCurso.get(tabIdRetenido) || 0) + 1);
   const buttons = list.map((choice) => EGRESS_BUTTONS[choice] || EGRESS_BUTTONS.cancel);
   const cancelId = Math.max(0, list.indexOf('cancel'));
   const detail = (Array.isArray(summary) ? summary : [])
@@ -806,6 +804,9 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
     ? setTimeout(() => controller.abort(), Math.min(ms, 600_000))
     : null;
   try {
+    // La marca vive dentro del `try` para que el `finally` la retire aunque el
+    // diálogo lance antes de abrirse: marca y desmarca en el mismo bloque.
+    egressEnCurso.set(tabIdRetenido, (egressEnCurso.get(tabIdRetenido) || 0) + 1);
     const { response } = await dialog.showMessageBox(parent, {
       type: 'warning',
       title: 'NEXO',
