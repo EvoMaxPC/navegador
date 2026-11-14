@@ -794,7 +794,8 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
   const tabIdRetenido = sender?.id;
   egressEnCurso.set(tabIdRetenido, (egressEnCurso.get(tabIdRetenido) || 0) + 1);
   const buttons = list.map((choice) => EGRESS_BUTTONS[choice] || EGRESS_BUTTONS.cancel);
-  const cancelId = Math.max(0, list.indexOf('cancel'));  const detail = (Array.isArray(summary) ? summary : [])
+  const cancelId = Math.max(0, list.indexOf('cancel'));
+  const detail = (Array.isArray(summary) ? summary : [])
     .map((s) => `• ${EGRESS_TYPE_LABELS[s?.type] || String(s?.type || 'dato')}: ${Number(s?.count) || 0}`)
     .join('\n');
   // Electron 45 admite `signal` en MessageBoxOptions: es el timeout real del
