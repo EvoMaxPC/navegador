@@ -881,6 +881,9 @@ function createWindow() {
   return win;
 }
 
+/** Instante del último aviso de `onUserMessage`, por pestaña. Sólo para el `+Nms`. */
+const diagMensajeUltimo = new Map();
+
 /**
  * Gancho de diagnóstico del motor: `engine.onUserMessage` avisa aquí con el
  * resultado de contar (o descartar) el mensaje. Sólo observa; el conteo no se
@@ -891,8 +894,14 @@ function hookDiagMensaje(instance) {
   const original = instance.onUserMessage.bind(instance);
   instance.onUserMessage = (webContentsId, payload = {}) => {
     const counted = original(webContentsId, payload);
+    // Milisegundos desde el aviso anterior de ESTA pestaña: es lo que separa «la
+    // red llegó tarde» de «son dos envíos». Sin previo se dice `primero`.
+    const ahora = Date.now();
+    const previo = diagMensajeUltimo.get(webContentsId);
+    const desdePrevio = typeof previo === 'number' ? Math.max(0, ahora - previo) : null;
+    diagMensajeUltimo.set(webContentsId, ahora);
     noteDiagMensaje({ source: String(payload?.source || 'request'), messageId: payload?.messageId,
-      counted, messages: instance.stats?.().messages });
+      counted, messages: instance.stats?.().messages, desdePrevio });
     return counted;
   };
   return instance;
@@ -1062,7 +1071,7 @@ function turnFollowUp(result) {
  * Nunca publica el texto ni el id: del id sólo un resumen de 6 caracteres, para
  * emparejar avisos del mismo envío sin revelarlo.
  */
-function noteDiagMensaje({ source, messageId, counted, messages }) {
+function noteDiagMensaje({ source, messageId, counted, messages, desdePrevio }) {
   if (!diagOn) return null;
   const id = String(messageId || '');
   // Resumen estable de 6 caracteres del id: no es reversible ni el id completo.
@@ -1078,9 +1087,11 @@ function noteDiagMensaje({ source, messageId, counted, messages }) {
     // (y `AVISOS_DIAG` ya lo saca de la ventana de 30 s).
     key: `diag-mensaje|${String(source || '').slice(0, 20)}|${resumen}`,
     detail: `source ${String(source || '-').slice(0, 20)} · messageId ${id ? 'sí' : 'no'} ${resumen}` +
-      ` · ${duplicado ? 'duplicado' : 'contado'} · mensajes del motor ${Number(messages) || 0}`,
+      ` · ${duplicado ? 'duplicado' : 'contado'} · mensajes del motor ${Number(messages) || 0}` +
+      ` · ${desdePrevio === null || desdePrevio === undefined ? 'primero' : `+${Number(desdePrevio) || 0}ms`}`,
     meta: { source: String(source || '').slice(0, 20), hasMessageId: Boolean(id), messageIdHash: resumen,
-      duplicate: duplicado, messages: Number(messages) || 0 },
+      duplicate: duplicado, messages: Number(messages) || 0,
+      desdePrevio: desdePrevio === null || desdePrevio === undefined ? null : Number(desdePrevio) || 0 },
   });
 }
 

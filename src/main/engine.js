@@ -27,6 +27,20 @@ import { redactInjected } from './injectedGuard.js';
  */
 const VENTANA_ENVIO_MS = 10_000;
 
+/**
+ * Ventana para un envío que todavía no tiene petición: sólo el gesto del cuadro.
+ *
+ * `enforce` retiene el gesto mientras el guardián de salida decide, y esa espera
+ * puede ser todo el `decisionTimeoutMs` (120 000 ms por omisión,
+ * `src/core/egressConfig.js:8`) más el `MARGEN_EGRESS_MS` de 5 000 ms que la capa
+ * suma a la consulta (`src/inject/index.js:498`). En ese caso la red llega
+ * después de `VENTANA_ENVIO_MS` y el mismo envío contaba dos veces.
+ *
+ * Sólo aplica a registros huérfanos (ver `onUserMessage`): un envío que ya tiene
+ * petición conserva la ventana corta.
+ */
+const VENTANA_PETICION_PENDIENTE_MS = 130_000;
+
 /** Ventana en la que dos textos son la misma respuesta todavía creciendo. */
 const VENTANA_RESPUESTA_MS = 120_000;
 
@@ -320,21 +334,28 @@ export class Engine {
     if (!record && submissionKey) record = this.inputRecords.get(this.submissions.get(submissionKey));
     // Respaldo heredado para transportes sin identidad de proveedor. Cada fuente
     // sólo puede emparejarse una vez por envío; IDs explícitos distintos NUNCA se fusionan.
-    if (!record && previo && now - previo.at < VENTANA_ENVIO_MS &&
+    if (!record && previo &&
         (!submissionId || !previo.submissionId || submissionId === previo.submissionId)) {
       const candidate = this.inputRecords.get(`${webContentsId}|${previo.messageId}`);
-      const sameHash = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
-      // La red lee el texto YA mediado (protocolo, memoria): su huella no puede
-      // coincidir con la del cuadro, que lleva el texto original. Sin este
-      // puente, un solo envío se contaba dos veces. Sólo une capa↔red, sólo el
-      // último envío de la pestaña y sólo fuentes que aún no estaban: dos
-      // envíos seguidos —iguales o no— no se funden nunca.
-      const puente = Boolean(candidate) && !candidate.sources.has(source) &&
-        ((source === 'network' && (candidate.sources.has('composer') || candidate.sources.has('request'))) ||
-         ((source === 'composer' || source === 'request') && candidate.sources.has('network')));
-      if (candidate && (sameHash || puente) && !candidate.sources.has(source)) {
-        record = candidate;
-        correlatedByFallback = true;
+      // Un registro huérfano (sólo el gesto) espera a su petición lo que dure la
+      // decisión del guardián: hasta `VENTANA_PETICION_PENDIENTE_MS`. Cualquier
+      // otro registro conserva `VENTANA_ENVIO_MS`.
+      const soloGesto = Boolean(candidate) && candidate.sources.size === 1 && candidate.sources.has('composer');
+      const ventana = soloGesto ? VENTANA_PETICION_PENDIENTE_MS : VENTANA_ENVIO_MS;
+      if (now - previo.at < ventana) {
+        const sameHash = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
+        // La red lee el texto YA mediado (protocolo, memoria): su huella no puede
+        // coincidir con la del cuadro, que lleva el texto original. Sin este
+        // puente, un solo envío se contaba dos veces. Sólo une capa↔red, sólo el
+        // último envío de la pestaña y sólo fuentes que aún no estaban: dos
+        // envíos seguidos —iguales o no— no se funden nunca.
+        const puente = Boolean(candidate) && !candidate.sources.has(source) &&
+          ((source === 'network' && (candidate.sources.has('composer') || candidate.sources.has('request'))) ||
+           ((source === 'composer' || source === 'request') && candidate.sources.has('network')));
+        if (candidate && (sameHash || puente) && !candidate.sources.has(source)) {
+          record = candidate;
+          correlatedByFallback = true;
+        }
       }
     }
     if (record) {
