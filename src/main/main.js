@@ -547,7 +547,14 @@ const DIAG_DOM_NODOS_SCRIPT = `(() => {
       rects: typeof nodo.getClientRects === 'function' ? nodo.getClientRects().length : 0,
     });
   }
-  return { h4: h4.length, conEtiqueta: nodos.length, nodos: nodos.slice(0, 12) };
+  // El filtro del lector pregunta antes por el contenedor, no por cada nodo.
+  // El main que mide el adaptador es el primero que devuelve querySelector.
+  const principales = Array.from(document.querySelectorAll('main'));
+  const primero = principales[0] || null;
+  const rectsMain = primero ? primero.getClientRects().length : 0;
+  const displayMain = primero ? getComputedStyle(primero).display : 'n.d.';
+  return { h4: h4.length, conEtiqueta: nodos.length, mains: principales.length, rectsMain, displayMain,
+    nodos: nodos.slice(0, 12) };
 })()`;
 
 /** Un `sí`/`no`/`n.d.` para el ternario de `checkVisibility`. */
@@ -592,11 +599,18 @@ async function noteDiagDomNodos(sender) {
       code: 'diag-dom-nodos', severity: 'info',
       key: `diag-dom-nodos|${cuenta(resultado.h4)}|${cuenta(resultado.conEtiqueta)}|${ahora}`,
       title: `diag-dom-nodos: ${cuenta(nodos.length)} nodos`,
-      detail: [`main h4 ${cuenta(resultado.h4)} · con etiqueta ${cuenta(resultado.conEtiqueta)}`, ...filas].join('\n'),
+      detail: [
+        `main h4 ${cuenta(resultado.h4)} · con etiqueta ${cuenta(resultado.conEtiqueta)} · ` +
+          `main ${cuenta(resultado.mains)} · main rects ${cuenta(resultado.rectsMain)} · display ${String(resultado.displayMain || 'n.d.').slice(0, 16)}`,
+        ...filas,
+      ].join('\n'),
       meta: {
         disponible: true,
         h4: Number(resultado.h4) || 0,
         conEtiqueta: Number(resultado.conEtiqueta) || 0,
+        mains: Number(resultado.mains) || 0,
+        rectsMain: Number(resultado.rectsMain) || 0,
+        displayMain: String(resultado.displayMain || '').slice(0, 16),
         nodos: nodos.map((nodo) => ({
           indice: Number(nodo?.indice) || 0,
           rol: String(nodo?.rol || '').slice(0, 9),
