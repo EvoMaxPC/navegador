@@ -58,6 +58,49 @@ function selectPrintLabelMessages(document) {
   });
   return { strategy: 'print-label', messages };
 }
+/**
+ * Posición de cada nodo en la última lista completa YA ordenada.
+ *
+ * El identificador de reserva es `visible-N`, y `N` tiene que ser la posición
+ * del nodo en la conversación, no en la lista que sobrevive al filtro: si se
+ * descarta un nodo oculto que iba antes, los que siguen visibles no pueden
+ * cambiar de id. Se guarda aquí antes de filtrar y `chatGptMessageId` lo usa
+ * cuando el nodo está.
+ */
+const posicionOriginal = new WeakMap();
+
+/**
+ * ¿Se puede confiar en el layout de esta lectura?
+ *
+ * Sólo si el contenedor del lector (`main`, el mismo de `main h4`) tiene caja.
+ * Con la pestaña en segundo plano, un `main` sin caja o un documento de prueba
+ * sin `getClientRects`, no se mide nada y se devuelve `false`: ahí el filtro no
+ * se aplica (fail-open). Ante cualquier fallo, `false`.
+ */
+function mainConCaja(document) {
+  try {
+    const main = query(document, 'main');
+    // Si `main` no está, `!!main` corta la expresión sin medir nada.
+    return !!main && main.getClientRects().length > 0;
+  } catch {
+    // Contenedor ausente o que no se puede medir: falta o lanza → fail-open.
+    return false;
+  }
+}
+
+/**
+ * ¿Ocupa lugar en la página? Sin `getClientRects` no hay forma de saberlo, así
+ * que se da por visible (fail-open); si la medición lanza, también.
+ */
+function tieneCaja(node) {
+  try {
+    return node.getClientRects().length > 0;
+  } catch {
+    // Nodo ausente o que no se puede medir: falta o lanza → fail-open.
+    return true;
+  }
+}
+
 function outer(nodes) {
   const candidates = new Set(nodes);
   return [...candidates].filter((node) => {
@@ -108,9 +151,15 @@ export function selectChatGptMessages(document) {
     }
   }
   messages.sort(compareDocumentOrder);
+  // La posición se anota ANTES de filtrar: es la que define `visible-N`, y así
+  // un nodo oculto que desaparece no renumera a los que siguen visibles.
+  messages.forEach(({ node }, index) => {
+    if (node && typeof node === 'object') posicionOriginal.set(node, index);
+  });
+  const visibles = mainConCaja(document) ? messages.filter(({ node }) => tieneCaja(node)) : messages;
   return {
     strategy: usedStrategies.join('+') || 'none',
-    messages,
+    messages: visibles,
   };
 }
 
@@ -126,7 +175,9 @@ export function chatGptMessageId(node, index) {
     node.closest?.('[data-message-id]')?.getAttribute?.('data-message-id') ||
     node.closest?.('[data-turn-id]')?.getAttribute?.('data-turn-id') ||
     (/^conversation-turn/.test(node.getAttribute?.('data-testid') || '') ? node.getAttribute('data-testid') : '') ||
-    node.closest?.('article[data-testid]')?.getAttribute?.('data-testid') || `visible-${index}`;
+    node.closest?.('article[data-testid]')?.getAttribute?.('data-testid') ||
+    // Posición en la conversación, aunque el filtro haya quitado nodos ocultos.
+    `visible-${posicionOriginal.get(node) ?? index}`;
 }
 
 const STOP_RE = /^(stop|detener|parar)\b/i;
