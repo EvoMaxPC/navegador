@@ -73,7 +73,8 @@ function documentoConMain(elementoMain, rectsNodos = [0, 0, 0, 0, 0]) {
     ...base,
     headers,
     doc: {
-      querySelectorAll: (selector) => (selector === 'main h4' ? headers : []),
+      querySelectorAll: (selector) => (selector === 'main h4' ? headers
+        : selector === 'main' ? (elementoMain ? [elementoMain] : []) : []),
       querySelector: (selector) => (selector === 'main' ? elementoMain : null),
     },
   };
@@ -100,7 +101,8 @@ function documento({ rectsMain = 1, rectsNodos = [0, 0, 1, 0, 0] } = {}) {
   const elementoMain = main(rectsMain);
   // `rectsMain` del mismo documento se puede cambiar después (`elementoMain.estado.rects`).
   const doc = {
-    querySelectorAll: (selector) => (selector === 'main h4' ? headers : []),
+    querySelectorAll: (selector) => (selector === 'main h4' ? headers
+      : selector === 'main' ? (elementoMain ? [elementoMain] : []) : []),
     querySelector: (selector) => (selector === 'main' ? elementoMain : null),
   };
   return { doc, headers, u1, u2, u3, a1, a2, TEXTO, elementoMain };
@@ -149,7 +151,8 @@ test('3b) main con caja y nodos cuyo getClientRects lanza: se cuentan (fail-open
     { textContent: 'Dijiste:Tú', nextElementSibling: nodoQueLanza('pregunta dos') },
   ];
   const doc = {
-    querySelectorAll: (selector) => (selector === 'main h4' ? headers : []),
+    querySelectorAll: (selector) => (selector === 'main h4' ? headers
+      : selector === 'main' ? (elementoMain ? [elementoMain] : []) : []),
     querySelector: (selector) => (selector === 'main' ? elementoMain : null),
   };
   const turnos = readChatGptConversation(doc);

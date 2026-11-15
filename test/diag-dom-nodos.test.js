@@ -60,6 +60,7 @@ const FORMA_REAL = {
   mains: 1,
   rectsMain: 1,
   displayMain: 'block',
+  mainsConCaja: 1,
   nodos: [
     { indice: 0, rol: 'user', chars: 12, visible: true, oculto: false, rects: 3 },
     { indice: 1, rol: 'assistant', chars: 240, visible: false, oculto: true, rects: 0 },
@@ -125,10 +126,11 @@ test('con NEXO_DIAG=1 se pide el recuento y se publica con números', async () =
   //   assert.match(aviso.detail, /^main h4 3 · con etiqueta 2$/m);
   // El encabezado lleva ahora el layout del contenedor para distinguir «main sin
   // caja» de «un camino que no pasa por el filtro».
-  assert.match(aviso.detail, /^main h4 3 · con etiqueta 2 · main 1 · main rects 1 · display block$/m);
+  assert.match(aviso.detail, /^main h4 3 · con etiqueta 2 · main 1 · main rects 1 · display block · mains con caja 1$/m);
   assert.equal(aviso.meta.mains, 1);
   assert.equal(aviso.meta.rectsMain, 1);
   assert.equal(aviso.meta.displayMain, 'block');
+  assert.equal(aviso.meta.mainsConCaja, 1);
   assert.match(aviso.detail, /^1 assistant 240c vis no oculto sí rects 0$/m);
   assert.match(aviso.detail, /^2 assistant 5c vis n\.d\. oculto no rects 1$/m);
   assert.equal(aviso.kind, 'system');

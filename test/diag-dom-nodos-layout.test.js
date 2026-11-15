@@ -104,7 +104,7 @@ test('el encabezado publica main, sus rects y su display', async () => {
   assert.equal(aviso.meta.mains, 1);
   assert.equal(aviso.meta.rectsMain, 1);
   assert.equal(aviso.meta.displayMain, 'block');
-  assert.match(aviso.detail, /^main h4 2 · con etiqueta 2 · main 1 · main rects 1 · display block$/m);
+  assert.match(aviso.detail, /^main h4 2 · con etiqueta 2 · main 1 · main rects 1 · display block · mains con caja 1$/m);
 });
 
 test('un main sin caja se informa como main rects 0 con su display', async () => {
@@ -113,7 +113,7 @@ test('un main sin caja se informa como main rects 0 con su display', async () =>
   assert.equal(aviso.meta.mains, 1);
   assert.equal(aviso.meta.rectsMain, 0);
   assert.equal(aviso.meta.displayMain, 'contents');
-  assert.match(aviso.detail, /^main h4 2 · con etiqueta 2 · main 1 · main rects 0 · display contents$/m);
+  assert.match(aviso.detail, /^main h4 2 · con etiqueta 2 · main 1 · main rects 0 · display contents · mains con caja 0$/m);
 });
 
 test('con varios main informa cuántos hay y mide el primero', async () => {
@@ -123,7 +123,7 @@ test('con varios main informa cuántos hay y mide el primero', async () => {
   assert.ok(aviso, 'se publica el recuento');
   assert.equal(aviso.meta.mains, 2, 'se cuentan todos');
   assert.equal(aviso.meta.rectsMain, 0, 'se miden los del primero, el que mide el lector');
-  assert.match(aviso.detail, /^main h4 2 · con etiqueta 2 · main 2 · main rects 0 · display contents$/m);
+  assert.match(aviso.detail, /^main h4 2 · con etiqueta 2 · main 2 · main rects 0 · display contents · mains con caja 1$/m);
 });
 
 test('sin main en el documento se informa main 0, rects 0 y display n.d.', async () => {
@@ -132,7 +132,7 @@ test('sin main en el documento se informa main 0, rects 0 y display n.d.', async
   assert.equal(aviso.meta.mains, 0);
   assert.equal(aviso.meta.rectsMain, 0);
   assert.equal(aviso.meta.displayMain, 'n.d.');
-  assert.match(aviso.detail, /^main h4 2 · con etiqueta 2 · main 0 · main rects 0 · display n\.d\.$/m);
+  assert.match(aviso.detail, /^main h4 2 · con etiqueta 2 · main 0 · main rects 0 · display n\.d\. · mains con caja 0$/m);
 });
 
 test('el main que informa el aviso es el que decide el filtro del lector', async () => {

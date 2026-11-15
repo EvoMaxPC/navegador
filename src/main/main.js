@@ -548,13 +548,16 @@ const DIAG_DOM_NODOS_SCRIPT = `(() => {
     });
   }
   // El filtro del lector pregunta antes por el contenedor, no por cada nodo.
-  // El main que mide el adaptador es el primero que devuelve querySelector.
+  // El adaptador se activa si ALGUNO de los main tiene caja; el primero se
+  // informa aparte porque es el que antes decidía (y se quedaba sin caja).
   const principales = Array.from(document.querySelectorAll('main'));
   const primero = principales[0] || null;
   const rectsMain = primero ? primero.getClientRects().length : 0;
   const displayMain = primero ? getComputedStyle(primero).display : 'n.d.';
+  // Cuántos main autorizan el filtro: el lector lo activa si ALGUNO tiene caja.
+  const mainsConCaja = principales.filter((item) => item.getClientRects().length > 0).length;
   return { h4: h4.length, conEtiqueta: nodos.length, mains: principales.length, rectsMain, displayMain,
-    nodos: nodos.slice(0, 12) };
+    mainsConCaja, nodos: nodos.slice(0, 12) };
 })()`;
 
 /** Un `sí`/`no`/`n.d.` para el ternario de `checkVisibility`. */
@@ -601,7 +604,8 @@ async function noteDiagDomNodos(sender) {
       title: `diag-dom-nodos: ${cuenta(nodos.length)} nodos`,
       detail: [
         `main h4 ${cuenta(resultado.h4)} · con etiqueta ${cuenta(resultado.conEtiqueta)} · ` +
-          `main ${cuenta(resultado.mains)} · main rects ${cuenta(resultado.rectsMain)} · display ${String(resultado.displayMain || 'n.d.').slice(0, 16)}`,
+          `main ${cuenta(resultado.mains)} · main rects ${cuenta(resultado.rectsMain)} · display ${String(resultado.displayMain || 'n.d.').slice(0, 16)} · ` +
+          `mains con caja ${cuenta(resultado.mainsConCaja)}`,
         ...filas,
       ].join('\n'),
       meta: {
@@ -611,6 +615,7 @@ async function noteDiagDomNodos(sender) {
         mains: Number(resultado.mains) || 0,
         rectsMain: Number(resultado.rectsMain) || 0,
         displayMain: String(resultado.displayMain || '').slice(0, 16),
+        mainsConCaja: Number(resultado.mainsConCaja) || 0,
         nodos: nodos.map((nodo) => ({
           indice: Number(nodo?.indice) || 0,
           rol: String(nodo?.rol || '').slice(0, 9),

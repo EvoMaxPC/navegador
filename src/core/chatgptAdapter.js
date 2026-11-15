@@ -72,18 +72,18 @@ const posicionOriginal = new WeakMap();
 /**
  * ¿Se puede confiar en el layout de esta lectura?
  *
- * Sólo si el contenedor del lector (`main`, el mismo de `main h4`) tiene caja.
- * Con la pestaña en segundo plano, un `main` sin caja o un documento de prueba
- * sin `getClientRects`, no se mide nada y se devuelve `false`: ahí el filtro no
- * se aplica (fail-open). Ante cualquier fallo, `false`.
+ * Sólo si **algún** contenedor del lector (`main`, los mismos de `main h4`) tiene
+ * caja: en un chat nuevo conviven dos `main` y el primero puede quedarse sin
+ * caja, así que mirar sólo el primero apagaba el filtro sin motivo. Con la
+ * pestaña en segundo plano, sin ningún `main` con caja o si la medición lanza,
+ * no se mide nada y se devuelve `false`: ahí el filtro no se aplica (fail-open).
  */
 function mainConCaja(document) {
   try {
-    const main = query(document, 'main');
-    // Si `main` no está, `!!main` corta la expresión sin medir nada.
-    return !!main && main.getClientRects().length > 0;
+    // `queryAll` ya devuelve un Array (:5). `.some` se detiene en el primero con caja.
+    return queryAll(document, 'main').some((main) => main.getClientRects().length > 0);
   } catch {
-    // Contenedor ausente o que no se puede medir: falta o lanza → fail-open.
+    // Sin `main`, sin `getClientRects` o midiendo mal: fail-open.
     return false;
   }
 }
