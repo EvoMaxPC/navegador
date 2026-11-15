@@ -36,8 +36,10 @@ const VENTANA_ENVIO_MS = 10_000;
  * suma a la consulta (`src/inject/index.js:498`). En ese caso la red llega
  * después de `VENTANA_ENVIO_MS` y el mismo envío contaba dos veces.
  *
- * Sólo aplica a registros huérfanos (ver `onUserMessage`): un envío que ya tiene
- * petición conserva la ventana corta.
+ * Sólo aplica a registros huérfanos (ver `onUserMessage`) y sólo mientras ese
+ * gesto siga esperando su petición: si el guardián ya lo canceló o lo bloqueó,
+ * no habrá red para ese envío y la ventana se queda en `VENTANA_ENVIO_MS`
+ * (`cerrarEnvioPendiente`). Un registro con petición nunca la usa.
  */
 const VENTANA_PETICION_PENDIENTE_MS = 130_000;
 
@@ -165,6 +167,11 @@ export class Engine {
     this.seenMessages = new Map();
     this.inputRecords = new Map();
     this.submissions = new Map();
+    /**
+     * Gestos cuyo envío ya no espera petición porque el guardián lo canceló o lo
+     * bloqueó: `${pestaña}|${messageId}` → instante. Sólo flags y números.
+     */
+    this.enviosCerrados = new Map();
     /** Respuestas contadas, por pestaña: `${pestaña}|${messageId}`. */
     this.seenResponses = new Map();
     /** Último envío de cada pestaña esperando respuesta. */
@@ -340,7 +347,8 @@ export class Engine {
       // Un registro huérfano (sólo el gesto) espera a su petición lo que dure la
       // decisión del guardián: hasta `VENTANA_PETICION_PENDIENTE_MS`. Cualquier
       // otro registro conserva `VENTANA_ENVIO_MS`.
-      const soloGesto = Boolean(candidate) && candidate.sources.size === 1 && candidate.sources.has('composer');
+      const soloGesto = Boolean(candidate) && candidate.sources.size === 1 && candidate.sources.has('composer') &&
+        !this.enviosCerrados.has(`${webContentsId}|${candidate.messageId}`);
       const ventana = soloGesto ? VENTANA_PETICION_PENDIENTE_MS : VENTANA_ENVIO_MS;
       if (now - previo.at < ventana) {
         const sameHash = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
@@ -1340,6 +1348,29 @@ export class Engine {
     };
   }
 
+  /**
+   * El guardián de salida canceló o bloqueó el envío en curso de una pestaña.
+   *
+   * Ese gesto ya no espera ninguna petición: si luego se fusionara con una red
+   * ajena, el envío siguiente —que sí salió— se perdería dentro del cancelado.
+   * Marcar el último registro como cerrado devuelve la ventana corta, como antes
+   * de la ventana larga. Sólo se marca el ÚLTIMO envío de la pestaña y sólo si
+   * todavía no tiene petición ni red; un envío ya contado no se toca.
+   *
+   * Sin texto: guarda el identificador del envío y el instante, nada más.
+   */
+  cerrarEnvioPendiente(webContentsId, messageId = '') {
+    const previo = this.lastSend.get(webContentsId);
+    const id = String(messageId || previo?.messageId || '');
+    if (!id || (previo && previo.messageId !== id)) return { closed: false };
+    const key = `${webContentsId}|${id}`;
+    const record = this.inputRecords.get(key);
+    const soloGesto = Boolean(record) && record.sources.size === 1 && record.sources.has('composer');
+    if (!soloGesto && !previo) return { closed: false };
+    this.enviosCerrados.set(key, Date.now());
+    return { closed: true, messageId: id };
+  }
+
   dropTab(webContentsId) {
     this.onTurnInterrupted(webContentsId);
     this.guards.delete(webContentsId);
@@ -1360,6 +1391,9 @@ export class Engine {
     }
     for (const key of [...this.cdpFailures.keys()]) {
       if (key.startsWith(`${webContentsId}|`)) this.cdpFailures.delete(key);
+    }
+    for (const key of [...this.enviosCerrados.keys()]) {
+      if (key.startsWith(`${webContentsId}|`)) this.enviosCerrados.delete(key);
     }
   }
 

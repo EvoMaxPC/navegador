@@ -1361,7 +1361,13 @@ function registerIpc() {
         title: 'NEXO no pudo decidir sobre un envío', detail: 'Motivo: sin puerta de salida.' });
       return { action: 'error', reason: 'sin-puerta' };
     }
-    return egressGate.handle({ sender: event.sender, host, payload });
+    const decision = await egressGate.handle({ sender: event.sender, host, payload });
+    // El guardián retuvo este envío: la capa lo cancelará sin petición, así que
+    // ese gesto deja de «esperar red» y el envío siguiente no se le fusiona.
+    if (decision?.action === 'block') {
+      try { engine?.cerrarEnvioPendiente(event.sender.id); } catch { /* sólo diagnóstico */ }
+    }
+    return decision;
   });
   ipcMain.handle('nexo:turn-result', (event, payload) => {
     if (event.sender?.getType?.() !== 'webview' || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
