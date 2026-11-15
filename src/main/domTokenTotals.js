@@ -105,7 +105,15 @@ export class DomTokenTotals {
       ? previousTab.conversation : `${url.origin}${url.pathname}#tab-${webContentsId}-${++project.generation}`;
     let changed = !project.ready;
     // Huellas de esta lectura, para reconocer lo que ya estaba en pantalla.
-    const huellas = new Map(turns.map((turn) => [huellaDe(turn.role, turn.content), turn]));
+    // El valor es una LISTA: dos mensajes pueden compartir texto exacto (p. ej.
+    // el usuario que repite la misma frase) y cada uno tiene su clave. Con un
+    // `Map` por huella, el segundo se perdía sin contarse.
+    const huellas = new Map();
+    for (const turn of turns) {
+      const huella = huellaDe(turn.role, turn.content);
+      if (!huellas.has(huella)) huellas.set(huella, []);
+      huellas.get(huella).push(turn);
+    }
     // El primer envío puede empezar en / y adquirir /c/id al guardarse.
     // Mover las identidades ya leídas, no sumar una copia de esos mensajes.
     //
@@ -131,7 +139,7 @@ export class DomTokenTotals {
         // El sitio renumera los ids al guardar el chat: se adopta el que muestra
         // ESTA lectura (`visible-1` → `visible-2`) para que la siguiente lo
         // reconozca directo y no lo sume otra vez.
-        const id = huellas.get(huellaDe(record.role, record.text))?.id ?? record.id;
+        const id = huellas.get(huellaDe(record.role, record.text))?.[0]?.id ?? record.id;
         const nextKey = `${conversation}\0${record.role}\0${id}`;
         const collision = project.records.get(nextKey);
         if (collision) project.chars -= collision.text.length;
@@ -179,9 +187,9 @@ export class DomTokenTotals {
     // Turnos que se cuentan de verdad: ni heredados de la conversación anterior
     // ni los que ya estaban registrados bajo esa misma huella y conversación.
     const aceptados = [];
-    for (const [huella, turn] of huellas) {
+    for (const [huella, lista] of huellas) {
       if (aplicaHeredadas && heredadas.has(huella)) continue;
-      aceptados.push(turn);
+      for (const turn of lista) aceptados.push(turn);
     }
     for (const turn of turns) heredadasNuevas.add(huellaDe(turn.role, turn.content));
     project.tabs.set(webContentsId, { anonymous: !named, conversation, path: url.origin + url.pathname,
@@ -199,10 +207,69 @@ export class DomTokenTotals {
     project.sources.set(conversation, source);
     project.ready = true;
     if (clipped && !project.partial) { project.partial = true; changed = true; }
+    // ---------------------------------------------------------------
+    // Reubicación de claves: el lector numera `visible-N` por POSICIÓN, así que
+    // al cargarse historial por delante los ids se desplazan (`visible-6` pasa a
+    // `visible-2`). Sin esto, el mismo texto entra bajo dos claves (se cuenta dos
+    // veces) y el registro que ocupaba la clave nueva se pisa (se pierde). Se
+    // resuelve la clave de cada turno aceptado en tres pasadas, y sólo contra
+    // registros de ESTA conversación:
+    //
+    //   P1 exacta   — la clave directa ya guarda ese mismo texto: se reutiliza.
+    //   P2 huella   — el turno tiene la misma huella (`huellaDe`: rol + texto)
+    //                 que un registro NO reclamado de esta conversación: adopta
+    //                 su clave y no se crea registro (el mensaje cambió de id).
+    //   P3 resto    — comportamiento de siempre (clave directa, y si tenía otro
+    //                 texto se reemplaza). Si la directa ya la reclamó otro turno
+    //                 de esta misma lectura, se usa `…~K` con K = 1, 2, 3…: el
+    //                 primero que no esté reclamado.
+    //
+    // Los registros que ningún turno reclama NO se borran: la unión se mantiene
+    // y el total no baja al recortar la lectura. `keysFor` (diagnóstico) sigue
+    // devolviendo la clave directa: no conoce las de colisión a propósito.
+    // ---------------------------------------------------------------
+    // Foto de lo que había ANTES de tocar nada: el bucle de conteo necesita el
+    // registro previo de cada clave para descontar su aporte. Leerlo de
+    // `project.records` no vale, porque P2 ya lo reescribió con el texto de esta
+    // lectura.
+    const previos = new Map(project.records);
+    const reclamadas = new Set();
+    const reubicados = [];
     for (const turn of aceptados) {
       const key = claveDe(turn);
+      if (reclamadas.has(key)) continue;
       const previous = project.records.get(key);
-      if (previous?.text === turn.content) continue;
+      if (previous && previous.conversation === conversation && previous.text === turn.content) {
+        reclamadas.add(key);
+        reubicados.push({ turn, key });
+      }
+    }
+    const libresPorHuella = new Map();
+    for (const [key, record] of project.records) {
+      if (record.conversation !== conversation || reclamadas.has(key)) continue;
+      const huella = huellaDe(record.role, record.text);
+      if (!libresPorHuella.has(huella)) libresPorHuella.set(huella, key);
+    }
+    for (const turn of aceptados) {
+      if (reubicados.some((entrada) => entrada.turn === turn)) continue;
+      const huella = huellaDe(turn.role, turn.content);
+      const key = libresPorHuella.get(huella);
+      if (key === undefined) continue;
+      reclamadas.add(key);
+      libresPorHuella.delete(huella);
+      reubicados.push({ turn, key });
+    }
+    for (const turn of aceptados) {
+      if (reubicados.some((entrada) => entrada.turn === turn)) continue;
+      const directa = claveDe(turn);
+      let key = directa, colision = 0;
+      while (reclamadas.has(key)) { colision += 1; key = `${directa}~${colision}`; }
+      reclamadas.add(key);
+      reubicados.push({ turn, key });
+    }
+    for (const { turn, key } of reubicados) {
+      const previous = previos.get(key);
+      if (previous?.text === turn.content && previous.conversation === conversation) continue;
       const chars = project.chars - (previous?.text.length || 0) + turn.content.length;
       if (chars > this.maxChars || (!previous && project.records.size >= this.maxRecords)) { project.partial = true; changed = true; continue; }
       const result = calculateTokenizer({ text: turn.content, model });
