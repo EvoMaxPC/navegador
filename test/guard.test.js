@@ -89,7 +89,11 @@ test('el prompt de continuación incluye el fragmento a evitar', () => {
 });
 
 test('los ajustes se pueden cambiar en caliente', () => {
-  const guard = new ConversationGuard({});
+  // Con egress 'off' el mensaje sale intacto y esta aserción se cumpliría aunque
+  // `setSettings` no hiciera nada: el caso dejaba de probar lo que dice. En
+  // 'observe' el único motivo para que `enhanced` sea el texto crudo es que el
+  // protocolo esté apagado, que es justo lo que se quiere demostrar.
+  const guard = new ConversationGuard({ settings: { egress: { mode: 'observe' } } });
   guard.setSettings({ protocol: { level: 'off' } });
   const report = guard.preparePrompt('Hola.');
   assert.equal(report.enhanced, 'Hola.');
