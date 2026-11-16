@@ -13,6 +13,7 @@
     "build:inject": "node scripts/build-inject.mjs",
     "dev": "npm run build:inject && electron . --dev",
     "demo": "node dev/serve.mjs",
+    "pretest": "npm run build:inject",
     "test": "node --test",
     "test:watch": "node --test --watch",
     "bench": "node scripts/bench.mjs",
