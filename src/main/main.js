@@ -27,7 +27,7 @@ import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
 import { CdpObserver } from './cdp.js';
 import { isAiHost } from '../core/cdp.js';
-import { detectSite, isAuthRequest, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
+import { detectSite, isAuthRequest, isMediable, isPreparationRequest, isProfileId, isResponseRequest, locateUserText } from '../core/sites.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS, isEvoMemoryEnabled, settingsForHost } from '../core/settings.js';
@@ -1312,7 +1312,23 @@ function registerIpc() {
     }
   });
   ipcMain.handle('nexo:prepare', (event, payload) => {
-    const result = engine.prepare(event.sender.id, payload);
+    // El alcance lo decide el emisor, no quien llama. `engine.prepare` mira
+    // `payload.url` y `payload.site`, dos campos que elige la página: una pestaña
+    // en cualquier sitio podía pedir mediación para `chatgpt.com` y recibir de
+    // vuelta el texto con la memoria del proyecto dentro. Acá se exige que lo
+    // que pide coincida con la pestaña que lo pide.
+    const hostEmisor = hostOf(event?.sender?.getURL?.() || '');
+    const hostPedido = hostOf(String(payload?.url || ''));
+    const perfilEmisor = hostEmisor ? detectSite(hostEmisor).id : '';
+    const sitePedido = isProfileId(payload?.site) ? String(payload.site) : '';
+    const alcanceAjeno =
+      !hostEmisor ||
+      !isAiHost(hostEmisor) ||
+      Boolean(hostPedido && hostPedido !== hostEmisor) ||
+      Boolean(sitePedido && sitePedido !== perfilEmisor);
+    const result = alcanceAjeno
+      ? { text: payload?.prompt, skipped: 'fuera-de-alcance' }
+      : engine.prepare(event.sender.id, payload);
     // El motor ocultó críticos que venían en el texto inyectado (memoria EVO,
     // protocolo) antes de que salieran. Se avisa acá, que es donde el aviso se
     // registra y llega al panel; `engine.prepare` no tiene registro propio.

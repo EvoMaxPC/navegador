@@ -28,6 +28,11 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
+  // Un `webContents` se pasa tal cual: `nexo:prepare` decide el alcance con la
+  // URL del emisor, y sólo una pestaña real la tiene.
+  if (senderId && typeof senderId === 'object') {
+    return handler({ sender: senderId, senderFrame: senderId.mainFrame }, payload);
+  }
   return handler({ sender: { id: senderId } }, payload);
 }
 
@@ -127,7 +132,7 @@ test('2. un mensaje mediado cuenta como mensaje y como intervención', async (t)
     prompt: 'hola, ¿me ayudás con esto?',
     url: 'https://chatgpt.com/backend-api/conversation',
     site: 'chatgpt',
-  }, 203);
+  }, journal.windows[0].attachWebview('https://chatgpt.com/c/contadores'));
 
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 1, 'el mensaje se cuenta');

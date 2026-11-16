@@ -28,6 +28,9 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
+  // Un `webContents` se pasa tal cual: `nexo:prepare` decide el alcance con la
+  // URL del emisor, y sólo una pestaña real la tiene.
+  if (senderId && typeof senderId === 'object') { return handler({ sender: senderId, senderFrame: senderId.mainFrame }, payload); }
   if(channel.startsWith('nexo:downloads:') || channel.startsWith('nexo:work:') || channel.startsWith('nexo:advanced:') || channel === 'nexo:profile:clear' || channel === 'nexo:data:clear') {const sender=journal.windows[0].webContents;return handler({sender,senderFrame:sender.mainFrame},payload);}
   return handler({ sender: { id: senderId } }, payload);
 }
@@ -431,7 +434,7 @@ test('el motor no prepara texto fuera de un proveedor ni en un flujo de acceso',
   const dentro = await callIpc('nexo:prepare', {
     prompt: 'hola, ¿me ayudás?',
     url: 'https://chatgpt.com/backend-api/conversation',
-  });
+  }, journal.windows[0].attachWebview('https://chatgpt.com/c/7a'));
   assert.equal(dentro.skipped, undefined, 'un chat de un proveedor sí se media');
   assert.equal(typeof dentro.text, 'string');
 });
@@ -444,7 +447,7 @@ test('preparar un envío no cuenta ni un mensaje ni un turno por sí solo', asyn
   const prep = await callIpc(
     'nexo:prepare',
     { prompt: 'hola, ¿me ayudás?', url: '/backend-api/conversation', site: 'chatgpt' },
-    77,
+    journal.windows[0].attachWebview('https://chatgpt.com/c/7b'),
   );
   assert.equal(prep.skipped, undefined, 'se media igual que con la URL absoluta');
   assert.ok(prep.text, 'el motor devolvió el texto a enviar');
