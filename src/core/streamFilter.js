@@ -35,6 +35,145 @@ import { createAdapter } from './streamAdapters.js';
 const encoder = new TextEncoder();
 
 /**
+ * Resumen **estructural** del stream para el diagnóstico: cuenta formas, no
+ * valores. Lo publica el proceso principal sólo con `NEXO_DIAG=1`
+ * (`diag-stream-end`), y sirve para saber qué llegó cuando el acumulador saca 0
+ * caracteres: cuántos eventos, cuántos JSON, qué nombres de evento y de clave,
+ * qué tipo tiene `v` y cuántos eventos el extractor consideró portadores.
+ *
+ * Nunca guarda contenido: los nombres pasan por `LISTA_BLANCA` y lo que no
+ * encaja se cuenta como `otros`; las listas quedan acotadas en variedad y en
+ * longitud total.
+ */
+const LISTA_BLANCA = /^[a-z_]{1,24}$/;
+const TOPE_NOMBRES = 12;
+const TOPE_NOMBRES_RENDER = 2000;
+const TOPE_TIPOS_V = 40;
+const TOPE_SALIDA = 400;
+
+/** Rutas `p` normalizadas: dígitos a `N`, sin nada más que esto. */
+const RUTA_DIAG = /^\/[a-z_/N]{1,48}$/;
+/** Valores de `o`: sólo letras y `_`, como los nombres. */
+const OPERACION_DIAG = /^[a-z_]{1,16}$/;
+const TOPE_ANIDADO = 12;
+
+/** Normaliza una ruta `p`: los índices numéricos pasan a `N`. */
+function normalizarRuta(crudo) {
+  const ruta = String(crudo === null || crudo === undefined ? '' : crudo).replace(/\d+/g, 'N');
+  return RUTA_DIAG.test(ruta) ? ruta.slice(0, 48) : 'otra';
+}
+
+/** Un valor de `o` publicable, o `otra`. */
+function normalizarOperacion(crudo) {
+  const valor = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
+  return OPERACION_DIAG.test(valor) ? valor : 'otra';
+}
+
+/**
+ * Clasifica un evento que no es JSON **sin guardar nada de su contenido**: sólo
+ * longitud, clase del primer carácter, si era el último y si equivale a `[DONE]`
+ * con espacios o CRLF.
+ */
+function clasificarNoJson(data, esUltimo) {
+  const crudo = String(data === null || data === undefined ? '' : data);
+  const limpio = crudo.trim();
+  const primero = limpio[0] || '';
+  const clase = !limpio ? 'vacio'
+    : /[a-zA-Z]/.test(primero) ? 'letra'
+      : /\d/.test(primero) ? 'digito' : 'simbolo';
+  return {
+    longitud: limpio.length,
+    clase,
+    ultimo: Boolean(esUltimo),
+    esDone: /^\[\s*DONE\s*\]$/i.test(limpio.replace(/\r\n/g, '\n')),
+    conCrlf: /\r/.test(crudo),
+  };
+}
+
+function contarNombre(lista, crudo, contador) {
+  const nombre = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
+  if (LISTA_BLANCA.test(nombre)) {
+    if (!lista.includes(nombre)) {
+      if (lista.length >= TOPE_NOMBRES) return;
+      lista.push(nombre);
+    }
+    return;
+  }
+  // Sin nombre utilizable: sólo se cuenta, nunca se guarda.
+  if (contador) contador.otros += 1;
+}
+
+function tipoDeV(valor) {
+  if (valor === null) return 'null';
+  if (Array.isArray(valor)) return 'array';
+  return typeof valor;
+}
+
+/**
+ * Cierra el nivel 2: listas renderizadas y acotadas, y banderas de "hubo algo
+ * fuera de la lista blanca". Sin un solo valor de texto.
+ */
+function resumirAnidado(anidado) {
+  const lista = (valores) => valores.slice(0, TOPE_ANIDADO).join(',').slice(0, 300);
+  const mensaje = anidado.mensaje;
+  return {
+    vArray: anidado.vArray,
+    elementos: anidado.elementos,
+    clavesElemento: lista(anidado.clavesElemento),
+    tiposElementoV: lista(anidado.tiposElementoV),
+    opsEvento: lista(anidado.opsEvento),
+    opsElemento: lista(anidado.opsElemento),
+    rutasParche: lista(anidado.rutasParche),
+    rutasEvento: lista(anidado.rutasEvento),
+    vObjetoClaves: lista(anidado.vObjetoClaves),
+    fueraDeLista: Boolean(anidado.opOtra || anidado.rutasOtra || anidado.rutasEventoOtra || anidado.vObjetoOtra),
+    mensaje: {
+      roles: lista(mensaje.roles),
+      tipos: lista(mensaje.tipos),
+      estados: lista(mensaje.estados),
+      canales: lista(mensaje.canales),
+      metadataClaves: lista(mensaje.metadataClaves),
+      descartados: mensaje.descartados,
+      sinTexto: mensaje.sinTexto,
+      otra: Boolean(mensaje.otra),
+      ocultoLevantado: mensaje.ocultoLevantado,
+      cierre: Boolean(mensaje.cierre),
+      removes: mensaje.removes.slice(0, 6),
+      removesOtra: Boolean(mensaje.removesOtra),
+    },
+    rutaTexto: { ...anidado.rutaTexto },
+    noJson: anidado.noJson,
+  };
+}
+
+function resumirEstructura(resumen) {
+  const recorta = (lista) => {
+    const caben = [];
+    let total = 0;
+    for (const nombre of lista) {
+      if (total + nombre.length + 1 > TOPE_NOMBRES_RENDER) break;
+      caben.push(nombre);
+      total += nombre.length + 1;
+    }
+    return caben.join(',');
+  };
+  return {
+    eventos: resumen.eventos,
+    conDatos: resumen.conDatos,
+    jsonValido: resumen.jsonValido,
+    jsonInvalido: resumen.jsonInvalido,
+    sinEvento: resumen.sinEvento,
+    dones: resumen.dones,
+    nombresEvento: recorta(resumen.nombresEvento),
+    claves: recorta(resumen.claves),
+    clavesOtros: resumen.clavesOtros,
+    tiposV: recorta(resumen.tiposV),
+    portadores: resumen.portadores,
+    lineas: resumen.lineas,
+  };
+}
+
+/**
  * @param {{
  *   format?: 'sse'|'ndjson'|'auto',
  *   settings?: object,
@@ -75,6 +214,132 @@ export function createStreamFilter(opts = {}) {
     if (next && (!outcome || outcome === 'completed')) outcome = next;
     if (chatgpt && (next === 'failed' || next === 'cancelled')) protocolEnded = true;
   };
+  // Resumen estructural del stream (`diag-stream-end`). Se calcula siempre
+  // —es un contador de formas, sin contenido y sin coste apreciable— porque el
+  // filtro no conoce `NEXO_DIAG`; el proceso principal decide si lo publica.
+  const estructura = {
+    eventos: 0, conDatos: 0, jsonValido: 0, jsonInvalido: 0, sinEvento: 0, dones: 0,
+    nombresEvento: [], claves: [], clavesOtros: 0, tiposV: [], portadores: 0, lineas: 0,
+  };
+  // Nivel 2: la forma de lo que va **dentro** de `v` (arrays de parches,
+  // mensajes anidados) y los descartes del adaptador. Sólo nombres, rutas
+  // normalizadas y conteos; nunca valores de texto.
+  const anidado = {
+    vArray: 0, elementos: 0, clavesElemento: [], tiposElementoV: [],
+    opsEvento: [], opsElemento: [], opOtra: false,
+    rutasParche: [], rutasOtra: false, rutasEvento: [], rutasEventoOtra: false,
+    vObjetoClaves: [], vObjetoOtra: false,
+    mensaje: { roles: [], tipos: [], estados: [], canales: [],
+      metadataClaves: [], descartados: 0, sinTexto: 0, otra: false,
+      ocultoLevantado: 0, removes: [], removesOtra: false, cierre: false },
+    // Forma de `v` en los eventos que apuntan a una parte de texto, y cuántos
+    // de ellos dieron segmento.
+    rutaTexto: { string: 0, array: 0, object: 0, otro: 0, conSegmento: 0 },
+    noJson: null,
+  };
+  const empujar = (lista, valor, tope = TOPE_ANIDADO) => {
+    if (lista.length < tope && !lista.includes(valor)) lista.push(valor);
+  };
+  const contarEvento = (evt) => {
+    estructura.eventos += 1;
+    if (!evt.hasData) return false;
+    estructura.conDatos += 1;
+    if (!evt.event) estructura.sinEvento += 1;
+    else contarNombre(estructura.nombresEvento, evt.event, null);
+    return true;
+  };
+  /** Cuenta la forma de un JSON ya leído. `portador` = el extractor sacó texto. */
+  const contarJson = (json, portador) => {
+    estructura.jsonValido += 1;
+    if (portador) estructura.portadores += 1;
+    if (Array.isArray(json)) return;                    // sin claves de primer nivel
+    if (!json || typeof json !== 'object') return;
+    for (const clave of Object.keys(json)) contarNombre(estructura.claves, clave, estructura);
+    if ('v' in json) {
+      const tipo = tipoDeV(json.v);
+      if (estructura.tiposV.length < TOPE_TIPOS_V && !estructura.tiposV.includes(tipo)) {
+        if (LISTA_BLANCA.test(tipo)) estructura.tiposV.push(tipo);
+      }
+      contarAnidado(json);
+    }
+  };
+
+  /**
+   * Nivel 2: la forma de `v` cuando es array u objeto. Mira nombres de clave,
+   * tipos, rutas normalizadas y etiquetas del mensaje; **nunca** un valor de
+   * texto.
+   */
+  const contarAnidado = (json) => {
+    if (typeof json?.p === 'string') {
+      const ruta = normalizarRuta(json.p);
+      if (ruta === 'otra') anidado.rutasEventoOtra = true;
+      else empujar(anidado.rutasEvento, ruta);
+    }
+    if (typeof json?.o === 'string') {
+      const op = normalizarOperacion(json.o);
+      if (op === 'otra') anidado.opOtra = true;
+      else empujar(anidado.opsEvento, op);
+    }
+    const valor = json?.v;
+    if (Array.isArray(valor)) {
+      anidado.vArray += 1;
+      anidado.elementos += valor.length;
+      for (const elemento of valor.slice(0, 256)) {
+        if (!elemento || typeof elemento !== 'object' || Array.isArray(elemento)) continue;
+        for (const clave of Object.keys(elemento)) {
+          const nombre = String(clave).trim().toLowerCase();
+          if (LISTA_BLANCA.test(nombre)) empujar(anidado.clavesElemento, nombre);
+          else anidado.vObjetoOtra = true;
+        }
+        if ('v' in elemento) {
+          const tipoElemento = tipoDeV(elemento.v);
+          if (LISTA_BLANCA.test(tipoElemento)) empujar(anidado.tiposElementoV, tipoElemento);
+        }
+        if (typeof elemento.o === 'string') {
+          const op = normalizarOperacion(elemento.o);
+          if (op === 'otra') anidado.opOtra = true;
+          else empujar(anidado.opsElemento, op);
+        }
+        if (typeof elemento.p === 'string') {
+          const ruta = normalizarRuta(elemento.p);
+          if (ruta === 'otra') anidado.rutasOtra = true;
+          else empujar(anidado.rutasParche, ruta);
+        }
+      }
+      return;
+    }
+    if (!valor || typeof valor !== 'object') return;
+    for (const clave of Object.keys(valor)) {
+      const nombre = String(clave).trim().toLowerCase();
+      if (LISTA_BLANCA.test(nombre)) empujar(anidado.vObjetoClaves, nombre);
+      else anidado.vObjetoOtra = true;
+    }
+    // Hipótesis alternativa: ¿el mensaje se descartó por rol/tipo/fragmento?
+    // Sólo se miran sus etiquetas, nunca su texto.
+    const mensaje = valor.message;
+    if (!mensaje || typeof mensaje !== 'object' || Array.isArray(mensaje)) return;
+    // Se deja constancia de que el mensaje llegó, aunque después se descarte.
+    const etiqueta = (crudo) => {
+      const texto = typeof crudo === 'string' ? crudo.trim().toLowerCase() : '';
+      return LISTA_BLANCA.test(texto) ? texto : null;
+    };
+    const guardar = (lista, crudo) => {
+      if (crudo === undefined) return;
+      const texto = etiqueta(crudo);
+      if (texto) empujar(lista, texto); else anidado.mensaje.otra = true;
+    };
+    guardar(anidado.mensaje.roles, mensaje.author?.role);
+    guardar(anidado.mensaje.tipos, mensaje.content?.content_type);
+    guardar(anidado.mensaje.estados, mensaje.status);
+    guardar(anidado.mensaje.canales, mensaje.channel);
+    if (mensaje.metadata && typeof mensaje.metadata === 'object' && !Array.isArray(mensaje.metadata)) {
+      for (const clave of Object.keys(mensaje.metadata)) {
+        const nombre = String(clave).trim().toLowerCase();
+        if (LISTA_BLANCA.test(nombre)) empujar(anidado.mensaje.metadataClaves, nombre);
+        else anidado.mensaje.otra = true;
+      }
+    }
+  };
   const pendingChunks = [];
   let plainText = '';
   let lineText = '';
@@ -89,11 +354,14 @@ export function createStreamFilter(opts = {}) {
     const lines = buffered.split('\n');
     buffered = final ? '' : lines.pop();
     for (const line of lines) {
+      if (!line.trim()) continue;
+      estructura.lineas += 1;
       const json = safeJson(line);
-      if (!json) continue;
+      if (!json) { estructura.jsonInvalido += 1; continue; }
       observeOutcome(json);
       const plan = adapter.read(json);
       const delta = (plan.segments || []).map((segment) => segment.newText).join('');
+      contarJson(json, Boolean(delta));
       lineText += delta;
       reportText(delta);
       if (chatgpt && json.type === 'end') protocolEnded = true;
@@ -107,19 +375,26 @@ export function createStreamFilter(opts = {}) {
     ended = true;
     if (format === 'ndjson') consumeLines(true);
     const verdict = sentinel.finish();
+    // El proveedor dijo que el mensaje del asistente terminó (status final +
+    // `end_turn`). Con eso, la heurística de puntuación no marca «cortada»: una
+    // respuesta completa que acaba sin punto no lo está. Sólo cuenta si el
+    // stream cerró como completado; cortado, abortado o interrumpido, igual.
+    const cierreSeguro = anidado.mensaje.cierre && outcome !== 'failed' && outcome !== 'cancelled' && !interrupted;
     const text = format === 'ndjson' ? (adapter.snapshot?.() ?? lineText)
       : format === 'text' ? plainText : verdict.delivered;
     opts.onEnd?.({
       stopped: format === 'sse' && verdict.stopped,
       code: interrupted ? 'stream-interrupted' : verdict.stopReason,
-      truncated: interrupted || (format === 'sse' && verdict.truncated),
-      truncationReason: interrupted ? 'stream-interrupted' : verdict.truncationReason,
+      truncated: interrupted || (format === 'sse' && verdict.truncated && !cierreSeguro),
+      truncationReason: interrupted ? 'stream-interrupted'
+        : (cierreSeguro ? null : verdict.truncationReason),
       deliveredChars: text.length,
       droppedChars: format === 'sse' ? verdict.droppedChars : 0,
       text, dropped: format === 'sse' ? verdict.dropped : '',
       outcome: outcome === 'failed' || outcome === 'cancelled' ? outcome
         : (interrupted || verdict.stopped) ? 'unknown' : outcome || 'completed',
       interrupted, model: adapter.model?.() || '',
+      estructura: { ...resumirEstructura(estructura), anidado: resumirAnidado(anidado) },
     });
   };
   let stoppedReported = false;
@@ -189,10 +464,12 @@ export function createStreamFilter(opts = {}) {
   };
 
   /** Procesa un evento ya parseado y devuelve lo que hay que escribir en el cable. */
-  const handleEvent = (evt) => {
+  const handleEvent = (evt, esUltimo = false) => {
+    contarEvento(evt);
     // ChatGPT recibe el fin lógico sin esperar EOF; primero liberar lo retenido.
     // Los otros proveedores conservan su cierre diferido.
     if (evt.data === '[DONE]' || evt.data === 'DONE') {
+      estructura.dones += 1;
       if (chatgpt) {
         protocolEnded = true;
         outcome ||= 'completed';
@@ -210,7 +487,12 @@ export function createStreamFilter(opts = {}) {
       protocolEnded = true;
     }
     const json = safeJson(evt.data);
-    if (!json) return passthroughSSE(evt);
+    if (!json) {
+      estructura.jsonInvalido += 1;
+      // Sin volcar contenido: longitud, clase del primer carácter y forma.
+      anidado.noJson ||= clasificarNoJson(evt.data, esUltimo);
+      return passthroughSSE(evt);
+    }
 
     observeOutcome(json);
     const plan = adapter.read(json);
@@ -218,6 +500,27 @@ export function createStreamFilter(opts = {}) {
     // puede finalizar antes de que llegue la respuesta visible.
     if (chatgpt && json.type === 'message_stream_complete') protocolEnded = true;
     const segments = plan.segments || [];
+    if (plan.descartados) anidado.mensaje.descartados += plan.descartados;
+    if (plan.sinTexto) anidado.mensaje.sinTexto += plan.sinTexto;
+    if (plan.cierre) anidado.mensaje.cierre = true;
+    if (plan.ocultoLevantado) anidado.mensaje.ocultoLevantado += plan.ocultoLevantado;
+    if (Array.isArray(plan.removes) && plan.removes.length) {
+      for (const ruta of plan.removes) {
+        if (anidado.mensaje.removes.length >= 6) break;
+        if (anidado.mensaje.removes.includes(ruta)) continue;
+        // Ruta normalizada o, si no encaja, `s<longitud>`: el resto se marca.
+        if (/^\/message\/[A-Za-z_/]{1,56}$/.test(ruta) || /^s\d{1,6}$/.test(ruta)) {
+          anidado.mensaje.removes.push(ruta);
+        } else anidado.mensaje.removesOtra = true;
+      }
+    }
+    if (plan.porEvento) {
+      for (const forma of Object.keys(anidado.rutaTexto)) {
+        if (forma !== 'conSegmento' && plan.porEvento[forma]) anidado.rutaTexto[forma] += plan.porEvento[forma];
+      }
+      if (plan.segmentos) anidado.rutaTexto.conSegmento += plan.segmentos;
+    }
+    contarJson(json, segments.length > 0);
 
     if (!segments.length) {
       // Evento de control. Si cierra un bloque o el mensaje, el texto retenido
@@ -249,9 +552,9 @@ export function createStreamFilter(opts = {}) {
    * llegó** y el fallo se informa una sola vez. La mediación puede entonces
    * quedarse sin efecto en ese evento, pero nunca romper la conversación.
    */
-  const safeHandle = (evt) => {
+  const safeHandle = (evt, esUltimo = false) => {
     try {
-      return handleEvent(evt);
+      return handleEvent(evt, esUltimo);
     } catch (error) {
       if (!failureReported) {
         failureReported = true;
@@ -295,7 +598,7 @@ export function createStreamFilter(opts = {}) {
       if (!events.length) return;
 
       let out = '';
-      for (const evt of events) out += safeHandle(evt);
+      events.forEach((evt, i) => { out += safeHandle(evt, i === events.length - 1); });
       if (out) controller.enqueue(encoder.encode(out));
       if (protocolEnded) finishCapture();
     },

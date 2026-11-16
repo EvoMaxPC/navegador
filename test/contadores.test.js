@@ -28,6 +28,11 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
+  // Un `webContents` se pasa tal cual: `nexo:prepare` decide el alcance con la
+  // URL del emisor, y sólo una pestaña real la tiene.
+  if (senderId && typeof senderId === 'object') {
+    return handler({ sender: senderId, senderFrame: senderId.mainFrame }, payload);
+  }
   return handler({ sender: { id: senderId } }, payload);
 }
 
@@ -109,7 +114,16 @@ test('el mismo mensaje repetido por la capa no se cuenta dos veces', async () =>
   assert.equal(despues.messages, antes.messages + 1);
 });
 
-test('2. un mensaje mediado cuenta como mensaje y como intervención', async () => {
+test('2. un mensaje mediado cuenta como mensaje y como intervención', async (t) => {
+  // Con `egress` en 'off' el mensaje sale intacto y por tanto no hay intervención
+  // mediada que contar: este caso necesita 'observe'. El ajuste vive en el proceso
+  // principal, así que se fija por el único camino autorizado (la shell) y se
+  // restaura con `t.after` para no alterar los demás casos del archivo.
+  const shell = journal.windows[0].webContents;
+  const setSettings = (patch) => journal.ipcHandlers.get('nexo:settings:set')({ sender: shell, senderFrame: shell.mainFrame }, patch);
+  setSettings({ egress: { mode: 'observe' } });
+  t.after(() => setSettings({ egress: { mode: 'off' } }));
+
   const antes = await stats();
   enviar(203, { messageId: 'a3', mediated: true });
 
@@ -118,7 +132,7 @@ test('2. un mensaje mediado cuenta como mensaje y como intervención', async () 
     prompt: 'hola, ¿me ayudás con esto?',
     url: 'https://chatgpt.com/backend-api/conversation',
     site: 'chatgpt',
-  }, 203);
+  }, journal.windows[0].attachWebview('https://chatgpt.com/c/contadores'));
 
   const despues = await stats();
   assert.equal(despues.messages, antes.messages + 1, 'el mensaje se cuenta');

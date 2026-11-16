@@ -12,7 +12,7 @@ function streamAll(guard, text, size = 11) {
 }
 
 test('el turno completo registra intervenciones de envío y de recepción', () => {
-  const guard = new ConversationGuard({});
+  const guard = new ConversationGuard({ settings: { egress: { mode: 'observe' } } });
   guard.preparePrompt('Explica los índices invertidos.');
   const done = streamAll(guard, LOOPING_ANSWER);
 
@@ -89,7 +89,11 @@ test('el prompt de continuación incluye el fragmento a evitar', () => {
 });
 
 test('los ajustes se pueden cambiar en caliente', () => {
-  const guard = new ConversationGuard({});
+  // Con egress 'off' el mensaje sale intacto y esta aserción se cumpliría aunque
+  // `setSettings` no hiciera nada: el caso dejaba de probar lo que dice. En
+  // 'observe' el único motivo para que `enhanced` sea el texto crudo es que el
+  // protocolo esté apagado, que es justo lo que se quiere demostrar.
+  const guard = new ConversationGuard({ settings: { egress: { mode: 'observe' } } });
   guard.setSettings({ protocol: { level: 'off' } });
   const report = guard.preparePrompt('Hola.');
   assert.equal(report.enhanced, 'Hola.');

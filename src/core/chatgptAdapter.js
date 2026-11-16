@@ -28,16 +28,79 @@ const PRINT_LABEL_ROLES = new Map([
   ['You said:', 'user'],
   ['ChatGPT said:', 'assistant'],
 ]);
+// Claves de más larga a más corta: si dos coinciden por prefijo, gana la más
+// específica. Se calcula una vez; el `Map` conserva las cuatro etiquetas.
+const PRINT_LABEL_KEYS = [...PRINT_LABEL_ROLES.keys()].sort((a, b) => b.length - a.length);
+/**
+ * Rol de un encabezado visible.
+ *
+ * En el DOM medido el nombre de quien habla viaja pegado a la etiqueta dentro
+ * del mismo `h4` («Dijiste:Tú», «ChatGPT dijo:ChatGPT»), así que la igualdad
+ * exacta se queda corta. Se prueba primero la búsqueda de siempre —idéntica
+ * para las etiquetas limpias— y sólo si falla se acepta la etiqueta como
+ * prefijo de una de las cuatro claves conocidas. No se añaden claves ni
+ * idiomas, y una etiqueta que no empiece por ninguna no se reconoce: «Respuesta
+ * más reciente» sigue descartándose.
+ */
+function printLabelRole(label) {
+  const exacto = PRINT_LABEL_ROLES.get(label);
+  if (exacto) return exacto;
+  const clave = PRINT_LABEL_KEYS.find((item) => label.startsWith(item));
+  return clave ? PRINT_LABEL_ROLES.get(clave) : '';
+}
 function selectPrintLabelMessages(document) {
   const messages = queryAll(document, 'main h4').flatMap((header) => {
     const label = String(header.textContent ?? header.innerText ?? '').trim();
-    const role = PRINT_LABEL_ROLES.get(label) || '';
+    const role = printLabelRole(label);
     // En el DOM observado, el contenido es el hermano inmediato del encabezado h4.
     const node = header.nextElementSibling;
     return role && node ? [{ node, role }] : [];
   });
   return { strategy: 'print-label', messages };
 }
+/**
+ * Posición de cada nodo en la última lista completa YA ordenada.
+ *
+ * El identificador de reserva es `visible-N`, y `N` tiene que ser la posición
+ * del nodo en la conversación, no en la lista que sobrevive al filtro: si se
+ * descarta un nodo oculto que iba antes, los que siguen visibles no pueden
+ * cambiar de id. Se guarda aquí antes de filtrar y `chatGptMessageId` lo usa
+ * cuando el nodo está.
+ */
+const posicionOriginal = new WeakMap();
+
+/**
+ * ¿Se puede confiar en el layout de esta lectura?
+ *
+ * Sólo si **algún** contenedor del lector (`main`, los mismos de `main h4`) tiene
+ * caja: en un chat nuevo conviven dos `main` y el primero puede quedarse sin
+ * caja, así que mirar sólo el primero apagaba el filtro sin motivo. Con la
+ * pestaña en segundo plano, sin ningún `main` con caja o si la medición lanza,
+ * no se mide nada y se devuelve `false`: ahí el filtro no se aplica (fail-open).
+ */
+function mainConCaja(document) {
+  try {
+    // `queryAll` ya devuelve un Array (:5). `.some` se detiene en el primero con caja.
+    return queryAll(document, 'main').some((main) => main.getClientRects().length > 0);
+  } catch {
+    // Sin `main`, sin `getClientRects` o midiendo mal: fail-open.
+    return false;
+  }
+}
+
+/**
+ * ¿Ocupa lugar en la página? Sin `getClientRects` no hay forma de saberlo, así
+ * que se da por visible (fail-open); si la medición lanza, también.
+ */
+function tieneCaja(node) {
+  try {
+    return node.getClientRects().length > 0;
+  } catch {
+    // Nodo ausente o que no se puede medir: falta o lanza → fail-open.
+    return true;
+  }
+}
+
 function outer(nodes) {
   const candidates = new Set(nodes);
   return [...candidates].filter((node) => {
@@ -88,9 +151,15 @@ export function selectChatGptMessages(document) {
     }
   }
   messages.sort(compareDocumentOrder);
+  // La posición se anota ANTES de filtrar: es la que define `visible-N`, y así
+  // un nodo oculto que desaparece no renumera a los que siguen visibles.
+  messages.forEach(({ node }, index) => {
+    if (node && typeof node === 'object') posicionOriginal.set(node, index);
+  });
+  const visibles = mainConCaja(document) ? messages.filter(({ node }) => tieneCaja(node)) : messages;
   return {
     strategy: usedStrategies.join('+') || 'none',
-    messages,
+    messages: visibles,
   };
 }
 
@@ -106,7 +175,9 @@ export function chatGptMessageId(node, index) {
     node.closest?.('[data-message-id]')?.getAttribute?.('data-message-id') ||
     node.closest?.('[data-turn-id]')?.getAttribute?.('data-turn-id') ||
     (/^conversation-turn/.test(node.getAttribute?.('data-testid') || '') ? node.getAttribute('data-testid') : '') ||
-    node.closest?.('article[data-testid]')?.getAttribute?.('data-testid') || `visible-${index}`;
+    node.closest?.('article[data-testid]')?.getAttribute?.('data-testid') ||
+    // Posición en la conversación, aunque el filtro haya quitado nodos ocultos.
+    `visible-${posicionOriginal.get(node) ?? index}`;
 }
 
 const STOP_RE = /^(stop|detener|parar)\b/i;

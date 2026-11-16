@@ -7,6 +7,7 @@ import { PromptStore } from './promptStore.js';
 import { MAX_PROMPTS, PROMPT_VARIABLES } from '../core/prompts.js';
 import { repetitionSnapshot } from '../core/conversationRepetition.js';
 import { isPublicAssetPath } from './internalAssets.js';
+import { configForTab, settingsForTab } from './tabConfig.js';
 import { createCaptureDiagnostic } from './captureDiagnostic.js';
 import { isChatGptMemoryUrl } from '../core/chatgptConversation.js';
 /**
@@ -26,11 +27,13 @@ import { Engine } from './engine.js';
 import { createMemory } from './memory.js';
 import { CdpObserver } from './cdp.js';
 import { isAiHost } from '../core/cdp.js';
-import { detectSite, isAuthRequest, isMediable, isPreparationRequest, isResponseRequest, locateUserText } from '../core/sites.js';
+import { detectSite, isAuthRequest, isMediable, isPreparationRequest, isProfileId, isResponseRequest, locateUserText } from '../core/sites.js';
 import { createProfile } from './profile.js';
 import { buildMenu } from './menu.js';
 import { DEFAULT_SETTINGS, isEvoMemoryEnabled, settingsForHost } from '../core/settings.js';
 import { createEgressGate } from './egressGate.js';
+import { inspectOutgoing } from './egressNet.js';
+import { normalizeEgress } from '../core/egressConfig.js';
 import { fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
 import { inputTokenMeasurement, countOutputTokens } from './tokens.js';
 import gptTokens from '../core/gptTokens.cjs';
@@ -289,6 +292,48 @@ async function servirArchivo(request) {
  * no debe llenar el registro.
  */
 const diagnosticSeen = new Map();
+// Un envío retenido es un hecho, no un estado: si el usuario vuelve a intentar
+// y lo retiene otra vez, tiene que verlo otra vez. Estos códigos no se
+// deduplican; el resto del registro sí, para que un reintento en bucle no lo
+// llene.
+const AVISOS_DE_BLOQUEO = new Set(['egress-block', 'egress-error', 'egress-net-block', 'egress-injected-block']);
+/**
+ * Instrumentación de diagnóstico, apagada por omisión.
+ *
+ * `NEXO_DIAG=1` (mismo estilo que `NEXO_NETWATCH`) publica avisos `diag-*` con
+ * lo que hace falta para separar «el lector no leyó» de «el motor no contó»:
+ * motivo de salida de cada snapshot, estrategia del adaptador, conteos por rol y
+ * el tamaño de lo que llega por `stream-end`. Sin la variable no se calcula ni se
+ * emite nada, y el retorno de cada canal es idéntico.
+ *
+ * Nunca lleva contenido del chat ni identificadores. Bajo `NEXO_DIAG=1` viaja el
+ * **pathname** de la conversación (`/c/…`), sin origen, sin query y sin hash:
+ * lo justo para separar «otra conversación» de «la misma recargada». El resto
+ * son conteos, nombres de estrategia y booleanos.
+ */
+const diagOn = process.env.NEXO_DIAG === '1';
+/**
+ * Margen para dar por buena una ausencia de respuestas al leer el historial.
+ * Mientras el DOM se pinta, dos lecturas seguidas separadas por menos de esto
+ * siguen siendo la misma carga: no se afirma nada hasta que el desenlace se
+ * repite. Por pestaña, y sólo del último desenlace (no se guarda contenido).
+ */
+const ESPERA_LECTURA_ESTABLE_MS = 1500;
+const lecturasDeConversacion = new Map();
+/**
+ * Pestañas con un envío retenido ahora mismo: la puerta de salida abrió el
+ * diálogo y todavía no hay veredicto (`askNativeEgress`). Se marca antes de
+ * abrir el cuadro y se desmarca al cerrarlo, también cuando falla.
+ *
+ * Mientras está marcada, la pestaña no puede afirmar «no encontró respuestas»:
+ * el mensaje del usuario está en pantalla pero no salió, así que cero
+ * respuestas es el estado esperado, no un hecho sobre la conversación. Es la
+ * señal que el proceso principal ya tiene en la mano; no hace falta ningún
+ * canal nuevo ni leer el DOM de la página.
+ */
+const egressEnCurso = new Map();
+/** Estos avisos no se deduplican: cada uno describe un hecho distinto. */
+const AVISOS_DIAG = new Set(['diag-inicio', 'diag-snapshot', 'diag-stream-end', 'diag-contadores', 'diag-mensaje', 'diag-cancelacion', 'diag-respuesta-contada', 'diag-dom-nodos']);
 function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key: explicitKey = null }) {
   if (!store) return null;
   // La clave agrupa lo que es el mismo aviso. Por omisión, código y título; el
@@ -296,10 +341,13 @@ function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key
   // distintos del mismo proveedor no se pisen.
   const key = explicitKey || `${code}|${title}`;
   const now = Date.now();
-  if (now - (diagnosticSeen.get(key) || 0) < 30_000) return null;
-  diagnosticSeen.set(key, now);
-  if (diagnosticSeen.size > 200) {
-    for (const [k, ts] of diagnosticSeen) if (now - ts > 120_000) diagnosticSeen.delete(k);
+  const sinDedup = AVISOS_DE_BLOQUEO.has(code) || AVISOS_DIAG.has(code);
+  if (!sinDedup && now - (diagnosticSeen.get(key) || 0) < 30_000) return null;
+  if (!sinDedup) {
+    diagnosticSeen.set(key, now);
+    if (diagnosticSeen.size > 200) {
+      for (const [k, ts] of diagnosticSeen) if (now - ts > 120_000) diagnosticSeen.delete(k);
+    }
   }
   const entry = { kind: 'system', code, severity, title, detail, meta, ts: now };
   store.pushLog(entry);
@@ -312,6 +360,315 @@ function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key
 
 function broadcast(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+
+/** Un booleano en texto, para que `detail` se lea sin abrir el meta. */
+const siNo = (value) => (value ? 'sí' : 'no');
+/** Un conteo sin decimales ni notación científica. */
+const cuenta = (value) => String(Number(value) || 0);
+
+/**
+ * Estrategias del adaptador de ChatGPT, en el orden en que las prueba
+ * `selectChatGptMessages`. Se usan sólo para partir la firma `a+b+c` que publica
+ * el lector; un nombre desconocido se conserva tal cual.
+ */
+const DIAG_STRATEGIES = ['print-label', 'author-role', 'data-turn', 'conversation-turn', 'article'];
+function diagStrategy(value) {
+  if (typeof value !== 'string' || !value) return 'sin-campo';
+  if (value === 'none') return 'none';
+  return value.split('+').every((part) => DIAG_STRATEGIES.includes(part)) ? value : 'no-valida';
+}
+
+/**
+ * Recorte de una clave de acumulador (`conversation\0role\0id`) para el aviso.
+ *
+ * La conversación puede ser una URL con identificador: se publica sólo su ruta
+ * (`/c/<algo>` recortado) y nunca el host con query. El id se recorta a 12
+ * caracteres. No se publica texto del chat en ningún caso.
+ */
+function diagClave(key) {
+  const partes = String(key).split('\u0000');
+  const [conversation = '', role = '', id = ''] = partes;
+  let ruta = '(otra)';
+  try {
+    const url = new URL(conversation);
+    ruta = `${url.pathname.slice(0, 16)}${url.pathname.length > 16 ? '…' : ''}`;
+  } catch { /* conversación anónima: `origin+path#tab-N-gen` no es URL válida */ }
+  return `${ruta}:${role === 'user' ? 'u' : 'a'}:${String(id).slice(0, 12)}`;
+}
+
+/**
+ * Aviso `diag-snapshot`: por qué salió (o no) cada snapshot de repetición, con
+ * la estrategia del adaptador y los conteos por rol. La clave lleva la firma
+ * completa para que dos snapshots distintos no se pisen y ninguno se descarte.
+ *
+ * Con `turnos` describe además, uno por línea, el rol, el id usado, cuántos
+ * caracteres y la clave del acumulador: es el dato que separa «el acumulador no
+ * reinicia» de «el id cambia y por eso suma de nuevo».
+ */
+function noteDiagSnapshot({ motivo, strategy, user, assistant, observed, dom, turnos = [], nuevas = null, total = null, href = null, hrefCambio = null }) {
+  if (!diagOn) return null;
+  const firma = [motivo, strategy, user, assistant, observed ? 1 : 0,
+    dom ? `${dom.ready ? 1 : 0}/${dom.inputTokens}/${dom.outputTokens}/${dom.partial ? 1 : 0}` : '-',
+    nuevas === null ? '-' : nuevas, total === null ? '-' : total, hrefCambio === null ? '-' : hrefCambio ? 1 : 0].join('|');
+  const title = `diag-snapshot: ${motivo}`;
+  const partes = [`estrategia ${strategy}`, `user ${cuenta(user)}`, `assistant ${cuenta(assistant)}`,
+    `observeDomTokens ${siNo(observed)}`];
+  if (dom) partes.push(`ready ${siNo(dom.ready)}`, `dom ${cuenta(dom.inputTokens)}/${cuenta(dom.outputTokens)}`,
+    `partial ${siNo(dom.partial)}`);
+  if (href !== null) {
+    let ruta = '(otra)';
+    try {
+      const url = new URL(href);
+      // Sólo la ruta: sin origen, sin query y sin hash. La ruta basta para
+      // distinguir una conversación de otra y evita que el host del proveedor
+      // viaje en un aviso de diagnóstico.
+      ruta = url.pathname.slice(0, 48) || '/';
+    } catch { /* href vacía o inválida */ }
+    partes.push(`href ${ruta}`, hrefCambio === null ? 'href-cambio sin-previa' : `href-cambio ${siNo(hrefCambio)}`);
+  }
+  if (nuevas !== null) partes.push(`claves nuevas ${cuenta(nuevas)}`, `registros ${cuenta(total)}`);
+  const detalleTurnos = turnos.map((turno, i) =>
+    `  ${i + 1}) ${turno.role} · id ${turno.id} · ${cuenta(turno.chars)} chars · clave ${turno.clave}`);
+  return noteDiagnostic({
+    code: 'diag-snapshot', key: `diag-snapshot|${firma}`, severity: 'info', title,
+    detail: [...partes, ...detalleTurnos].join('\n'),
+    meta: { motivo, strategy, user: Number(user) || 0, assistant: Number(assistant) || 0,
+      observed: Boolean(observed), ready: dom ? Boolean(dom.ready) : null,
+      inputTokens: dom ? Number(dom.inputTokens) || 0 : null,
+      outputTokens: dom ? Number(dom.outputTokens) || 0 : null,
+      partial: dom ? Boolean(dom.partial) : null,
+      hrefCambio: hrefCambio === null ? null : Boolean(hrefCambio),
+      nuevasClaves: nuevas === null ? null : Number(nuevas) || 0,
+      registros: total === null ? null : Number(total) || 0,
+      turnos: turnos.map((turno) => ({ role: turno.role, id: turno.id, chars: Number(turno.chars) || 0, clave: turno.clave })) },
+  });
+}
+
+/**
+ * Última firma publicada por `diag-contadores`.
+ *
+ * `diag-contadores` se emite desde `statsSnapshot()`, y esa función se llama en
+ * cada cambio de contadores, en cada navegación y en cada `nexo:stats`: sin este
+ * freno inunda el registro (400 entradas) y desaloja a `diag-snapshot`, que es el
+ * que explica por qué suben los números. Sólo se publica cuando la firma cambia.
+ */
+let diagContadoresFirma = null;
+
+/**
+ * Aviso `diag-respuesta-contada`: qué hizo el motor cuando se le entregó una
+ * respuesta, camino por camino, y si eso dejó aviso en el panel.
+ *
+ * Existe porque el contador de respuestas y las entradas de Actividad pueden
+ * separarse: un camino puede sumar sin avisar (`dom`), o no sumar porque el
+ * turno ya estaba contado (`stream-end` con `duplicate`). Sin este aviso, esa
+ * diferencia sólo se ve comparando números a mano. Sólo números y booleanos:
+ * nunca texto ni URL.
+ *
+ * @param {'stream-end'|'dom'|'red'|'cdp'} camino
+ * @param {{conto: boolean, aviso: boolean, chars: number}} datos
+ */
+function noteDiagRespuestaContada(camino, { conto, aviso, chars }) {
+  if (!diagOn) return null;
+  const n = Math.max(0, Number(chars) || 0);
+  const si = cuenta(conto ? 1 : 0);
+  const siAviso = cuenta(aviso ? 1 : 0);
+  return noteDiagnostic({
+    code: 'diag-respuesta-contada', severity: 'info',
+    key: `diag-respuesta-contada|${camino}|${si}|${siAviso}|${n}`,
+    title: `diag-respuesta-contada: ${camino}`,
+    detail: `camino ${camino} · contó ${siNo(conto)} · aviso ${siNo(aviso)} · chars ${cuenta(n)}`,
+    meta: { camino, conto: Boolean(conto), aviso: Boolean(aviso), chars: n },
+  });
+}
+
+/**
+ * Última ruta observada por `nexo:dom-tokens:snapshot` (la del respaldo directo
+ * de la shell), por pestaña. Sólo `origin + pathname`, nunca la URL completa y
+ * nunca el contenido: sirve para decir si la href cambió entre lecturas.
+ */
+const diagDirectoHref = new Map();
+
+/* ---------------------- diag-dom-nodos (sólo lectura) ---------------------- */
+
+/**
+ * Último instante en que se pidió `diag-dom-nodos` por pestaña.
+ *
+ * La lectura del DOM se ejecuta en la página y cuesta: una vez cada 3 s por
+ * pestaña es suficiente para ver si los nodos que el lector no reconoce están
+ * ocultos, y evita inundar el registro (400 entradas) que es donde viven los
+ * `diag-snapshot` que explican el resto.
+ */
+const diagDomNodosAt = new Map();
+const DIAG_DOM_NODOS_MS = 3_000;
+const DIAG_DOM_NODOS_TIMEOUT_MS = 1_500;
+
+/**
+ * Script de SÓLO LECTURA que replica la selección `print-label`.
+ *
+ * Es una réplica deliberada de `src/core/chatgptAdapter.js:51-60`
+ * (`selectPrintLabelMessages`): el proceso principal no puede importar el
+ * adaptador porque ese código corre en la página, y esta etapa no toca
+ * `src/core`. **Puede divergir** si el adaptador cambia; si eso pasa, este aviso
+ * describirá una selección que ya no es la del lector.
+ *
+ * Devuelve sólo números y booleanos: ni texto, ni atributos, ni URLs.
+ */
+const DIAG_DOM_NODOS_SCRIPT = `(() => {
+  const ETIQUETAS = new Map([['Dijiste:', 'user'], ['ChatGPT dijo:', 'assistant'], ['You said:', 'user'], ['ChatGPT said:', 'assistant']]);
+  const claves = [...ETIQUETAS.keys()].sort((a, b) => b.length - a.length);
+  const rolDe = (etiqueta) => {
+    const exacto = ETIQUETAS.get(etiqueta);
+    if (exacto) return exacto;
+    const clave = claves.find((item) => etiqueta.startsWith(item));
+    return clave ? ETIQUETAS.get(clave) : '';
+  };
+  const h4 = Array.from(document.querySelectorAll('main h4'));
+  const nodos = [];
+  for (const header of h4) {
+    const etiqueta = String(header.textContent || '').trim();
+    const rol = rolDe(etiqueta);
+    if (!rol) continue;
+    const nodo = header.nextElementSibling;
+    if (!nodo) continue;
+    let oculto = false;
+    for (let padre = nodo; padre; padre = padre.parentElement) {
+      if (padre.hasAttribute && (padre.hasAttribute('hidden') || padre.getAttribute('aria-hidden') === 'true' || padre.hasAttribute('inert'))) {
+        oculto = true;
+        break;
+      }
+    }
+    nodos.push({
+      indice: nodos.length,
+      rol,
+      chars: String(nodo.innerText ?? nodo.textContent ?? '').length,
+      visible: typeof nodo.checkVisibility === 'function' ? nodo.checkVisibility() : null,
+      oculto,
+      rects: typeof nodo.getClientRects === 'function' ? nodo.getClientRects().length : 0,
+    });
+  }
+  // El filtro del lector pregunta antes por el contenedor, no por cada nodo.
+  // El adaptador se activa si ALGUNO de los main tiene caja; el primero se
+  // informa aparte porque es el que antes decidía (y se quedaba sin caja).
+  const principales = Array.from(document.querySelectorAll('main'));
+  const primero = principales[0] || null;
+  const rectsMain = primero ? primero.getClientRects().length : 0;
+  const displayMain = primero ? getComputedStyle(primero).display : 'n.d.';
+  // Cuántos main autorizan el filtro: el lector lo activa si ALGUNO tiene caja.
+  const mainsConCaja = principales.filter((item) => item.getClientRects().length > 0).length;
+  return { h4: h4.length, conEtiqueta: nodos.length, mains: principales.length, rectsMain, displayMain,
+    mainsConCaja, nodos: nodos.slice(0, 12) };
+})()`;
+
+/** Un `sí`/`no`/`n.d.` para el ternario de `checkVisibility`. */
+const siNoNd = (value) => (value === null || value === undefined ? 'n.d.' : (value ? 'sí' : 'no'));
+
+/**
+ * Con `NEXO_DIAG=1`, pide a la página un recuento de los nodos que su lector
+ * reconocería. Sólo lectura y sólo números; cualquier fallo se publica como «no
+ * disponible» con el motivo, sin datos de la página.
+ *
+ * Fuera de `NEXO_DIAG=1` no se llama a la página ni una vez.
+ */
+async function noteDiagDomNodos(sender) {
+  if (!diagOn || !sender) return null;
+  const ahora = Date.now();
+  if (ahora - (diagDomNodosAt.get(sender.id) || 0) < DIAG_DOM_NODOS_MS) return null;
+  diagDomNodosAt.set(sender.id, ahora);
+  const noDisponible = (motivo) => noteDiagnostic({
+    code: 'diag-dom-nodos', severity: 'info',
+    key: `diag-dom-nodos|no|${motivo}|${ahora}`,
+    title: 'diag-dom-nodos: no disponible',
+    detail: `motivo ${motivo} · sin datos de la página`,
+    meta: { disponible: false, motivo },
+  });
+  const ejecutar = sender.executeJavaScript;
+  if (typeof ejecutar !== 'function') return noDisponible('sin-ejecutor');
+  let temporizador = null;
+  try {
+    const resultado = await Promise.race([
+      Promise.resolve(ejecutar.call(sender, DIAG_DOM_NODOS_SCRIPT, false)),
+      new Promise((resolve) => {
+        temporizador = setTimeout(() => resolve({ __agotado: true }), DIAG_DOM_NODOS_TIMEOUT_MS);
+      }),
+    ]);
+    if (resultado?.__agotado) return noDisponible('timeout');
+    if (!resultado || !Array.isArray(resultado.nodos)) return noDisponible('formato');
+    const nodos = resultado.nodos.slice(0, 12);
+    const filas = nodos.map((nodo) =>
+      `${cuenta(nodo?.indice)} ${String(nodo?.rol || '?').slice(0, 9)} ${cuenta(nodo?.chars)}c ` +
+      `vis ${siNoNd(nodo?.visible)} oculto ${siNo(nodo?.oculto)} rects ${cuenta(nodo?.rects)}`);
+    return noteDiagnostic({
+      code: 'diag-dom-nodos', severity: 'info',
+      key: `diag-dom-nodos|${cuenta(resultado.h4)}|${cuenta(resultado.conEtiqueta)}|${ahora}`,
+      title: `diag-dom-nodos: ${cuenta(nodos.length)} nodos`,
+      detail: [
+        `main h4 ${cuenta(resultado.h4)} · con etiqueta ${cuenta(resultado.conEtiqueta)} · ` +
+          `main ${cuenta(resultado.mains)} · main rects ${cuenta(resultado.rectsMain)} · display ${String(resultado.displayMain || 'n.d.').slice(0, 16)} · ` +
+          `mains con caja ${cuenta(resultado.mainsConCaja)}`,
+        ...filas,
+      ].join('\n'),
+      meta: {
+        disponible: true,
+        h4: Number(resultado.h4) || 0,
+        conEtiqueta: Number(resultado.conEtiqueta) || 0,
+        mains: Number(resultado.mains) || 0,
+        rectsMain: Number(resultado.rectsMain) || 0,
+        displayMain: String(resultado.displayMain || '').slice(0, 16),
+        mainsConCaja: Number(resultado.mainsConCaja) || 0,
+        nodos: nodos.map((nodo) => ({
+          indice: Number(nodo?.indice) || 0,
+          rol: String(nodo?.rol || '').slice(0, 9),
+          chars: Number(nodo?.chars) || 0,
+          visible: nodo?.visible === null || nodo?.visible === undefined ? null : Boolean(nodo.visible),
+          oculto: Boolean(nodo?.oculto),
+          rects: Number(nodo?.rects) || 0,
+        })),
+      },
+    });
+  } catch (error) {
+    // El nombre del error, nunca su mensaje: puede traer texto de la página.
+    return noDisponible(`error-${String(error?.name || 'desconocido').slice(0, 24)}`);
+  } finally {
+    if (temporizador) clearTimeout(temporizador);
+  }
+}
+
+/**
+ * Aviso `diag-contadores`: lo que pinta la interfaz (DOM) frente a lo que midió
+ * el motor. Sólo números y booleanos: es lo que decide si un cero viene de una
+ * lectura vacía o de una fuente que no se está usando.
+ *
+ * La firma incluye TODO lo que viaja en el aviso, también los conteos de
+ * mensajes del DOM: si dos estados difieren sólo en `userMessages` o
+ * `assistantMessages`, el aviso tiene que salir igualmente.
+ */
+function noteDiagContadores(stats) {
+  if (!diagOn) return null;
+  const dom = stats?.domTokens || {};
+  // La ruta activa entra en la firma: si sólo cambia de conversación, el aviso
+  // también tiene que salir. `ruta` es un `pathname`, nunca la URL completa.
+  const activo = domTokenTotals.resumenActivo(store?.settings?.memory?.projectId || 'default');
+  const firma = [dom.ready ? 1 : 0, dom.inputTokens, dom.outputTokens, dom.partial ? 1 : 0,
+    dom.userMessages, dom.assistantMessages, activo.ruta, activo.obsoletos, activo.migrados,
+    stats?.messages, stats?.responses, stats?.inputTokens, stats?.outputTokens].join('|');
+  // Mismo estado que el último aviso: no se repite. La primera lectura sí sale.
+  if (firma === diagContadoresFirma) return null;
+  diagContadoresFirma = firma;
+  return noteDiagnostic({
+    code: 'diag-contadores', key: `diag-contadores|${firma}`, severity: 'info',
+    title: `diag-contadores: dom ${dom.ready ? 'listo' : 'sin texto'}`,
+    detail: `dom ready ${siNo(dom.ready)} · dom ${cuenta(dom.inputTokens)}/${cuenta(dom.outputTokens)}` +
+      ` · parcial ${siNo(dom.partial)} · motor mensajes ${cuenta(stats?.messages)}` +
+      ` · respuestas ${cuenta(stats?.responses)} · motor ${cuenta(stats?.inputTokens)}/${cuenta(stats?.outputTokens)}` +
+      ` · activa ${activo.ruta ?? '—'} · ignorados ${cuenta(activo.obsoletos)} · migrados ${cuenta(activo.migrados)}`,
+    meta: { ready: Boolean(dom.ready), inputTokens: Number(dom.inputTokens) || 0,
+      outputTokens: Number(dom.outputTokens) || 0, partial: Boolean(dom.partial),
+      messages: Number(stats?.messages) || 0, responses: Number(stats?.responses) || 0,
+      engineInputTokens: Number(stats?.inputTokens) || 0, engineOutputTokens: Number(stats?.outputTokens) || 0,
+      // Sólo `pathname`: sin origen, sin query y sin hash.
+      conversationPath: activo.ruta, ignoredTurns: activo.obsoletos, migratedRecords: activo.migrados },
+  });
 }
 
 /**
@@ -543,6 +900,32 @@ function createWindow() {
   return win;
 }
 
+/** Instante del último aviso de `onUserMessage`, por pestaña. Sólo para el `+Nms`. */
+const diagMensajeUltimo = new Map();
+
+/**
+ * Gancho de diagnóstico del motor: `engine.onUserMessage` avisa aquí con el
+ * resultado de contar (o descartar) el mensaje. Sólo observa; el conteo no se
+ * toca. El camino de red y el de la capa pasan por sus propios puntos.
+ */
+function hookDiagMensaje(instance) {
+  if (!instance || typeof instance.onUserMessage !== 'function') return instance;
+  const original = instance.onUserMessage.bind(instance);
+  instance.onUserMessage = (webContentsId, payload = {}) => {
+    const counted = original(webContentsId, payload);
+    // Milisegundos desde el aviso anterior de ESTA pestaña: es lo que separa «la
+    // red llegó tarde» de «son dos envíos». Sin previo se dice `primero`.
+    const ahora = Date.now();
+    const previo = diagMensajeUltimo.get(webContentsId);
+    const desdePrevio = typeof previo === 'number' ? Math.max(0, ahora - previo) : null;
+    diagMensajeUltimo.set(webContentsId, ahora);
+    noteDiagMensaje({ source: String(payload?.source || 'request'), messageId: payload?.messageId,
+      counted, messages: instance.stats?.().messages, desdePrevio });
+    return counted;
+  };
+  return instance;
+}
+
 function domTokenModel() {
   const configured = store?.settings?.tokenCounting?.model;
   return tokenizerModels().models.some(item => item.id === configured) ? configured : tokenizerModels().defaultModel;
@@ -587,6 +970,9 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
       detail: 'No se encontró la ventana de la pestaña; el envío se bloqueó.' });
     return 'cancel';
   }
+  // La pestaña lo sabe para no convertir «todavía no salió» en «no hay
+  // respuestas». El conteo por pestaña cubre el caso de dos envíos encadenados.
+  const tabIdRetenido = sender?.id;
   const buttons = list.map((choice) => EGRESS_BUTTONS[choice] || EGRESS_BUTTONS.cancel);
   const cancelId = Math.max(0, list.indexOf('cancel'));
   const detail = (Array.isArray(summary) ? summary : [])
@@ -600,6 +986,9 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
     ? setTimeout(() => controller.abort(), Math.min(ms, 600_000))
     : null;
   try {
+    // La marca vive dentro del `try` para que el `finally` la retire aunque el
+    // diálogo lance antes de abrirse: marca y desmarca en el mismo bloque.
+    egressEnCurso.set(tabIdRetenido, (egressEnCurso.get(tabIdRetenido) || 0) + 1);
     const { response } = await dialog.showMessageBox(parent, {
       type: 'warning',
       title: 'NEXO',
@@ -619,16 +1008,30 @@ async function askNativeEgress({ sender, summary, allowed, timeoutMs }) {
     if (controller.signal.aborted) return 'timeout';
     return list[response] || 'cancel';
   } catch (error) {
-    return controller.signal.aborted ? 'timeout' : 'cancel';
+    if (controller.signal.aborted) return 'timeout';
+    // Si el diálogo revienta, el usuario nunca vio la pregunta: tiene que
+    // quedar dicho. Sólo el nombre del error (el mensaje puede traer el texto
+    // del envío, que es justo lo que no debe registrarse).
+    const nombre = String(error?.name || '').slice(0, 40) || 'desconocido';
+    noteDiagnostic({ code: 'egress-error', severity: 'warn', key: 'egress-error|dialogo',
+      title: 'NEXO no pudo decidir sobre un envío', detail: `Motivo: el diálogo falló (${nombre}).` });
+    return 'cancel';
   } finally {
     if (timer) clearTimeout(timer);
+    // El veredicto ya está: la pestaña puede volver a afirmar lo que lea. Si el
+    // contador no existiera (doble liberación), no se inventa uno.
+    const quedan = (egressEnCurso.get(tabIdRetenido) || 1) - 1;
+    if (quedan > 0) egressEnCurso.set(tabIdRetenido, quedan);
+    else egressEnCurso.delete(tabIdRetenido);
   }
 }
 
 function statsSnapshot() {
-  return {
+  const stats = {
     ...engine.stats(),
-    domTokens: domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel()),
+    // Sólo la conversación activa: un chat nuevo arranca en 0/0 y volver a
+    // `/c/A` recupera su total. Los registros de las demás no se borran.
+    domTokens: domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel(), { soloActiva: true }),
     log: store.log.length,
     cdpObserver: cdp?.status() || null,
     captureDiagnosticFile,
@@ -637,13 +1040,20 @@ function statsSnapshot() {
     capture: { ...capture },
     egress: egressGate ? egressGate.stats() : null,
   };
+  // Instrumentación: fuera de `NEXO_DIAG=1` la función es exactamente la de antes.
+  if (diagOn) noteDiagContadores(stats);
+  return stats;
 }
 
 function refreshGuestSettings() {
   for (const contents of webContents.getAllWebContents()) {
     const host = hostOf(contents.getURL());
     if (!contents.isDestroyed() && contents.getType() === 'webview' && isAiHost(host)) {
-      contents.send('nexo:settings', engine.configFor(host));
+      // Es un envío hacia la pestaña, no una respuesta a la shell: el payload se
+      // recorta con el mismo criterio que `nexo:config`/`config-sync`
+      // (`tabConfig.js`), porque el bridge lo reenvía tal cual al mundo principal
+      // de la página (preload/bridge.cjs:212-214 → inject/index.js:1350).
+      contents.send('nexo:settings', configForTab(engine.configFor(host)));
     }
   }
 }
@@ -672,16 +1082,237 @@ function turnFollowUp(result) {
   return { fixes, suggestions, next, truncated: Boolean(repaired.truncated), refusal: Boolean(repaired.refusal) };
 }
 
+/**
+ * Aviso `diag-mensaje` (sólo con `NEXO_DIAG=1`): por qué camino se contó (o se
+ * descartó) un mensaje del usuario en el motor. Existe porque el panel llegó a
+ * mostrar 3 mensajes tras 2 envíos limpios y no había forma de ver la causa.
+ *
+ * Nunca publica el texto ni el id: del id sólo un resumen de 6 caracteres, para
+ * emparejar avisos del mismo envío sin revelarlo.
+ */
+function noteDiagMensaje({ source, messageId, counted, messages, desdePrevio }) {
+  if (!diagOn) return null;
+  const id = String(messageId || '');
+  // Resumen estable de 6 caracteres del id: no es reversible ni el id completo.
+  let resumen = '';
+  let h = 0x811c9dc5 | 0;
+  for (let i = 0; i < id.length; i += 1) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) | 0;
+  resumen = (h >>> 0).toString(36).padStart(6, '0').slice(0, 6);
+  const duplicado = Boolean(counted?.duplicate);
+  return noteDiagnostic({
+    code: 'diag-mensaje', severity: 'info',
+    title: `diag-mensaje: ${duplicado ? 'duplicado' : 'contado'}`,
+    // La clave lleva el resumen del id: dos envíos distintos nunca se pisan
+    // (y `AVISOS_DIAG` ya lo saca de la ventana de 30 s).
+    key: `diag-mensaje|${String(source || '').slice(0, 20)}|${resumen}`,
+    detail: `source ${String(source || '-').slice(0, 20)} · messageId ${id ? 'sí' : 'no'} ${resumen}` +
+      ` · ${duplicado ? 'duplicado' : 'contado'} · mensajes del motor ${Number(messages) || 0}` +
+      ` · ${desdePrevio === null || desdePrevio === undefined ? 'primero' : `+${Number(desdePrevio) || 0}ms`}`,
+    meta: { source: String(source || '').slice(0, 20), hasMessageId: Boolean(id), messageIdHash: resumen,
+      duplicate: duplicado, messages: Number(messages) || 0,
+      desdePrevio: desdePrevio === null || desdePrevio === undefined ? null : Number(desdePrevio) || 0 },
+  });
+}
+
+/**
+ * Sólo tipo/subtipo del MIME que la capa ya leyó: sin parámetros (`; charset=`)
+ * ni otras cabeceras ni URL. `-` si la capa no lo mandó.
+ */
+function diagMime(payload) {
+  return String(payload?.diag?.mime || '').split(';')[0].trim().toLowerCase().slice(0, 40) || '-';
+}
+
+/** Nombres que se publican: minúsculas y `_`, igual que el filtro. Lo demás es `otros`. */
+const NOMBRE_DIAG = /^[a-z_]{1,24}$/;
+
+/** Rutas normalizadas del nivel 2: dígitos ya son `N` en la capa. */
+const RUTA_DIAG = /^\/[a-z_/N]{1,48}$/;
+
+/**
+ * El resumen en una línea, ya acotada: conteos, nombres de evento y de clave y
+ * tipos de `v`. Sin valores de ningún campo.
+ */
+function textoEstructura(e) {
+  if (!e) return '-';
+  const texto = `eventos ${cuenta(e.eventos)} · con datos ${cuenta(e.conDatos)}` +
+    ` · json ${cuenta(e.jsonValido)}/${cuenta(e.jsonValido + e.jsonInvalido)}` +
+    ` · done ${cuenta(e.dones)} · portadores ${cuenta(e.portadores)}` +
+    ` · tipos ${e.tiposV || '-'} · claves ${e.claves || '-'}` +
+    ` · eventos ${e.nombresEvento || '-'} · otros ${cuenta(e.clavesOtros)}` +
+    (e.anidado ? ` · v array ${cuenta(e.anidado.vArray)}/${cuenta(e.anidado.elementos)}` +
+      ` · rutas ${e.anidado.rutasParche || '-'} · ops ${e.anidado.opsEvento || '-'}` +
+      ` · descartes ${cuenta(e.anidado.mensaje.descartados)}` +
+      ` · noJson ${e.anidado.noJson ? `${e.anidado.noJson.clase}/${e.anidado.noJson.longitud}` : '-'}` +
+      ` · ${textoEtiquetas(e.anidado.mensaje)}` +
+      ` · rutaTexto ${textoRutaTexto(e.anidado.rutaTexto)}` +
+      ` · cierre ${e.anidado.mensaje.cierre ? 'si' : 'no'}` +
+      ` · ocultoLevantado ${e.anidado.mensaje.ocultoLevantado}` +
+      ` · removes ${e.anidado.mensaje.removes.length ? e.anidado.mensaje.removes.join(',') : '0'}` +
+      `${e.anidado.mensaje.removesOtra ? '+s<n>' : ''}` +
+      `` : '');
+  return texto.slice(0, 1100);
+}
+
+/**
+ * Las etiquetas del mensaje anidado, en la línea publicada. Si no hay ninguna
+ * lo dice explícitamente con «etiquetas 0»: un hueco silencioso no se distingue
+ * de un mensaje que nunca llegó.
+ */
+function textoEtiquetas(m) {
+  const lista = (valor) => String(valor || '').trim();
+  const partes = [];
+  if (lista(m.roles)) partes.push(`rol ${lista(m.roles)}`);
+  if (lista(m.tipos)) partes.push(`tipo ${lista(m.tipos)}`);
+  if (lista(m.estados)) partes.push(`estado ${lista(m.estados)}`);
+  if (lista(m.canales)) partes.push(`canal ${lista(m.canales)}`);
+  if (lista(m.metadataClaves)) partes.push(`meta ${lista(m.metadataClaves)}`);
+  return partes.length ? partes.join(' · ') : 'etiquetas 0';
+}
+
+/** Formas de `v` en la ruta de texto, y cuántas dieron segmento. */
+function textoRutaTexto(r) {
+  const v = r || {};
+  return `string ${cuenta(v.string)} array ${cuenta(v.array)} object ${cuenta(v.object)}` +
+    ` otro ${cuenta(v.otro)} · con segmento ${cuenta(v.conSegmento)}`;
+}
+
+/**
+ * Copia defensiva del resumen estructural que ya calculó el filtro: no inventa
+ * campos, no añade valores y acota lo que llega. Por si un nombre raro se
+ * colara antes, aquí se tira y se suma a `otros`.
+ */
+function diagEstructura(payload) {
+  const e = payload?.estructura ?? payload?.diag?.estructura;
+  if (!e || typeof e !== 'object') return null;
+  const lista = (valor) => {
+    const todos = String(valor || '').split(',').filter(Boolean);
+    const nombres = todos.filter((nombre) => NOMBRE_DIAG.test(nombre));
+    return {
+      texto: nombres.slice(0, 12).join(',').slice(0, 200),
+      // Los que no pasan la lista blanca o no caben no se publican: se cuentan.
+      fuera: todos.length - Math.min(nombres.length, 12),
+    };
+  };
+  const numero = (valor) => (Number.isFinite(Number(valor)) ? Number(valor) : 0);
+  const eventos = lista(e.nombresEvento);
+  const claves = lista(e.claves);
+  const tipos = lista(e.tiposV);
+  return {
+    eventos: numero(e.eventos),
+    conDatos: numero(e.conDatos),
+    jsonValido: numero(e.jsonValido),
+    jsonInvalido: numero(e.jsonInvalido),
+    sinEvento: numero(e.sinEvento),
+    dones: numero(e.dones),
+    nombresEvento: eventos.texto,
+    claves: claves.texto,
+    clavesOtros: numero(e.clavesOtros) + claves.fuera,
+    tiposV: tipos.texto,
+    portadores: numero(e.portadores),
+    lineas: numero(e.lineas),
+    // Nivel 2: la forma de `v` cuando es array u objeto y los descartes del
+    // adaptador. Se copia tal cual, pero saneada: listas acotadas y sólo
+    // etiquetas. Ni un valor de texto.
+    ...(e.anidado ? { anidado: diagAnidado(e.anidado) } : {}),
+  };
+}
+
+/** Sanea el nivel 2: rutas, operaciones y etiquetas con su lista blanca. */
+function diagAnidado(a) {
+  if (!a || typeof a !== 'object') return null;
+  const lista = (valor, patron = NOMBRE_DIAG, tope = 12) => {
+    const todos = String(valor || '').split(',').filter(Boolean);
+    const validos = todos.filter((nombre) => patron.test(nombre));
+    return { texto: validos.slice(0, tope).join(',').slice(0, 300), fuera: todos.length - Math.min(validos.length, tope) };
+  };
+  const numero = (valor) => (Number.isFinite(Number(valor)) ? Number(valor) : 0);
+  // Rutas ya vienen normalizadas (`N` en vez de índices) y con `/` delante.
+  const rutas = lista(a.rutasParche, RUTA_DIAG);
+  const rutasEvento = lista(a.rutasEvento, RUTA_DIAG);
+  const m = a.mensaje && typeof a.mensaje === 'object' ? a.mensaje : {};
+  const noJson = a.noJson && typeof a.noJson === 'object' ? {
+    longitud: numero(a.noJson.longitud),
+    clase: ['letra', 'digito', 'simbolo', 'vacio'].includes(a.noJson.clase) ? a.noJson.clase : 'vacio',
+    ultimo: Boolean(a.noJson.ultimo),
+    esDone: Boolean(a.noJson.esDone),
+    conCrlf: Boolean(a.noJson.conCrlf),
+  } : null;
+  return {
+    vArray: numero(a.vArray),
+    elementos: numero(a.elementos),
+    clavesElemento: lista(a.clavesElemento).texto,
+    tiposElementoV: lista(a.tiposElementoV).texto,
+    opsEvento: lista(a.opsEvento).texto,
+    opsElemento: lista(a.opsElemento).texto,
+    rutasParche: rutas.texto,
+    rutasEvento: rutasEvento.texto,
+    vObjetoClaves: lista(a.vObjetoClaves).texto,
+    fueraDeLista: Boolean(a.fueraDeLista),
+    mensaje: {
+      roles: lista(m.roles).texto,
+      tipos: lista(m.tipos).texto,
+      estados: lista(m.estados).texto,
+      canales: lista(m.canales).texto,
+      metadataClaves: lista(m.metadataClaves).texto,
+      descartados: numero(m.descartados),
+      sinTexto: numero(m.sinTexto),
+      otra: Boolean(m.otra),
+      ocultoLevantado: numero(m.ocultoLevantado),
+      cierre: Boolean(m.cierre),
+      removes: Array.isArray(m.removes)
+        ? [...new Set(m.removes)].filter((r) => /^\/message\/[A-Za-z_/]{1,60}$/.test(r)).slice(0, 6) : [],
+      removesOtra: Boolean(m.removesOtra),
+    },
+    rutaTexto: {
+      string: numero(a.rutaTexto?.string), array: numero(a.rutaTexto?.array),
+      object: numero(a.rutaTexto?.object), otro: numero(a.rutaTexto?.otro),
+      conSegmento: numero(a.rutaTexto?.conSegmento),
+    },
+    noJson,
+  };
+}
+
+/**
+ * ¿El rechazo de la lectura llegó sin motivo? Es la cancelación del consumidor:
+ * el valor del rechazo es `undefined`, así que `String(error?.message || error)`
+ * produce justo la cadena «undefined». Se exige que la capa lo haya declarado
+ * (`sinMotivo`) para no confundirlo con un error cuyo texto sea esa palabra.
+ */
+const sinMotivoDeCancelacion = (payload) =>
+  payload?.stage === 'stream-interrupted' &&
+  (payload?.sinMotivo === true || String(payload?.message || '') === 'undefined');
+
 function isShellRequest(event) {
   return Boolean(event?.sender && event.senderFrame===event.sender.mainFrame &&
     event.sender.getURL()==='nexo://app/src/ui/shell/index.html' &&
     BrowserWindow.getAllWindows().some(window=>window.webContents===event.sender));
 }
 
+/**
+ * Envuelve un handler de canal para que sólo lo ejecute la shell.
+ *
+ * El registro sigue siendo el mismo `ipcMain.handle(canal, …)`: lo que cambia es
+ * el cuerpo, que primero pregunta por el emisor. Un emisor ajeno —una pestaña
+ * inyectada o cualquier ventana que no sea la shell— recibe el valor vacío del
+ * tipo que ese canal devuelve normalmente (`denegado`), así que quien llama no
+ * distingue un rechazo de una lista sin datos y el proceso principal no ejecuta
+ * ningún efecto.
+ *
+ * @param {(event: unknown, payload?: unknown) => unknown} handler
+ * @param {unknown} denegado valor vacío del tipo de retorno normal del canal
+ */
+function shellOnly(handler, denegado) {
+  return (event, payload) => (isShellRequest(event) ? handler(event, payload) : denegado);
+}
+
+
 function registerIpc() {
   ipcMain.handle('nexo:tokenizer:models', event => isShellRequest(event) ? tokenizerModels() : { ok: false, error: 'No autorizado.' });
   ipcMain.handle('nexo:tokenizer:count', (event, payload) => isShellRequest(event) ? calculateTokenizer(payload) : { ok: false, error: 'No autorizado.' });
-  ipcMain.handle('nexo:config', (_event, payload = {}) => engine.configFor(payload.host || ''));
+  // La configuración que sale de acá la consume una pestaña: se recorta a lo que
+  // la capa lee de verdad (`tabConfig.js`). El recorte va en el handler, no en
+  // `engine.configFor`: el proceso principal —guardián y motor— la usa entera.
+  ipcMain.handle('nexo:config', (_event, payload = {}) => configForTab(engine.configFor(payload.host || '')));
 
   // La misma configuración, pero síncrona: el preload de cada pestaña la
   // necesita ANTES de que la página registre su propio `fetch`. Es una llamada
@@ -689,7 +1320,7 @@ function registerIpc() {
   ipcMain.on('nexo:config-sync', (event, payload = {}) => {
     const host = typeof payload?.host === 'string' ? payload.host : '';
     try {
-      event.returnValue = engine ? engine.configFor(host) : null;
+      event.returnValue = engine ? configForTab(engine.configFor(host)) : null;
     } catch (error) {
       // Un `sendSync` que se quede sin `returnValue` bloquea el renderer antes
       // de que la página exista: la pestaña se queda en blanco. Nunca se sale
@@ -699,7 +1330,49 @@ function registerIpc() {
     }
   });
   ipcMain.handle('nexo:prepare', (event, payload) => {
-    const result = engine.prepare(event.sender.id, payload);
+    // El alcance lo decide el emisor, no quien llama. `engine.prepare` mira
+    // `payload.url` y `payload.site`, dos campos que elige la página: una pestaña
+    // en cualquier sitio podía pedir mediación para `chatgpt.com` y recibir de
+    // vuelta el texto con la memoria del proyecto dentro. Acá se exige que lo
+    // que pide coincida con la pestaña que lo pide.
+    const hostEmisor = hostOf(event?.sender?.getURL?.() || '');
+    const hostPedido = hostOf(String(payload?.url || ''));
+    const perfilEmisor = hostEmisor ? detectSite(hostEmisor).id : '';
+    const sitePedido = isProfileId(payload?.site) ? String(payload.site) : '';
+    const alcanceAjeno =
+      !hostEmisor ||
+      !isAiHost(hostEmisor) ||
+      Boolean(hostPedido && hostPedido !== hostEmisor) ||
+      Boolean(sitePedido && sitePedido !== perfilEmisor);
+    const result = alcanceAjeno
+      ? { text: payload?.prompt, skipped: 'fuera-de-alcance' }
+      : engine.prepare(event.sender.id, payload);
+    // El motor ocultó críticos que venían en el texto inyectado (memoria EVO,
+    // protocolo) antes de que salieran. Se avisa acá, que es donde el aviso se
+    // registra y llega al panel; `engine.prepare` no tiene registro propio.
+    if (result?.redacted?.count) {
+      noteDiagnostic({
+        code: 'egress-injected-redact',
+        severity: 'info',
+        key: `egress-injected-redact|${hostOf(String(payload?.url || '')) || 'sitio'}`,
+        title: 'NEXO ocultó un dato sensible de tu memoria antes de enviar',
+        detail: `Tipos: ${result.redacted.types.map((t) => `${t}×1`).join(', ')}. El dato sigue en tu memoria; sólo no viaja.`,
+        meta: { host: hostOf(String(payload?.url || '')) || '', types: result.redacted.types, count: result.redacted.count },
+      });
+    }
+    // El fail-safe del guardián no pudo limpiar el texto inyectado: el envío se
+    // retiene entero (la capa lanza el AbortError). Sin este aviso, el usuario
+    // sólo vería que su mensaje no sale.
+    if (result?.blocked === 'redaccion-inyectada') {
+      noteDiagnostic({
+        code: 'egress-injected-block',
+        severity: 'warn',
+        key: `egress-injected-block|${hostOf(String(payload?.url || '')) || 'sitio'}`,
+        title: 'NEXO retuvo un envío: no pudo ocultar un dato sensible de tu memoria',
+        detail: 'El dato sigue en tu memoria; el envío no salió. Revisá las memorias del proyecto antes de reintentar.',
+        meta: { host: hostOf(String(payload?.url || '')) || '', site: payload?.site || null, blocked: 'redaccion-inyectada' },
+      });
+    }
     // Lectura paralela, sin alterar el envío ni los motores de EVO.
     if(isUnderstandingSource(event)&&isChatGptMemoryUrl(event.sender.getURL())&&!isAuthRequest(String(payload?.url||'')))conversationOptimizer?.observePrompt(event.sender,payload?.prompt,payload?.model);
     // La capa de la página sólo pide mediación cuando ya reconoció una petición
@@ -730,10 +1403,24 @@ function registerIpc() {
     try { host = new URL(event.sender?.getURL?.() || '').hostname; } catch { /* sin URL */ }
     if (!isUnderstandingSource(event) || !host || detectSite(host).id === 'generic') {
       egressGate?.noteUnauthorized();
+      // La capa se queda sin veredicto y decide ella sola: si bloquea, sin este
+      // aviso el envío desaparece sin rastro. Sin contenido, sólo el motivo.
+      noteDiagnostic({ code: 'egress-error', severity: 'warn', key: 'egress-error|emisor',
+        title: 'NEXO no pudo decidir sobre un envío', detail: 'Motivo: emisor no autorizado.' });
       return { action: 'error', reason: 'emisor' };
     }
-    if (!egressGate) return { action: 'error', reason: 'sin-puerta' };
-    return egressGate.handle({ sender: event.sender, host, payload });
+    if (!egressGate) {
+      noteDiagnostic({ code: 'egress-error', severity: 'warn', key: 'egress-error|sin-puerta',
+        title: 'NEXO no pudo decidir sobre un envío', detail: 'Motivo: sin puerta de salida.' });
+      return { action: 'error', reason: 'sin-puerta' };
+    }
+    const decision = await egressGate.handle({ sender: event.sender, host, payload });
+    // El guardián retuvo este envío: la capa lo cancelará sin petición, así que
+    // ese gesto deja de «esperar red» y el envío siguiente no se le fusiona.
+    if (decision?.action === 'block') {
+      try { engine?.cerrarEnvioPendiente(event.sender.id); } catch { /* sólo diagnóstico */ }
+    }
+    return decision;
   });
   ipcMain.handle('nexo:turn-result', (event, payload) => {
     if (event.sender?.getType?.() !== 'webview' || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -754,16 +1441,64 @@ function registerIpc() {
   });
   ipcMain.handle('nexo:stream-end', (event, payload) => {
     payload = { ...payload, documentUrl: event.sender?.getURL?.() || '' };
+    // Diagnóstico: si el texto llegó vacío, cualquier «respuesta contada» de acá
+    // hacia abajo viene sin una sola palabra. Sin contenido: sólo números.
+    if (diagOn) {
+      const chars = Number(payload?.chars) || Number(payload?.deliveredChars) || 0;
+      const vacio = !String(payload?.text || '').trim();
+      // Se copia y acota una sola vez; si la capa no lo mandó, no se publica.
+      const estructura = diagEstructura(payload);
+      noteDiagnostic({
+        code: 'diag-stream-end', severity: 'info', title: `diag-stream-end: ${vacio ? 'sin texto' : 'con texto'}`,
+        key: `diag-stream-end|${chars}|${vacio ? 1 : 0}|${payload?.outcome || '-'}|${payload?.messageId ? 1 : 0}`,
+        // Números de la lectura, para saber si un cierre sin texto viene de un
+        // formato mal detectado. Sólo tipo/subtipo del MIME y conteos.
+        detail: `chars ${cuenta(chars)} · vacío ${siNo(vacio)} · source ${String(payload?.source || '-')}` +
+          ` · outcome ${String(payload?.outcome || '-')} · messageId ${siNo(Boolean(payload?.messageId))}` +
+          ` · mime ${diagMime(payload)} · formato ${String(payload?.diag?.formato || '-')}` +
+          ` · trozos ${cuenta(payload?.diag?.trozos)} · bytes ${cuenta(payload?.diag?.bytes)}` +
+          ` · estructura ${textoEstructura(estructura)}`,
+        meta: { chars, empty: vacio, source: String(payload?.source || '').slice(0, 40),
+          outcome: String(payload?.outcome || '').slice(0, 40), hasMessageId: Boolean(payload?.messageId),
+          host: hostOf(payload?.documentUrl || ''),
+          mime: diagMime(payload), formato: String(payload?.diag?.formato || '').slice(0, 20),
+          chunks: Number(payload?.diag?.trozos) || 0, bytes: Number(payload?.diag?.bytes) || 0,
+          ...(estructura ? { estructura } : {}) },
+      });
+    }
     // Texto tardío del mismo turno: reutilizar la absorción/deduplicación que
     // ya atiende CDP, sin volver a finalizar la memoria del guardián.
+    // Diagnóstico: el contador antes y después, para poder decir si este camino
+    // sumó y si además dejó aviso. Se lee el contador público del motor.
+    const respuestasAntesStream = diagOn ? engine.stats().responses : 0;
     const result = payload?.source === 'dom-recovery' && payload?.site === 'chatgpt'
       ? { counted: engine.onCdpCapture(event.sender.id, payload), nextAction: null }
       : engine.onStreamEnd(event.sender.id, payload);
+    // Recuperación por DOM del mismo turno: el texto llegó, así que un aviso de
+    // «quedó cortada» ya mostrado (por un stream-end sin texto) es falso. Se
+    // retira, y nunca se publica uno nuevo. Sin texto no se retira nada.
+    // `counted.duplicate` no lo impide: es lo habitual (el mismo turno ya contado)
+    // y el texto igualmente llegó. Pero si el turno viene marcado como cortado
+    // (`truncated`), el aviso es cierto: se conserva y no se retira nada.
+    const recuperaTexto = payload?.source === 'dom-recovery' &&
+      Boolean(String(payload?.text || '').trim()) &&
+      payload?.truncated !== true && result?.repaired?.truncated !== true;
+    // Mismo canal con `cleared`: la shell ya lo escucha y no hace falta un
+    // canal nuevo (ni tocar el preload).
+    if (recuperaTexto) broadcast('nexo:turn-followup', { webContentsId: event.sender.id, cleared: true });
     writeCaptureTrace('response-delivered', { capture: payload, source: payload?.source || 'request',
       memory: result?.memory || result?.counted?.memory || null,
       duplicate: Boolean(result?.counted?.duplicate) });
     const chars = Number(payload?.chars) || Number(payload?.deliveredChars) || 0;
-    if (chars > 0 && !result?.counted?.duplicate) {
+    const avisaStream = chars > 0 && !result?.counted?.duplicate;
+    if (diagOn) {
+      // Se publica también cuando NO contó (duplicado): ese es justamente el
+      // caso que deja al panel sin aviso y que hay que poder explicar.
+      noteDiagRespuestaContada('stream-end', {
+        conto: engine.stats().responses > respuestasAntesStream, aviso: avisaStream, chars,
+      });
+    }
+    if (avisaStream) {
       const host = String(payload?.host || payload?.site || 'el sitio');
       const cortada = Boolean(payload?.stopped || payload?.truncated);
       const entry = {
@@ -795,6 +1530,8 @@ function registerIpc() {
     // Lo que el motor detectó al cerrar el turno (reparaciones, sugerencias y
     // continuación) se publica como evento: antes se calculaba y se descartaba
     // en la interfaz, que no tenía forma de ofrecer el siguiente paso.
+    // Un turno recuperado y completo no tiene `next` (el motor ya no propone
+    // continuar), así que aquí basta con no publicar nada si no hay nada.
     const followUp = turnFollowUp(result);
     if (followUp) broadcast('nexo:turn-followup', { webContentsId: event.sender.id, ...followUp });
     return result;
@@ -839,12 +1576,19 @@ function registerIpc() {
     return promptStore.render(payload.id, payload.values || {});
   });
 
-  ipcMain.handle('nexo:settings:get', () => store.settings);
+  // La shell lo usa completo para pintar Ajustes y para reenviar un parche. Una
+  // pestaña lo pide para un solo dato —`receiving.autoContinue`
+  // (preload/bridge.cjs:191-192)—: se le entrega recortado, sin atajos ni
+  // preferencias de privacidad.
+  ipcMain.handle('nexo:settings:get', (event) => (
+    isShellRequest(event) ? store.settings : settingsForTab(store.settings)
+  ));
   ipcMain.handle('nexo:storage:status', (event) => {
     if (!isShellRequest(event)) return { state: 'unauthorized' };
     return { ...store.loadStatus, error: store.lastError || store.loadError?.message || null };
   });
-  ipcMain.handle('nexo:settings:set', (_event, patch) => {
+  ipcMain.handle('nexo:settings:set', (event, patch) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     if (patch?.tokenCounting?.model !== undefined && !tokenizerModels().models.some(item => item.id === patch.tokenCounting.model)) throw new Error('Elegí un modelo de tokenizador verificado.');
     const next = store.setSettings(patch);
     engine.refresh();
@@ -853,7 +1597,8 @@ function registerIpc() {
     broadcast('nexo:stats-changed', statsSnapshot());
     return next;
   });
-  ipcMain.handle('nexo:settings:reset', () => {
+  ipcMain.handle('nexo:settings:reset', (event) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     const next = store.replaceSettings(DEFAULT_SETTINGS);
     engine.refresh();
     refreshGuestSettings();
@@ -863,7 +1608,8 @@ function registerIpc() {
   });
 
   ipcMain.handle('nexo:log', () => store.log);
-  ipcMain.handle('nexo:log:clear', () => {
+  ipcMain.handle('nexo:log:clear', (event) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     store.clearLog();
     return [];
   });
@@ -885,18 +1631,82 @@ function registerIpc() {
   ipcMain.handle('nexo:repetition:snapshot', (event, payload) => {
     const sender = event.sender;
     const href = sender?.getURL?.() || '';
-    if (sender?.getType?.() !== 'webview' || !isChatGptMemoryUrl(href) || payload?.href !== href ||
-      (event.senderFrame && sender.mainFrame && event.senderFrame !== sender.mainFrame)) return { ok: false };
+    // Motivo de salida, en una palabra: es lo que el diagnóstico publica. El
+    // retorno de cada rama no cambia; sólo se añade el aviso cuando hay diag.
+    // La estrategia se lee del payload como texto, sin validarlo con el
+    // snapshot: así «no lo trae» y «no reconoció nada» no se confunden.
+    const rechazo = (motivo) => {
+      noteDiagSnapshot({ motivo, strategy: diagStrategy(payload?.strategy),
+        user: 0, assistant: 0, observed: false, dom: null });
+      return { ok: false };
+    };
+    if (sender?.getType?.() !== 'webview') return rechazo('no-webview');
+    if (event.senderFrame && sender.mainFrame && event.senderFrame !== sender.mainFrame) return rechazo('otro-frame');
+    if (!isChatGptMemoryUrl(href) || payload?.href !== href) return rechazo('href-distinto');
     const snapshot = repetitionSnapshot(payload);
-    if (!snapshot) return { ok: false };
+    if (!snapshot) return rechazo('null-snapshot');
     // Consumir la vista literal ya validada: existe aun con EVO desactivada.
     const next = { ...snapshot, href, webContentsId: sender.id };
     const previous = repetitionSnapshots.get(sender.id);
     repetitionSnapshots.set(sender.id, next);
     const ownedMainFrame = isUnderstandingSource(event);
     if (ownedMainFrame) domTokenSnapshots.set(sender.id, next);
+    // Diagnóstico: las claves se calculan ANTES de observar (es el mismo cálculo
+    // de `observe`, sin aplicarlo) y el total después, para saber cuántas son
+    // nuevas. Fuera de `NEXO_DIAG=1` no se pide nada.
+    const diagAntes = diagOn && ownedMainFrame
+      ? domTokenTotals.keysFor({ projectId: store?.settings?.memory?.projectId || 'default',
+        webContentsId: sender.id, href, turns: next.turns })
+      : null;
+    const diagRegistros = diagAntes ? domTokenTotals.records(store?.settings?.memory?.projectId || 'default') : null;
     const domChanged = ownedMainFrame ? observeDomTokens(sender, next) : false;
+    // El contador de respuestas del motor es la única señal pública de que la
+    // lectura contó un turno (`engine.stats()`, sin tocar el motor). Se lee antes
+    // y después: la diferencia decide si hay que avisar.
+    const respuestasAntes = engine.stats().responses;
     const progress = engine.onRenderedConversation(sender.id, next, previous);
+    const contoLaLectura = engine.stats().responses > respuestasAntes;
+    // Caracteres del último turno del assistant de esta lectura: es el único
+    // número que describe lo que llegó, y no necesita el texto.
+    const ultimoTurno = [...next.turns].reverse().find((turn) => turn?.role === 'assistant');
+    const charsLectura = String(ultimoTurno?.content ?? '').length;
+    if (contoLaLectura) {
+      // Camino del DOM: hasta acá contaba sin dejar rastro en el panel. El aviso
+      // es el mismo hecho que `incoming`, con su propio código para no
+      // confundirlo con el cierre del stream. Sólo números: nunca el texto.
+      const entry = {
+        kind: 'receiving',
+        code: 'incoming-dom',
+        severity: 'info',
+        title: `Respuesta recibida en ${hostOf(href)}`,
+        detail: `${charsLectura} caracteres llegaron a la pantalla.`,
+        meta: { host: hostOf(href), site: 'chatgpt', chars: charsLectura },
+        ts: Date.now(),
+      };
+      if (store) store.pushLog(entry);
+      broadcast('nexo:event', { type: 'intervention', payload: entry });
+    }
+    noteDiagRespuestaContada('dom', { conto: contoLaLectura, aviso: contoLaLectura, chars: charsLectura });
+    if (diagOn) {
+      // Tras observar: lo que quedó en los contadores del DOM. Sólo se lee el
+      // proyecto del DOM (no el motor) y no cambia nada de lo que se publica.
+      const dom = ownedMainFrame
+        ? domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel())
+        : null;
+      const porRol = (role) => snapshot.turns.filter((turn) => turn.role === role).length;
+      const motivo = !snapshot.turns.length ? 'sin-turnos' : ownedMainFrame ? 'ok' : 'no-owned';
+      const total = diagAntes ? domTokenTotals.records(store?.settings?.memory?.projectId || 'default') : null;
+      noteDiagSnapshot({ motivo, strategy: diagStrategy(payload?.strategy),
+        user: porRol('user'), assistant: porRol('assistant'), observed: ownedMainFrame, dom,
+        turnos: (diagAntes || []).map((turno) => ({ ...turno, clave: diagClave(turno.clave) })),
+        nuevas: diagAntes ? total - diagRegistros : null, total,
+        href: ownedMainFrame ? href : null, hrefCambio: previous ? previous.href !== href : null });
+    }
+    // Con el snapshot ya publicado, se pregunta a la página qué nodos ve su
+    // lector. No se espera: la lectura del DOM no puede retrasar el snapshot ni
+    // el panel. La ÚNICA puerta de `NEXO_DIAG=1` está en `noteDiagDomNodos`, que
+    // sale antes de tocar la página cuando la variable está apagada.
+    void noteDiagDomNodos(sender);
     publishRepetition(next);
     if (domChanged || progress?.updated) broadcast('nexo:stats-changed', statsSnapshot());
     return { ok: true };
@@ -914,7 +1724,24 @@ function registerIpc() {
     if (!snapshot) return { ok: false };
     const cached = domTokenSnapshots.get(sender.id);
     const sameDocument = cached?.href && new URL(cached.href).origin + new URL(cached.href).pathname === new URL(href).origin + new URL(href).pathname;
+    const observeThis = sameDocument && cached.turns.length ? cached : snapshot;
     const changed = sameDocument && cached.turns.length ? observeDomTokens(sender, cached) : observeDomTokens(sender, snapshot, 'direct');
+    if (diagOn) {
+      // Mismo detalle que la ruta del lector, con `source` en el motivo: esta
+      // ruta la pide la shell y hasta ahora no dejaba rastro en Actividad.
+      const registro = new URL(href).origin + new URL(href).pathname;
+      const previo = diagDirectoHref.get(sender.id);
+      diagDirectoHref.set(sender.id, registro);
+      const total = domTokenTotals.records(store?.settings?.memory?.projectId || 'default');
+      const claves = domTokenTotals.keysFor({ projectId: store?.settings?.memory?.projectId || 'default',
+        webContentsId: sender.id, href, turns: observeThis.turns });
+      noteDiagSnapshot({ motivo: 'ok-directo', strategy: diagStrategy(observeThis.strategy),
+        user: observeThis.turns.filter((turn) => turn.role === 'user').length,
+        assistant: observeThis.turns.filter((turn) => turn.role === 'assistant').length,
+        observed: true, dom: domTokenTotals.stats(store?.settings?.memory?.projectId || 'default', domTokenModel()),
+        turnos: claves.map((turno) => ({ ...turno, clave: diagClave(turno.clave) })),
+        nuevas: null, total, href, hrefCambio: previo ? previo !== registro : null });
+    }
     if (changed) broadcast('nexo:stats-changed', statsSnapshot());
     return { ok: true };
   });
@@ -985,6 +1812,33 @@ function registerIpc() {
     const assistantTurns = payload.turns.filter((turn) => turn?.role === 'assistant').length;
     const assistantChars = payload.turns.reduce((sum, turn) =>
       sum + (turn?.role === 'assistant' ? String(turn.content || '').length : 0), 0);
+    // «No hay respuestas» sólo si se mantiene: mientras el DOM se pinta, una
+    // lectura puede ver los mensajes del usuario y ninguna respuesta todavía.
+    // Se exige el mismo desenlace dos veces seguidas, separadas por este
+    // margen; la primera vez no se afirma nada y la lectura no se pierde (el
+    // guardado de arriba ya ocurrió). Con una lectura a medias y otra completa
+    // (lo normal al cargar el historial) el aviso falso no llega a salir, y su
+    // deduplicación de 30 s ya no puede tapar la lectura buena.
+    const sinRespuestas = assistantTurns === 0;
+    // Envío retenido en esta pestaña: el mensaje del usuario está en pantalla
+    // pero no viajó. Cero respuestas es lo que corresponde y no se afirma nada
+    // (la lectura se guarda igual, arriba). No se toca el desenlace anterior:
+    // cuando el envío se resuelve, la primera lectura vuelve a esperar su
+    // margen en vez de heredar una confirmación que no era de este momento.
+    if (sinRespuestas && egressEnCurso.has(event.sender.id)) {
+      lecturasDeConversacion.delete(event.sender.id);
+      if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());
+      return { ...result, observed: false, assistantCaptures: undefined };
+    }
+    const anterior = lecturasDeConversacion.get(event.sender.id);
+    lecturasDeConversacion.set(event.sender.id, { sinRespuestas, at: Date.now() });
+    const estable = Boolean(anterior) && anterior.sinRespuestas === sinRespuestas &&
+      Date.now() - anterior.at >= ESPERA_LECTURA_ESTABLE_MS;
+    if (!assistantTurns && !estable) {
+      // Ni aviso ni traza: la lectura aún no dice nada concluyente.
+      if (result.changed) broadcast('nexo:memory-changed', engine.memoryStats());
+      return { ...result, observed: false, assistantCaptures: undefined };
+    }
     noteDiagnostic({
       code: 'chatgpt-conversation-read',
       key: 'chatgpt-conversation-read',
@@ -1006,24 +1860,24 @@ function registerIpc() {
   ipcMain.handle('nexo:memory:list', () => engine.memoryList());
   ipcMain.handle('nexo:memory:recall', (_event, payload = {}) =>
     engine.memoryRecall(String(payload.query || ''), { limit: payload.limit || 12 }));
-  ipcMain.handle('nexo:memory:pin', (_event, payload = {}) => engine.memoryPin(payload.id, payload.pinned !== false));
-  ipcMain.handle('nexo:memory:forget', (_event, payload = {}) => engine.memoryForget(payload.id));
-  ipcMain.handle('nexo:memory:handoff', () => engine.memoryHandoff());
+  ipcMain.handle('nexo:memory:pin', shellOnly((_event, payload = {}) => engine.memoryPin(payload.id, payload.pinned !== false), { ok: false }));
+  ipcMain.handle('nexo:memory:forget', shellOnly((_event, payload = {}) => engine.memoryForget(payload.id), { ok: false }));
+  ipcMain.handle('nexo:memory:handoff', shellOnly(() => engine.memoryHandoff(), null));
   ipcMain.handle('nexo:memory:import', (_event, packet) => {
     const result = engine.memoryImport(packet);
     broadcast('nexo:memory-changed', engine.memoryStats());
     return result;
   });
-  ipcMain.handle('nexo:memory:clear', () => {
+  ipcMain.handle('nexo:memory:clear', shellOnly(() => {
     const result = engine.memoryClear();
     broadcast('nexo:memory-changed', engine.memoryStats());
     return result;
-  });
-  ipcMain.handle('nexo:shell:config', () => ({
+  }, { ok: false }));
+  ipcMain.handle('nexo:shell:config', shellOnly(() => ({
     version: app.getVersion(),
     pagePreload: `file://${PAGE_PRELOAD}`,
     platform: process.platform,
-  }));
+  }), null));
 
   // Medidas de la interfaz: sólo las acepta la shell, y sólo números.
   ipcMain.on('nexo:perf', (event, data) => {
@@ -1044,6 +1898,25 @@ function registerIpc() {
     // interfaz, que sólo escucha `intervention`, así que se perdía: el usuario
     // notaba el síntoma («no conecta») sin la causa.
     if (clean.type === 'error') {
+      // Un rechazo sin motivo es la cancelación del cuerpo por parte de la
+      // página, no un fallo de la mediación: no se anuncia como error. Sólo se
+      // anota, y sólo con NEXO_DIAG=1. Un error con mensaje o un AbortError
+      // siguen por el camino de siempre.
+      if (sinMotivoDeCancelacion(clean.payload)) {
+        if (diagOn) {
+          noteDiagnostic({
+            code: 'diag-cancelacion', severity: 'info',
+            title: 'diag-cancelacion: lectura cancelada sin motivo',
+            detail: `stage ${String(clean.payload.stage || '-').slice(0, 40)} · messageId ${siNo(Boolean(clean.payload.messageId))}` +
+              ` · outcome ${String(clean.payload.outcome || '-').slice(0, 20)}`,
+            meta: { stage: String(clean.payload.stage || '').slice(0, 40),
+              hasMessageId: Boolean(clean.payload.messageId),
+              outcome: String(clean.payload.outcome || '').slice(0, 20),
+              host: hostOf(href) },
+          });
+        }
+        return;
+      }
       noteDiagnostic({
         code: 'page-error',
         severity: 'info',
@@ -1082,6 +1955,10 @@ function registerIpc() {
       // Contador de mensajes del usuario: se cuenta acá, no en `prepare()`.
       const counted = engine.onUserMessage(event.sender.id, clean.payload);
       if (counted?.duplicate) { broadcast('nexo:stats-changed', statsSnapshot()); return; }
+      // Un solo envío, un solo «Mensaje enviado»: si la red ya lo contó con el
+      // cuerpo real, este aviso no se repite. `counted.superseded` distingue
+      // esta fusión (misma petición, otro texto) de un envío nuevo.
+      if (counted?.superseded) { broadcast('nexo:stats-changed', statsSnapshot()); return; }
       writeCaptureTrace('request-detected', { ...clean.payload, duplicate: Boolean(counted?.duplicate) });
       const entry = {
         kind: 'sending',
@@ -1092,7 +1969,12 @@ function registerIpc() {
           ? 'El texto salió mediado por el motor.'
           : clean.payload.textFound === false
             ? 'Envío contado: la petición salió, pero su texto no se pudo leer.'
-            : 'El texto salió sin cambios: el motor no modificó este mensaje.',
+            // `chars` distinto del texto que se leyó en la red = el motor SÍ
+            // cambió este mensaje (protocolo, memoria): no puede decir «sin
+            // cambios». Las cifras del gesto son del texto original.
+            : clean.payload.mediated || (Number(clean.payload.chars) || 0) !== (Number(clean.payload.networkChars) || 0)
+              ? 'El texto salió mediado por el motor.'
+              : 'El texto salió sin cambios: el motor no modificó este mensaje.',
         meta: {
           host,
           site: clean.payload.site || null,
@@ -1135,7 +2017,8 @@ function registerIpc() {
 
   /* ---------------- navegador: perfil ---------------- */
   ipcMain.handle('nexo:profile:stats', () => profile?.stats() || null);
-  ipcMain.handle('nexo:profile:clear', (_event, scope = {}) => {
+  ipcMain.handle('nexo:profile:clear', (event, scope = {}) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     const result = profile?.clear(scope) || {};
     broadcast('nexo:profile-changed', profile?.stats() || null);
     return result;
@@ -1149,15 +2032,15 @@ function registerIpc() {
       ? profile.history.search(payload.query, { limit })
       : profile.history.recent({ limit, offset: Number(payload.offset) || 0 });
   });
-  ipcMain.handle('nexo:history:top', (_event, payload = {}) => profile?.history.topSites(payload) || []);
-  ipcMain.handle('nexo:history:remove', (_event, id) => ({ ok: Boolean(profile?.history.remove(id)) }));
-  ipcMain.handle('nexo:history:clear', (_event, payload = {}) => {
+  ipcMain.handle('nexo:history:top', shellOnly((_event, payload = {}) => profile?.history.topSites(payload) || [], []));
+  ipcMain.handle('nexo:history:remove', shellOnly((_event, id) => ({ ok: Boolean(profile?.history.remove(id)) }), { ok: false }));
+  ipcMain.handle('nexo:history:clear', shellOnly((_event, payload = {}) => {
     const since = payload.range === 'all' ? null : Date.now() - rangeMs(payload.range);
     const result = profile?.history.clear({ since }) || { removed: 0 };
     profile?.history.save({ force: true });
     broadcast('nexo:profile-changed', profile?.stats() || null);
     return result;
-  });
+  }, { removed: 0 }));
   ipcMain.handle('nexo:suggest', async (_event, payload = {}) => {
     if (!profile) return [];
     const query = String(payload.query || '');
@@ -1173,7 +2056,7 @@ function registerIpc() {
 
   /* ---------------- marcadores ---------------- */
   ipcMain.handle('nexo:bookmarks:list', (_event, payload = {}) => profile?.bookmarks.list(payload) || []);
-  ipcMain.handle('nexo:bookmarks:folders', () => profile?.bookmarks.folders() || []);
+  ipcMain.handle('nexo:bookmarks:folders', shellOnly(() => profile?.bookmarks.folders() || [], []));
   ipcMain.handle('nexo:bookmarks:is', (_event, url) => Boolean(profile?.bookmarks.isBookmarked(url)));
   ipcMain.handle('nexo:bookmarks:toggle', (_event, payload = {}) => {
     const result = profile?.bookmarks.toggle(payload) || { added: false, bookmark: null };
@@ -1181,18 +2064,18 @@ function registerIpc() {
     broadcast('nexo:bookmarks-changed', { url: payload.url, added: result.added });
     return result;
   });
-  ipcMain.handle('nexo:bookmarks:clear', () => {
+  ipcMain.handle('nexo:bookmarks:clear', shellOnly(() => {
     const result = profile?.bookmarks.clear() || { removed: 0 };
     profile?.bookmarks.save({ force: true });
     broadcast('nexo:bookmarks-changed', {});
     return result;
-  });
-  ipcMain.handle('nexo:bookmarks:remove', (_event, id) => {
+  }, { removed: 0 }));
+  ipcMain.handle('nexo:bookmarks:remove', shellOnly((_event, id) => {
     const ok = Boolean(profile?.bookmarks.remove(id));
     profile?.bookmarks.save({ force: true });
     broadcast('nexo:bookmarks-changed', {});
     return { ok };
-  });
+  }, { ok: false }));
 
   /* ---------------- descargas ---------------- */
   ipcMain.handle('nexo:downloads:list', (event) => isShellRequest(event) ? (profile?.downloads.list({ limit: 100 }) || []).map(entry=>{const live=downloadItems.get(entry.id)?.item;return {...entry,paused:Boolean(live?.isPaused?.()),canResume:Boolean(live?.canResume?.()||live?.isPaused?.())};}) : []);
@@ -1226,30 +2109,31 @@ function registerIpc() {
   });
 
   /* ---------------- permisos y zoom ---------------- */
-  ipcMain.handle('nexo:permissions:for', (_event, host) => profile?.permissions.rulesFor(host) || []);
-  ipcMain.handle('nexo:permissions:set', (_event, payload = {}) => {
+  ipcMain.handle('nexo:permissions:for', shellOnly((_event, host) => profile?.permissions.rulesFor(host) || [], []));
+  ipcMain.handle('nexo:permissions:set', shellOnly((_event, payload = {}) => {
     const permission = permissionName(payload.permission, PERMISSION_CATALOG);
     if (!permission) return { ok: false, error: 'permiso desconocido' };
     const ok = Boolean(profile?.permissions.set(payload.host, permission, payload.value));
     profile?.permissions.save({ force: true });
     return { ok };
-  });
-  ipcMain.handle('nexo:permissions:sites', () => profile?.permissions.list() || []);
-  ipcMain.handle('nexo:permissions:clear', (_event, host) => {
+  }, { ok: false }));
+  ipcMain.handle('nexo:permissions:sites', shellOnly(() => profile?.permissions.list() || [], []));
+  ipcMain.handle('nexo:permissions:clear', shellOnly((_event, host) => {
     const result = profile?.permissions.clear(host);
     profile?.permissions.save({ force: true });
     return { ok: Boolean(result) };
-  });
+  }, { ok: false }));
   ipcMain.handle('nexo:zoom:get', (_event, target) => profile?.zoom.get(target) ?? 1);
   ipcMain.handle('nexo:zoom:set', (_event, payload = {}) => {
     const level = profile?.zoom.set(payload.target, payload.level) ?? 1;
     profile?.zoom.save();
     return { level };
   });
-  ipcMain.handle('nexo:zoom:list', () => profile?.zoom.list() || []);
+  ipcMain.handle('nexo:zoom:list', shellOnly(() => profile?.zoom.list() || [], []));
 
   /* ---------------- datos del sitio ---------------- */
-  ipcMain.handle('nexo:data:clear', async (_event, scope = {}) => {
+  ipcMain.handle('nexo:data:clear', async (event, scope = {}) => {
+    if (!isShellRequest(event)) return { ok: false, error: 'No autorizado.' };
     const target = session.fromPartition('persist:nexo');
     const done = { ok: true, cookies: false, cache: false };
     try {
@@ -1276,17 +2160,20 @@ function registerIpc() {
     return { ok: true };
   });
   ipcMain.handle('nexo:session:restore', () => profile?.session.restore() || null);
-  ipcMain.on('nexo:session:save-now', (_event, payload = {}) => {
+  ipcMain.on('nexo:session:save-now', (event, payload = {}) => {
+    // Sin respuesta posible (`send`): un emisor ajeno se descarta con un retorno
+    // temprano silencioso, igual que el resto de eventos que no exigen shell.
+    if (!isShellRequest(event)) return;
     try {
       profile?.session.capture(sessionPayload(payload).windows);
     } catch (error) {
       console.error('[nexo] no se pudo guardar la sesión:', error.message);
     }
   });
-  ipcMain.handle('nexo:session:clear', () => {
+  ipcMain.handle('nexo:session:clear', shellOnly(() => {
     profile?.session.clear();
     return { ok: true };
-  });
+  }, { ok: false }));
 }
 
 /** La observación UUE nunca acepta autoridad desde una página ajena o un subframe. */
@@ -1376,6 +2263,56 @@ function uploadText(uploadData) {
   }
   // Decodificar UNA vez: un trozo puede terminar en medio de un emoji UTF-8.
   return Buffer.concat(partes).toString('utf8');
+}
+
+/**
+ * Respaldo del guardián de salida en la red.
+ *
+ * Devuelve `true` sólo si hay que cancelar la petición. Es la segunda barrera:
+ * la primera es la capa inyectada, que sí dialoga con el usuario. Acá no hay
+ * diálogo posible (la petición está en vuelo) y tampoco se puede reescribir el
+ * cuerpo, así que la única decisión es frenar o dejar pasar.
+ *
+ * Falla abierto SIEMPRE: cualquier error, cualquier cuerpo que no se pueda leer
+ * y cualquier modo que no sea `enforce` dejan pasar, igual que antes de existir
+ * esta función.
+ *
+ * @param {object} details datos de `webRequest.onBeforeRequest`
+ * @returns {boolean}
+ */
+function bloqueoDeRed(details = {}) {
+  try {
+    if (!engine || !store) return false;
+    const url = String(details.url || '');
+    const host = hostOf(url);
+    if (!isAiHost(host)) return false;
+    const method = String(details.method || 'GET').toUpperCase();
+    if (method !== 'POST') return false;
+    const site = detectSite(host);
+    // Sólo peticiones de chat de un sitio con perfil. La ruta del canal de
+    // respuestas (`/conversation/updates`) no lleva el prompt y se deja fuera.
+    if (!isMediable(site, url, method)) return false;
+    if (isResponseRequest(site, url, method)) return false;
+
+    const config = normalizeEgress(settingsForHost(store.settings, host).egress);
+    if (config.mode !== 'enforce') return false; // ni se lee el cuerpo
+    const result = inspectOutgoing({ method, bodyText: uploadText(details.uploadData), config });
+    if (!result.cancel) return false;
+
+    const types = result.summary.map((s) => `${s.type}: ${s.count}`).join(', ');
+    noteDiagnostic({
+      code: 'egress-net-block',
+      key: `egress-net-block|${host}`,
+      severity: 'warn',
+      title: 'NEXO frenó un envío con datos sensibles (respaldo)',
+      detail: `Tipos: ${types}. Motivo: ${result.reason}.`,
+      meta: { host, site: site.id, url: shortPath(url), method, summary: result.summary },
+    });
+    return true;
+  } catch (error) {
+    console.log('[red] respaldo del guardián:', error?.message || error);
+    return false;
+  }
 }
 
 /**
@@ -1498,8 +2435,9 @@ function noteUserMessageFromNetwork(details = {}) {
   }
 
   const measurement = located ? inputTokenMeasurement(text, model, site.id) : {tokens:null,tokenExact:false,tokenMethod:'unreadable',tokenEncoding:null,model};
+  const messageIdRed = `net-${details.id ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`}`;
   const counted = engine.onUserMessage(tabId, {
-    messageId: `net-${details.id ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`}`,
+    messageId: messageIdRed,
     submissionId: userMessageIdentity(json),
     source: 'network',
     site: site.id,
@@ -1512,9 +2450,29 @@ function noteUserMessageFromNetwork(details = {}) {
     promptHash: text ? fingerprint(text) : '',
     textFound: Boolean(text),
   });
-  if (counted?.duplicate) {
+  // Antes que `duplicate`: una fusión con otro texto es un duplicado, pero de
+  // los que sustituyen el aviso en vez de dejar el de la capa.
+  if (counted?.duplicate && !counted?.superseded) {
     broadcast('nexo:stats-changed', statsSnapshot());
     return { seen: true, counted: false, conversation: true };
+  }
+  // La capa ya describió este envío con el texto del cuadro; el cuerpo real
+  // manda. Se retira su aviso (mismo `messageId`) para que quede UNO solo y se
+  // vuelve a publicar debajo con lo que de verdad viajó. No es un mensaje nuevo.
+  const sustituye = Boolean(counted?.superseded) && Boolean(store);
+  if (sustituye) {
+    // `save()` NO publica el estado en RAM (`store.js:64`, el estado se cambia
+    // con `pushLog`/`clearLog`): se retira el aviso del registro vivo y se
+    // vuelve a guardar, igual que `clearLog` pero quitando una sola entrada.
+    // El identificador del envío viaja en `meta.messageId`, no en la raíz de
+    // la entrada (ver el aviso de arriba).
+    const vivo = store.log;
+    const queda = vivo.filter((e) => (e?.meta?.messageId ?? e?.messageId) !== counted.messageId);
+    if (queda.length !== vivo.length) {
+      vivo.length = 0;
+      vivo.push(...queda);
+      store.save();
+    }
   }
 
   const entry = {
@@ -1530,6 +2488,9 @@ function noteUserMessageFromNetwork(details = {}) {
       site: site.id,
       url: shortPath(url),
       source: 'network',
+      // Mismo identificador que el aviso de la capa: permite ver que son el
+      // mismo envío (y sustituir uno por otro sin duplicar).
+      messageId: counted?.messageId || null,
       chars: text.length,
       ...measurement,
       conversationId: null,
@@ -1584,6 +2545,13 @@ function watchProviderNetwork(s) {
   s.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details = {}, callback) => {
     capture.requests += 1;
     capture.lastRequestAt = Date.now();
+    // Respaldo del guardián: si la capa no llegó a frenar el envío (no se
+    // inyectó, su consulta se perdió, el sitio cambió), la red lo frena aquí.
+    // Va ANTES de contar: un mensaje que no salió no puede sumar.
+    if (bloqueoDeRed(details)) {
+      callback({ cancel: true });
+      return;
+    }
     try {
       const note = noteUserMessageFromNetwork(details);
       if (note?.seen) capture.chatRequests += 1;
@@ -1659,7 +2627,14 @@ function watchProviderNetwork(s) {
               // Cuando el cierre viene correlacionado por identificador de
               // petición, esa correlación ya resolvió el turno.
               if (!asociada && engine.currentSendId(tabId) !== esperaba) return;
+              const respuestasAntesRed = diagOn ? engine.stats().responses : 0;
               const contada = engine.onNetworkResponse(tabId, { host, url, messageId: esperaba });
+              if (diagOn) {
+                noteDiagRespuestaContada('red', {
+                  conto: engine.stats().responses > respuestasAntesRed,
+                  aviso: Boolean(contada?.counted), chars: 0,
+                });
+              }
               if (!contada?.counted) return;
               const entry = {
                 kind: 'receiving',
@@ -1848,6 +2823,9 @@ app.whenReady().then(async () => {
       if (entry.code === 'turn-result') broadcast('nexo:stats-changed', statsSnapshot());
     },
   });
+  // Diagnóstico: envuelve `onUserMessage` (no cambia el conteo). Cubre los tres
+  // caminos —capa, red y CDP— porque todos pasan por el mismo método.
+  hookDiagMensaje(engine);
   mark('motor');
   cdp = new CdpObserver({
     engine,
@@ -1903,6 +2881,14 @@ app.whenReady().then(async () => {
           broadcast('nexo:event', { type: 'intervention', payload: entry });
         } else if (event?.type === 'capture') {
           const captureData = event.capture || {};
+          // Diagnóstico: CDP cuenta dentro del motor; el aviso depende de
+          // `event.duplicate`. Se comparan las dos cosas en el mismo renglón.
+          if (diagOn) {
+            noteDiagRespuestaContada('cdp', {
+              conto: !event.duplicate, aviso: !event.duplicate,
+              chars: String(captureData.text || '').length,
+            });
+          }
           writeCaptureTrace('response-delivered', {
             capture: captureData, duplicate: Boolean(event.duplicate), paired: Boolean(event.paired),
             messageId: event.messageId || captureData.messageId,
@@ -1971,6 +2957,18 @@ app.whenReady().then(async () => {
     } · contadores en la sesión.`,
     meta: { version: app.getVersion(), netwatch: process.env.NEXO_NETWATCH !== '0', cdp: process.env.NEXO_CDP !== '0' },
   });
+  // Instrumentación optativa: una sola línea que dice que está encendida. Sin
+  // `NEXO_DIAG=1` ni el aviso ni el coste existen.
+  if (diagOn) {
+    noteDiagnostic({
+      code: 'diag-inicio',
+      key: `diag-inicio|${app.getVersion()}`,
+      severity: 'info',
+      title: 'diag-inicio: instrumentación encendida',
+      detail: 'NEXO_DIAG=1 · se publican diag-snapshot, diag-stream-end y diag-contadores. Sin contenido del chat.',
+      meta: { version: app.getVersion() },
+    });
+  }
   promptStore = new PromptStore({ store });
   advancedBrowser = installAdvancedBrowser({getProfile:()=>profile,downloadItems,broadcast,
     onCaptureEvidence:(owner,contents,params)=>workDossier?.captureSelection(owner,contents,params),

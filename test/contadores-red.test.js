@@ -36,7 +36,26 @@ const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
+  // `nexo:settings:get` distingue la shell del resto: este test la usa como la
+  // usa la interfaz —leer el perfil y reenviar el parche completo—, así que el
+  // emisor es la ventana principal, no un identificador suelto.
+  if (channel === 'nexo:settings:get') {
+    const sender = journal.windows[0].webContents;
+    return handler({ sender, senderFrame: sender.mainFrame }, payload);
+  }
   return handler({ sender: { id: senderId } }, payload);
+}
+
+/** Ajustes: el único emisor autorizado es la shell, con marco principal. */
+function setSettings(payload) {
+  const shell = journal.windows[0].webContents;
+  return journal.ipcHandlers.get('nexo:settings:set')({ sender: shell, senderFrame: shell.mainFrame }, payload);
+}
+
+/** Restablecer: igual que guardar, sólo desde la shell. */
+function resetSettings() {
+  const shell = journal.windows[0].webContents;
+  return journal.ipcHandlers.get('nexo:settings:reset')({ sender: shell, senderFrame: shell.mainFrame });
 }
 
 const stats = () => callIpc('nexo:stats');
@@ -555,7 +574,7 @@ test('un POST al proveedor fuera de la ruta conocida queda anotado con su ruta r
 test('con el sitio apagado en Ajustes, el panel dice que llegó y no se contó', async () => {
   await abrir('https://chatgpt.com/c/red-apagado');
   const ajustes = await callIpc('nexo:settings:get');
-  await callIpc('nexo:settings:set', {
+  await setSettings({
     ...ajustes,
     sites: { ...(ajustes.sites || {}), chatgpt: { enabled: false } },
   });
@@ -579,7 +598,7 @@ test('con el sitio apagado en Ajustes, el panel dice que llegó y no se contó',
     assert.ok(aviso, 'con un aviso en el registro, no un cero mudo');
     assert.match(aviso.title, /chatgpt\.com/);
   } finally {
-    await callIpc('nexo:settings:reset');
+    await resetSettings();
   }
 });
 
@@ -650,7 +669,7 @@ test('la ruta de preparación no cuenta un mensaje aunque traiga el cuerpo', asy
 
 test('restablecer los ajustes vuelve a habilitar el sitio que se había apagado', async () => {
   const ajustes = await callIpc('nexo:settings:get');
-  await callIpc('nexo:settings:set', {
+  await setSettings({
     ...ajustes,
     sites: { ...(ajustes.sites || {}), chatgpt: { enabled: false } },
   });
@@ -658,7 +677,7 @@ test('restablecer los ajustes vuelve a habilitar el sitio que se había apagado'
 
   // Restablecer tiene que reemplazar, no fusionar: fusionando, el sitio seguía
   // apagado y el panel mostraba ceros sin ninguna causa visible.
-  await callIpc('nexo:settings:reset');
+  await resetSettings();
   assert.equal((await callIpc('nexo:config', { host: 'chatgpt.com' })).enabled, true, 'y queda habilitado');
 });
 

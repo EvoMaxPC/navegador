@@ -830,14 +830,29 @@ function renderLog() {
     .join('');
 }
 
-function pushLocalNotice(text) {
+function pushLocalNotice(text, code = 'notice') {
   pushIntervention({
     kind: 'system',
-    code: 'notice',
+    code,
     severity: 'info',
     title: text,
     ts: Date.now(),
   });
+}
+
+/**
+ * Retira un aviso local ya mostrado.
+ *
+ * Se usa cuando la recuperación por DOM trae el texto del turno que se creía
+ * cortado: el aviso dejó de ser cierto y no debe quedar en Actividad. No toca
+ * las entradas del proceso principal (esas son su registro, no este aviso).
+ */
+function clearLocalNotice(code = 'notice') {
+  const antes = state.logs.length;
+  state.logs = state.logs.filter((entry) => !(entry.kind === 'system' && entry.code === code));
+  if (state.logs.length === antes) return false;
+  if (isPanelActive('activity')) uiTasks.schedule('log', renderLog);
+  return true;
 }
 
 function pushIntervention(entry) {
@@ -855,6 +870,41 @@ function pushIntervention(entry) {
     }
   }
 }
+
+// Un envío retenido es lo único que el usuario no puede deducir de la página:
+// el mensaje no sale y no hay respuesta que lo explique. Se avisa en la franja
+// de la shell, que nunca queda debajo del webview.
+const AVISOS_RETENIDOS = new Set(['egress-block', 'egress-error', 'egress-net-block', 'egress-injected-block']);
+const EGRESS_BAR_MS = 20_000;
+let egressTimer = null;
+
+function markActivityUnread() {
+  const dot = document.querySelector('[data-activity-dot]');
+  if (dot) dot.hidden = false;
+}
+
+function clearActivityUnread() {
+  const dot = document.querySelector('[data-activity-dot]');
+  if (dot) dot.hidden = true;
+}
+
+function dismissEgressNotice() {
+  clearTimeout(egressTimer);
+  egressTimer = null;
+  const bar = document.getElementById('egressBar');
+  if (bar) bar.hidden = true;
+}
+
+function showEgressNotice() {
+  const bar = document.getElementById('egressBar');
+  if (!bar) return;
+  // Un bloqueo reemplaza al anterior: la barra es una sola y no se apila.
+  bar.hidden = false;
+  clearTimeout(egressTimer);
+  egressTimer = setTimeout(dismissEgressNotice, EGRESS_BAR_MS);
+}
+
+document.getElementById('egressDismiss')?.addEventListener('click', dismissEgressNotice);
 
 /** Formatea un número con separador de miles local (1.204, no 1204). */
 function num(value) {
@@ -1536,6 +1586,7 @@ panelTabs.forEach((tab, index) => {
     browserTools?.refreshLayout();
     document.querySelectorAll('.rail-item[data-open-panel]').forEach((item) => item.classList.toggle('selected', item.dataset.openPanel === tab.dataset.panel));
     document.querySelector('[data-workspace-home]').classList.remove('selected');
+    if (tab.dataset.panel === 'activity') clearActivityUnread();
     refreshActivePanel();
   });
   tab.addEventListener('keydown', (event) => {
@@ -1565,6 +1616,11 @@ nexo.on('nexo:event', (message) => {
   if (message?.type === 'intervention' && message.payload) {
     pushIntervention(message.payload);
     refreshStats();
+    // Sólo los bloqueos: un cierre de turno o una redacción no interrumpen.
+    if (AVISOS_RETENIDOS.has(message.payload.code)) {
+      if (!isPanelActive('activity')) markActivityUnread();
+      showEgressNotice();
+    }
   }
 });
 
@@ -1593,6 +1649,14 @@ nexo.onTurnFollowUp?.((payload) => {
     try { return t.view.getWebContentsId() === id; } catch { return false; }
   });
   if (!tab) return;
+  // El texto del turno llegó por otra vía: lo que se avisó como corte era
+  // falso. Se retira el aviso y la acción de continuación, sin dejar rastro.
+  if (payload?.cleared) {
+    if (tab.followUp?.kind === 'continue') tab.followUp = null;
+    clearLocalNotice('followup-truncated');
+    if (tab.id === state.activeId) refreshFollowUp();
+    return;
+  }
   const touchesActive = tab.id === state.activeId;
   const fixes = Array.isArray(payload.fixes) ? payload.fixes : [];
   if (fixes.length) {
@@ -1603,7 +1667,7 @@ nexo.onTurnFollowUp?.((payload) => {
   if (fixes.length) pushLocalNotice(`Respuesta reparada al vuelo: ${fixes.join(', ')}.`);
   if (payload.next?.prompt) {
     tab.followUp = { kind: 'continue', label: payload.next.label || 'Continuar la respuesta', prompt: payload.next.prompt };
-    pushLocalNotice(`La respuesta quedó cortada. Menú del navegador → Continuar la respuesta para seguir donde terminó.`);
+    pushLocalNotice(`La respuesta quedó cortada. Menú del navegador → Continuar la respuesta para seguir donde terminó.`, 'followup-truncated');
   } else if (Array.isArray(payload.suggestions) && payload.suggestions.length) {
     tab.followUp = { kind: 'suggestion', ...payload.suggestions[0] };
   }

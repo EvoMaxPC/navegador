@@ -17,6 +17,8 @@ import { countOutputTokens, inputTokenMeasurement } from './tokens.js';
 import { VisibleOutputTokens } from './visibleOutputTokens.js';
 import { TURN_OUTCOMES, turnOutcome } from '../core/turnOutcome.js';
 import { looksEncrypted } from '../memory/item.js';
+import { normalizeEgress } from '../core/egressConfig.js';
+import { redactInjected } from './injectedGuard.js';
 
 /** Cómo se llama cada canal en los textos que ve el usuario. */
 /**
@@ -24,6 +26,22 @@ import { looksEncrypted } from '../memory/item.js';
  * la capa avisa al enviar y CDP cuando Chromium informa la petición.
  */
 const VENTANA_ENVIO_MS = 10_000;
+
+/**
+ * Ventana para un envío que todavía no tiene petición: sólo el gesto del cuadro.
+ *
+ * `enforce` retiene el gesto mientras el guardián de salida decide, y esa espera
+ * puede ser todo el `decisionTimeoutMs` (120 000 ms por omisión,
+ * `src/core/egressConfig.js:8`) más el `MARGEN_EGRESS_MS` de 5 000 ms que la capa
+ * suma a la consulta (`src/inject/index.js:498`). En ese caso la red llega
+ * después de `VENTANA_ENVIO_MS` y el mismo envío contaba dos veces.
+ *
+ * Sólo aplica a registros huérfanos (ver `onUserMessage`) y sólo mientras ese
+ * gesto siga esperando su petición: si el guardián ya lo canceló o lo bloqueó,
+ * no habrá red para ese envío y la ventana se queda en `VENTANA_ENVIO_MS`
+ * (`cerrarEnvioPendiente`). Un registro con petición nunca la usa.
+ */
+const VENTANA_PETICION_PENDIENTE_MS = 130_000;
 
 /** Ventana en la que dos textos son la misma respuesta todavía creciendo. */
 const VENTANA_RESPUESTA_MS = 120_000;
@@ -149,6 +167,11 @@ export class Engine {
     this.seenMessages = new Map();
     this.inputRecords = new Map();
     this.submissions = new Map();
+    /**
+     * Gestos cuyo envío ya no espera petición porque el guardián lo canceló o lo
+     * bloqueó: `${pestaña}|${messageId}` → instante. Sólo flags y números.
+     */
+    this.enviosCerrados = new Map();
     /** Respuestas contadas, por pestaña: `${pestaña}|${messageId}`. */
     this.seenResponses = new Map();
     /** Último envío de cada pestaña esperando respuesta. */
@@ -260,17 +283,28 @@ export class Engine {
     guard.setSettings(settingsForHost(this.store.settings, host));
 
     const report = guard.preparePrompt(prompt);
+    // El guardián de la capa miró `prompt`, antes de que existieran los bloques;
+    // el respaldo de red frena el cuerpo entero y no puede dialogar. Los
+    // críticos que entran por la memoria se ocultan acá, con el perfil del host.
+    const inyectado = redactInjected({
+      original: prompt,
+      mediated: report.enhanced,
+      mode: normalizeEgress(settingsForHost(this.store.settings, host).egress).mode,
+    });
+    const mediated = inyectado.text;
     // Intervención real: el texto que viaja al modelo no es el que escribió el
     // usuario. Sin cambio, no hay intervención que contar.
     if (report.changed) this.counters.interventions += 1;
     this.#publish(guard);
+    if (mediated === null) return { text: null, blocked: 'redaccion-inyectada', lang: report.lang };
     return {
-      text: report.enhanced,
+      text: mediated,
       changed: report.changed,
       lang: report.lang,
       stats: report.stats,
       blocks: report.blocks.map((b) => ({ id: b.id, label: b.label })),
       findings: report.findings.map((f) => ({ id: f.id, level: f.level, title: f.title })),
+      redacted: inyectado.redacted,
       context: report.context
         ? {
             engine: report.context.engine || 'fold',
@@ -307,11 +341,30 @@ export class Engine {
     if (!record && submissionKey) record = this.inputRecords.get(this.submissions.get(submissionKey));
     // Respaldo heredado para transportes sin identidad de proveedor. Cada fuente
     // sólo puede emparejarse una vez por envío; IDs explícitos distintos NUNCA se fusionan.
-    if (!record && previo && now - previo.at < VENTANA_ENVIO_MS &&
+    if (!record && previo &&
         (!submissionId || !previo.submissionId || submissionId === previo.submissionId)) {
       const candidate = this.inputRecords.get(`${webContentsId}|${previo.messageId}`);
-      const sameHash = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
-      if (candidate && sameHash && !candidate.sources.has(source)) { record = candidate; correlatedByFallback = true; }
+      // Un registro huérfano (sólo el gesto) espera a su petición lo que dure la
+      // decisión del guardián: hasta `VENTANA_PETICION_PENDIENTE_MS`. Cualquier
+      // otro registro conserva `VENTANA_ENVIO_MS`.
+      const soloGesto = Boolean(candidate) && candidate.sources.size === 1 && candidate.sources.has('composer') &&
+        !this.enviosCerrados.has(`${webContentsId}|${candidate.messageId}`);
+      const ventana = soloGesto ? VENTANA_PETICION_PENDIENTE_MS : VENTANA_ENVIO_MS;
+      if (now - previo.at < ventana) {
+        const sameHash = hash && previo.hash ? hash === previo.hash : !hash || !previo.hash;
+        // La red lee el texto YA mediado (protocolo, memoria): su huella no puede
+        // coincidir con la del cuadro, que lleva el texto original. Sin este
+        // puente, un solo envío se contaba dos veces. Sólo une capa↔red, sólo el
+        // último envío de la pestaña y sólo fuentes que aún no estaban: dos
+        // envíos seguidos —iguales o no— no se funden nunca.
+        const puente = Boolean(candidate) && !candidate.sources.has(source) &&
+          ((source === 'network' && (candidate.sources.has('composer') || candidate.sources.has('request'))) ||
+           ((source === 'composer' || source === 'request') && candidate.sources.has('network')));
+        if (candidate && (sameHash || puente) && !candidate.sources.has(source)) {
+          record = candidate;
+          correlatedByFallback = true;
+        }
+      }
     }
     if (record) {
       record.sources.add(source);
@@ -324,7 +377,11 @@ export class Engine {
       this.#inputMeasurement(record, payload);
       const waiting = this.awaiting.get(webContentsId);
       if (waiting?.messageId === record.messageId && payload.model) waiting.model = payload.model;
-      return {ok:true,duplicate:true,merged:true,messageId:record.messageId};
+      // `superseded`: el registro lo abrió otra fuente con OTRO texto (el
+      // original del cuadro frente al mediado de la red). Quien llama no debe
+      // publicar un segundo «Mensaje enviado» por el mismo envío.
+      if (hash && record.hash && hash !== record.hash) record.superseded = true;
+      return {ok:true,duplicate:true,merged:true,messageId:record.messageId,superseded:Boolean(record.superseded)};
     }
 
     this.seenMessages.set(key, now);
@@ -348,7 +405,7 @@ export class Engine {
     const chars = Math.max(0, Number(payload.chars) || 0);
     const tokens = Number.isFinite(Number(payload.tokens)) ? Math.max(0, Number(payload.tokens)) : 0;
     this.counters.messages += 1;
-    const inputRecord = {messageId, sources:new Set([source]), measurement:null, unverifiedCorrelation:!submissionKey};
+    const inputRecord = {messageId, hash, superseded:false, sources:new Set([source]), measurement:null, unverifiedCorrelation:!submissionKey};
     if (!submissionKey) this.counters.inputCorrelationUnverified += 1;
     this.inputRecords.set(key, inputRecord);
     if (submissionKey) this.submissions.set(submissionKey, key);
@@ -371,7 +428,7 @@ export class Engine {
       model: payload.model || '',
     });
 
-    return { ok: true, duplicate: false, messageId, chars, tokens };
+    return { ok: true, duplicate: false, messageId, chars, tokens, superseded: false };
   }
 
   /** No mezclar BPE visible con estimaciones heredadas o texto/modelo desconocido. */
@@ -1291,6 +1348,29 @@ export class Engine {
     };
   }
 
+  /**
+   * El guardián de salida canceló o bloqueó el envío en curso de una pestaña.
+   *
+   * Ese gesto ya no espera ninguna petición: si luego se fusionara con una red
+   * ajena, el envío siguiente —que sí salió— se perdería dentro del cancelado.
+   * Marcar el último registro como cerrado devuelve la ventana corta, como antes
+   * de la ventana larga. Sólo se marca el ÚLTIMO envío de la pestaña y sólo si
+   * todavía no tiene petición ni red; un envío ya contado no se toca.
+   *
+   * Sin texto: guarda el identificador del envío y el instante, nada más.
+   */
+  cerrarEnvioPendiente(webContentsId, messageId = '') {
+    const previo = this.lastSend.get(webContentsId);
+    const id = String(messageId || previo?.messageId || '');
+    if (!id || (previo && previo.messageId !== id)) return { closed: false };
+    const key = `${webContentsId}|${id}`;
+    const record = this.inputRecords.get(key);
+    const soloGesto = Boolean(record) && record.sources.size === 1 && record.sources.has('composer');
+    if (!soloGesto && !previo) return { closed: false };
+    this.enviosCerrados.set(key, Date.now());
+    return { closed: true, messageId: id };
+  }
+
   dropTab(webContentsId) {
     this.onTurnInterrupted(webContentsId);
     this.guards.delete(webContentsId);
@@ -1311,6 +1391,9 @@ export class Engine {
     }
     for (const key of [...this.cdpFailures.keys()]) {
       if (key.startsWith(`${webContentsId}|`)) this.cdpFailures.delete(key);
+    }
+    for (const key of [...this.enviosCerrados.keys()]) {
+      if (key.startsWith(`${webContentsId}|`)) this.enviosCerrados.delete(key);
     }
   }
 

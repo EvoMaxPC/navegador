@@ -33,6 +33,20 @@ export function createEgressGate({ getConfig, askUser, onDiagnostic = () => {}, 
     return { action: 'block', reason };
   };
 
+  /**
+   * Salida `error`: la puerta no pudo decidir. El que llama cae a su detector
+   * local, así que el envío se puede quedar retenido sin que nadie lo cuente.
+   * Se avisa siempre (nunca con el contenido: sólo motivo y tipos).
+   */
+  const fallo = (reason, summary = [], extra = '') => {
+    bump('errors');
+    const tipos = summary.length ? `Tipos: ${describe(summary)}.` : 'Sin datos que juzgar.';
+    onDiagnostic({ code: 'egress-error', severity: 'warn', title: 'NEXO no pudo decidir sobre un envío',
+      detail: `${tipos} Motivo: ${reason}${extra ? ` (${extra})` : ''}.` });
+    onStats();
+    return { action: 'error', reason };
+  };
+
   async function handle({ sender, host, payload }) {
     const cfg = normalizeEgress(getConfig(host));
     if (cfg.mode === 'off') return { action: 'pass', mode: 'off' };
@@ -43,16 +57,16 @@ export function createEgressGate({ getConfig, askUser, onDiagnostic = () => {}, 
       bump('unreadable');
       onDiagnostic({ code: 'egress-unreadable', severity: 'info', title: 'NEXO no pudo leer el cuerpo del envío',
         detail: `Motivo: ${reason}. Modo: ${cfg.mode}.` });
+      if (cfg.mode === 'enforce' && cfg.onUnreadable === 'block') return block(reason, []);
       onStats();
-      return { action: cfg.mode === 'enforce' && cfg.onUnreadable === 'block' ? 'block' : 'pass', reason };
+      return { action: 'pass', reason };
     }
 
     const slots = payload?.slots;
     if (!Array.isArray(slots) || slots.length === 0 || slots.length > MAX_SLOTS ||
         slots.some((s) => typeof s !== 'string') ||
         slots.reduce((n, s) => n + s.length, 0) > MAX_CHARS) {
-      bump('errors');
-      return { action: 'error', reason: 'payload' };
+      return fallo('payload');
     }
 
     const per = slots.map((s) => detectSensitive(s));
@@ -76,9 +90,11 @@ export function createEgressGate({ getConfig, askUser, onDiagnostic = () => {}, 
       let choice;
       try {
         choice = await askUser({ sender, summary, allowed, timeoutMs: cfg.decisionTimeoutMs });
-      } catch {
-        bump('errors');
-        return { action: 'error', reason: 'dialogo' };
+      } catch (error) {
+        // El `reason` no cambia (`dialogo`): el contrato con la capa ya está
+        // fijado. Sólo el nombre del error va al aviso, nunca su mensaje, que
+        // podría traer el texto del envío.
+        return fallo('dialogo', summary, String(error?.name || '').slice(0, 40));
       }
       // `allowed` es lo que se OFRECE, no lo que se acepta: 'cancel' está en la
       // lista y aun así debe bloquear, no caer en redactar. Solo 'redact' y

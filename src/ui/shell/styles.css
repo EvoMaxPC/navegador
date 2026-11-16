@@ -177,9 +177,11 @@ button { font: inherit; color: inherit; }
 .local-badge > span { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .sidebar-heading .icon-btn { width: 24px; height: 28px; font-size: 21px; }
 .sidebar-tabs { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 6px; border-right: 1px solid var(--line-soft); background: #101722; }
-.stab { display: grid; place-items: center; flex: none; width: 36px; height: 38px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; }
+.stab { position: relative; display: grid; place-items: center; flex: none; width: 36px; height: 38px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; }
 .stab:hover { background: #192b40; color: var(--text); }
 .stab.active { color: var(--accent); background: #102b47; border-color: #244d72; }
+/* Hay algo nuevo en el registro sin abrir el panel. */
+.stab .cut-dot { position: absolute; top: 4px; right: 4px; }
 .stab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .panel-view { display: none; grid-column: 2; grid-row: 2; min-width: 0; padding: 20px 16px; overflow-y: auto; overscroll-behavior: contain; }
 .panel-view.active { display: block; }

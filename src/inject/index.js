@@ -23,6 +23,10 @@ import { getPath, looksLikeStream } from '../core/sse.js';
 import { detectSite, isChatRequest, isMediable, isResponseRequest, locateUserText, patchUserText } from '../core/sites.js';
 import { readChatGptDpuAnswer, waitForChatGptDpuAnswer, extractChatGptVisibleAnswer, isChatGptDpuMime } from '../core/chatgptDpu.js';
 import { estimateTokens, fingerprint, gptModelFromRequest, userMessageIdentity } from '../core/text.js';
+import { normalizeEgress } from '../core/egressConfig.js';
+import { readBody } from '../core/readBody.js';
+import { detectSensitive } from '../egress/detect.js';
+import { guardSlots } from '../egress/slots.js';
 
 const CONFIG = window.__NEXO_CONFIG__ || {};
 const site = detectSite(CONFIG.host || location.hostname);
@@ -37,6 +41,8 @@ const state = {
   currentMessageId: null,
   /** Identificador de cada envío reconocido: asocia mensaje, respuesta y turno. */
   messageSeq: 0,
+  /** Último veredicto del guardián de salida (`null` si nunca corrió). */
+  egress: null,
 };
 
 /* ------------------------------------------------------------------ */
@@ -163,6 +169,12 @@ const envio = {
   pendiente: null,
   /** Envío que ya se contó sólo con el gesto, por si la petición no aparece. */
   porGesto: null,
+  /**
+   * Gesto apartado mientras el guardián decide. Su temporizador está parado: no
+   * puede contar un envío que quizá no salga. `anunciado` dice si ya llegó a
+   * contar (si el temporizador venció antes de retenerlo).
+   */
+  retenido: null,
 };
 
 /** Margen para que aparezca la petición antes de contar el gesto por su cuenta. */
@@ -269,6 +281,11 @@ function anunciarGesto(gesto) {
   envio.porGesto = {
     at: gesto.at, chars: gesto.chars, id: gesto.id,
     tokenText: gesto.tokenText, tokens: gesto.tokens, promptHash: gesto.promptHash,
+    // Texto saneado que reemplazó al del cuadro: la petición lo traerá así.
+    sustituidoPor: gesto.sustituidoPor || null,
+    // Sólo para `liberarGesto`: si el envío se retuvo, no hay que borrar la
+    // marca de un gesto posterior.
+    _timer: gesto.timer,
   };
   anunciarEnvio({ ...gesto, messageId: gesto.id, source: 'composer', textFound: true });
 }
@@ -321,8 +338,12 @@ function mismoEnvioDelGesto(gesto, peticion) {
   if (!gesto) return false;
   // El gesto local no trae ID del proveedor: sólo es evidencia el texto literal de la
   // petición, no texto tomado del propio gesto como respaldo (caso DPU opaco).
-  return peticion.textFound !== false && peticion.promptFromRequest !== false &&
-    typeof peticion.promptText === 'string' && peticion.promptText === gesto.tokenText;
+  if (peticion.textFound === false || peticion.promptFromRequest === false) return false;
+  if (typeof peticion.promptText !== 'string') return false;
+  // El guardián pudo redactar entre el gesto y la petición: entonces la
+  // petición trae el texto saneado, no el del cuadro. Es el mismo envío.
+  return peticion.promptText === gesto.tokenText ||
+    (typeof gesto.sustituidoPor === 'string' && peticion.promptText === gesto.sustituidoPor);
 }
 
 /** Devuelve el ID del gesto contado sólo si esta petición corresponde a él. */
@@ -332,6 +353,100 @@ function yaContadoPorGesto(peticion) {
   if (!mismoEnvioDelGesto(gesto, peticion)) return null;
   envio.porGesto = null;
   return gesto.id;
+}
+
+/**
+ * El gesto que corresponde a este texto, lo haya confirmado la petición o no.
+ *
+ * En `enforce` la petición espera al diálogo del guardián, así que puede tardar
+ * más que `ESPERA_PETICION_MS`: para entonces el gesto ya se anunció solo y vive
+ * en `porGesto`. Sin mirar ahí, el envío se contaría dos veces.
+ */
+function gestoDeEsteEnvio(texto) {
+  if (envio.retenido && mismoEnvioDelGesto(envio.retenido, { promptText: texto })) return envio.retenido;
+  if (envio.pendiente && mismoEnvioDelGesto(envio.pendiente, { promptText: texto })) return envio.pendiente;
+  const gesto = envio.porGesto;
+  if (gesto && Date.now() - gesto.at <= VENTANA_ENLACE_MS && mismoEnvioDelGesto(gesto, { promptText: texto })) return gesto;
+  return null;
+}
+
+/**
+ * Aparta el gesto mientras el guardián decide, y para su temporizador.
+ *
+ * Sólo para `enforce` con un gesto que corresponda al texto que se va a enviar.
+ * En `off` y `observe` no se llama, y sin gesto no hace nada.
+ */
+function retenerGesto(texto) {
+  // Si quedó un retenido de un envío anterior (por ejemplo, un planRequest que
+  // murió sin liberar), no se reutiliza como propio: se descarta con la regla de
+  // «no salió» y se retiene el de ahora. Así un huérfano no contamina el envío
+  // siguiente ni se queda retenido para siempre.
+  if (envio.retenido) liberarGesto(envio.retenido);
+  const gesto = gestoDeEsteEnvio(texto);
+  if (!gesto) return null;
+  if (gesto === envio.pendiente) {
+    clearTimeout(gesto.timer);
+    gesto.timer = null;
+    envio.pendiente = null;
+  }
+  const retenido = {
+    ...gesto,
+    timer: null,
+    retenidoEn: Date.now(),
+    anunciado: Boolean(gesto.messageId),
+    sustituidoPor: gesto.sustituidoPor || null,
+  };
+  if (gesto === envio.porGesto) envio.porGesto = null;
+  envio.retenido = retenido;
+  return retenido;
+}
+
+/**
+ * Devuelve el gesto retenido a la circulación.
+ *
+ * Se llama SIEMPRE (try/finally), también cuando la consulta lanza.
+ *
+ *   · Sin texto (`saneado` nulo): la decisión fue retener. Se descarta el gesto
+ *     y, si ya se había anunciado, se cierra el turno como cancelado. Ojo: un
+ *     cancelado ya anunciado **queda contado** como mensaje; es una limitación
+ *     aceptada (pasó `ESPERA_PETICION_MS` antes de la decisión) y no se puede
+ *     descontar sin inventar contadores negativos en el motor.
+ *   · Con texto: el envío sigue. El gesto vuelve a `pendiente` con el reloj
+ *     renovado, y con `sustituidoPor` si el guardián lo redactó.
+ */
+function liberarGesto(retenido, saneado = null) {
+  if (!retenido) return;
+  if (envio.retenido === retenido) envio.retenido = null;
+
+  if (typeof saneado !== 'string') {
+    if (retenido.anunciado) {
+      bridge.event('turn-result', {
+        messageId: retenido.messageId,
+        host: CONFIG.host || location.hostname,
+        site: site.id,
+        outcome: 'cancelled',
+        stoppedByUser: false,
+        blockedByGuard: true,
+      });
+    }
+    return;
+  }
+
+  const nuevo = {
+    ...retenido,
+    at: Date.now(),
+    // `true` = provisional: hay un temporizador vivo que puede anunciarlo.
+    provisional: true,
+    sustituidoPor: saneado === retenido.tokenText ? null : saneado,
+    promptHash: fingerprint(saneado),
+  };
+  nuevo.timer = setTimeout(() => {
+    if (envio.pendiente !== nuevo) return;
+    envio.pendiente = null;
+    anunciarGesto(nuevo);
+  }, ESPERA_PETICION_MS);
+  envio.pendiente = nuevo;
+  return nuevo;
 }
 
 /** Una petición ajena no consume ni cancela el gesto pendiente. */
@@ -376,6 +491,108 @@ async function chatGptDpuRequest(input, init) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 1b. guardián de salida (datos sensibles)                            */
+/* ------------------------------------------------------------------ */
+
+/** Margen sobre el tiempo de decisión: el diálogo puede tardar, el puente no. */
+const MARGEN_EGRESS_MS = 5000;
+
+/** ¿Hay algo crítico en este texto? El mismo juicio que usa la puerta. */
+function hayCritico(texto) {
+  return detectSensitive(String(texto || '')).some((f) => f.severity === 'critical');
+}
+
+/**
+ * Red de seguridad para cuando `planRequest` lanza.
+ *
+ * `guardPrompt` está escrito para no lanzar, pero un fallo ANTES de que llegue a
+ * mirar el cuerpo dejaba la petición seguir hasta el `fetch` nativo con el dato
+ * dentro. En `enforce` se vuelve a leer el cuerpo con `readBody` (que no lo
+ * consume) y se decide con el detector local: sólo un hallazgo crítico retiene.
+ * En `observe` y `off` no cambia nada: nunca se ha retenido por esta vía.
+ */
+async function planFallido(input, init) {
+  if (normalizeEgress(state.settings?.egress).mode !== 'enforce') return { chat: false };
+  let critico = false;
+  try {
+    const { text } = await readBody(input, init);
+    critico = typeof text === 'string' && hayCritico(text);
+  } catch {
+    // Si la lectura falla y no se sabía nada, se deja pasar como siempre.
+  }
+  if (!critico) return { chat: false };
+  state.egress = { mode: 'enforce', action: 'block', reason: 'fail-safe', at: Date.now() };
+  // `red` distingue este bloqueo del que decide la puerta: la puerta ya avisa
+  // por `onDiagnostic` (egress-block), así que aquí no se repite el diagnóstico.
+  return { chat: true, send: true, blocked: true, red: true };
+}
+
+/**
+ * Consulta la puerta de salida antes de enviar. Nunca lanza: un guardián que
+ * rompe el envío de la página es peor que uno que no interviene.
+ *
+ *   · `off` no cuesta nada y no habla con el proceso principal.
+ *   · `observe` registra lo que la puerta habría hecho y deja pasar siempre.
+ *   · `enforce` obedece a la puerta (`replace`, `block`, `pass`).
+ *
+ * Si la puerta no contesta (o contesta algo que no entiende) se mira el texto
+ * acá con el mismo detector del proceso principal: sólo se retiene si hay datos
+ * críticos. Es el único camino en el que la decisión se toma en la página.
+ */
+async function guardPrompt(text, { canRewrite = false, unreadable = null, slots = null } = {}) {
+  const cfg = normalizeEgress(state.settings?.egress);
+  if (cfg.mode === 'off') return { action: 'pass' };
+
+  const decidido = (resultado) => {
+    state.egress = { mode: cfg.mode, action: resultado.action, reason: resultado.reason || '', at: Date.now() };
+    return resultado;
+  };
+  // `cfg` ya viene de normalizeEgress: el tope de 600 000 y el mínimo de 5 000
+  // son los mismos que aplica la puerta, así que los dos esperan lo mismo.
+  const espera = cfg.decisionTimeoutMs + MARGEN_EGRESS_MS;
+
+  // Cuerpo ilegible: se declara el motivo y decide la puerta (`onUnreadable`).
+  // Sin texto que juzgar, el respaldo local no tiene nada que mirar.
+  if (unreadable) {
+    try {
+      const out = await bridge.request('egress', { unreadable, canRewrite: false }, espera);
+      if (cfg.mode === 'enforce' && out?.action === 'block') return decidido({ action: 'block', reason: unreadable });
+      return decidido({ action: 'pass', reason: unreadable });
+    } catch (error) {
+      bridge.event('error', { stage: 'egress', message: String(error?.message || error) });
+      return decidido({ action: 'pass', reason: unreadable });
+    }
+  }
+
+  // Se envían todas las partes de texto del mensaje, no sólo la que se puede
+  // reponer: si el usuario pegó el dato en un segundo bloque, también se ve.
+  const partes = Array.isArray(slots) && slots.length ? slots : [text];
+  let out = null;
+  let fallo = '';
+  try {
+    out = await bridge.request('egress', { slots: partes, canRewrite }, espera);
+  } catch (error) {
+    fallo = String(error?.message || error);
+    bridge.event('error', { stage: 'egress', message: fallo });
+  }
+
+  if (!fallo && out && out.action === 'replace' && Array.isArray(out.slots) &&
+      out.slots.length === partes.length && out.slots.every((x) => typeof x === 'string')) {
+    return decidido({ action: 'replace', texts: out.slots });
+  }
+  // `observe` no interviene nunca: se deja constancia y el envío sigue igual.
+  if (cfg.mode === 'observe') return decidido({ action: 'pass', reason: `observado:${out?.action || 'sin-puerta'}` });
+  if (!fallo && out?.action === 'block') return decidido({ action: 'block', reason: out.reason || 'egress' });
+  if (!fallo && (out?.action === 'pass' || out?.action === 'error')) {
+    // `error` es un payload que la puerta no aceptó: se cae al detector local.
+    if (out.action === 'pass') return decidido({ action: 'pass', reason: out.reason || '' });
+  }
+
+  const criticos = detectSensitive(String(text || '')).some((f) => f.severity === 'critical');
+  return decidido(criticos ? { action: 'block', reason: 'fail-safe' } : { action: 'pass', reason: fallo ? 'sin-puerta' : 'sin-veredicto' });
+}
+
+/* ------------------------------------------------------------------ */
 /* 1 + 2. petición saliente                                            */
 /* ------------------------------------------------------------------ */
 
@@ -407,6 +624,10 @@ async function planRequest(input, init) {
       envio.porGesto && Date.now() - envio.porGesto.at <= VENTANA_ENLACE_MS ? envio.porGesto : null
     );
     const prompt = form.prompt ?? gesture?.tokenText ?? '';
+    // En DPU el cuerpo se reescribe en el proceso principal, no acá: el guardián
+    // sólo puede retener (`block`) y no se le ofrece redactar.
+    const dpuGuard = await guardPrompt(prompt, { canRewrite: false, unreadable: form.prompt === null ? 'formulario' : null });
+    if (dpuGuard.action === 'block') return { chat: true, send: true, blocked: true, promptText: prompt, url };
     return {
       chat: true,
       send: true,
@@ -438,7 +659,13 @@ async function planRequest(input, init) {
   // Sin cuerpo legible sigue siendo una conversación: se captura la respuesta y
   // el envío se cuenta igual (lo confirma el gesto o la propia petición).
   const parsed = safeJson(text);
-  if (!parsed) return { chat: true, send: true, reason: 'cuerpo-no-legible' };
+  if (!parsed) {
+    // Sin cuerpo legible no hay texto que redactar; el guardián sólo puede
+    // retener, y eso lo decide el ajuste `onUnreadable` de la puerta.
+    const sinCuerpo = await guardPrompt('', { canRewrite: false, unreadable: 'stream-o-desconocido' });
+    if (sinCuerpo.action === 'block') return { chat: true, send: true, blocked: true, promptText: '' };
+    return { chat: true, send: true, reason: 'cuerpo-no-legible' };
+  }
 
   // «Regenerar» y «continuar» son peticiones de conversación, pero no son un
   // mensaje nuevo del usuario: se captura la respuesta y no se cuenta mensaje.
@@ -450,15 +677,71 @@ async function planRequest(input, init) {
   if (!located || !located.value) return { chat: true, send: true, reason: 'sin-texto' };
 
   const prompt = located.value;
+  // Guardián de salida ANTES de la mediación: redactar aquí deja el texto
+  // saneado como base y el motor registra exactamente lo que se va a enviar.
+  // `canRewrite` sólo si sabemos volver a poner el texto en el cuerpo.
+  // Con más de un bloque no se puede reponer el texto sin adivinar cuál es cuál:
+  // no se ofrece redactar, para que el diálogo no prometa algo que después se
+  // quedaría en retención (ver el `length !== 1` de abajo).
+  const slots = guardSlots(parsed);
+  const canRewrite = (site.body?.kind === 'chatgpt-messages' || site.body?.kind === 'claude-prompt') &&
+    slots.length <= 1;
+  // Mientras la puerta decide, el gesto del usuario no puede contar el envío:
+  // el diálogo puede tardar más que ESPERA_PETICION_MS.
+  const retenido = normalizeEgress(state.settings?.egress).mode === 'enforce' ? retenerGesto(prompt) : null;
+  const ctx = { input, init, parsed, prompt, url, canMediate, canRewrite, slots, desdeRequest, liberar: () => {} };
+  if (!retenido) return continuarPlan(ctx);
+  // Todo lo que va del `retenerGesto` al final puede lanzar (JSON.stringify del
+  // cuerpo, `new Request`, `patchUserText`…). El `finally` garantiza que el gesto
+  // se libere UNA vez: con texto si el plan salió, sin texto si no.
+  let liberado = false;
+  const liberar = (saneado = null) => {
+    if (liberado) return;
+    liberado = true;
+    liberarGesto(retenido, saneado);
+  };
+  try {
+    const plan = await continuarPlan({ ...ctx, liberar });
+    liberar(plan?.blocked ? null : plan?.promptText);
+    return plan;
+  } finally {
+    // Cualquier excepción o retorno que no haya pasado por `liberar` descarta.
+    liberar();
+  }
+}
+
+/**
+ * Resto de `planRequest` después del guardián.
+ *
+ * Vive aparte para que la liberación del gesto esté en UN `try/finally` y no en
+ * cinco `return` repartidos. `liberar` llega desde arriba cuando hay gesto
+ * retenido; si no hay, este camino no toca nada del gesto.
+ */
+async function continuarPlan({ input, init, parsed, prompt, url, canMediate, canRewrite, slots, desdeRequest, liberar }) {
+  const guard = await guardPrompt(prompt, { canRewrite, slots });
+  if (guard.action === 'block') return { chat: true, send: true, blocked: true, promptText: prompt, url };
+  let outbound = prompt;
+  if (guard.action === 'replace') {
+    // Un solo bloque de texto: se repone en el cuerpo y se sigue. Con varios no
+    // hay forma segura de saber cuál es cuál, así que se retiene (falla cerrado)
+    // en vez de enviar alguno sin sanear.
+    if (guard.texts.length !== 1) return { chat: true, send: true, blocked: true, promptText: prompt, url };
+    outbound = guard.texts[0];
+  }
+  if (outbound !== prompt && !patchUserText(parsed, site, outbound)) {
+    // No se pudo dejar el texto saneado en el cuerpo: no se envía el original.
+    return { chat: true, send: true, blocked: true, promptText: prompt, url };
+  }
+
   const base = {
     chat: true,
     send: true,
     promptChars: prompt.length,
-    promptText: prompt,
-    promptTokens: legacyProviderInputTokens(prompt),
+    promptText: outbound,
+    promptTokens: legacyProviderInputTokens(outbound),
     model: gptModelFromRequest(parsed),
     submissionId: userMessageIdentity(parsed),
-    promptHash: fingerprint(prompt),
+    promptHash: fingerprint(outbound),
     url,
   };
 
@@ -472,15 +755,24 @@ async function planRequest(input, init) {
   // envolviendo la respuesta.
   let report = null;
   try {
-    report = await bridge.request('prepare', { prompt, url, site: site.id });
+    report = await bridge.request('prepare', { prompt: outbound, url, site: site.id });
   } catch (error) {
     bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
   }
-  if (!report?.text) return { ...base, plan: null };
+  // Si el guardián reescribió el cuerpo antes de la mediación, el plan base ya
+  // lleva ese texto: la petición original no puede volver a salir con el dato.
+  const planBase = outbound === prompt ? { input, init } : {
+    input: desdeRequest ? new Request(input, { body: JSON.stringify(parsed) }) : input,
+    init: desdeRequest ? init : { ...init, body: JSON.stringify(parsed) },
+  };
+  // El proceso principal retuvo el texto mediado (no pudo ocultar un crítico
+  // de la memoria): se frena como un bloqueo, no se envía el original.
+  if (report?.blocked) return { chat: true, send: true, blocked: true, promptText: outbound, url };
+  if (!report?.text) return { ...base, plan: planBase };
 
   // El texto no cambió: no hay nada que reescribir, pero el envío se registra y
   // la respuesta se captura. Antes se descartaba todo y el turno no existía.
-  if (report.text === prompt) return { ...base, plan: { input, init }, mediated: false };
+  if (report.text === outbound) return { ...base, plan: planBase, mediated: false };
 
   if (!patchUserText(parsed, site, report.text)) return { ...base, plan: null };
   const body = JSON.stringify(parsed);
@@ -657,9 +949,19 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
   if (!response || !response.body || (!looksLikeStream(response.headers) && !jsonUpdates)) return response;
   if (NULL_BODY_STATUS.has(response.status) || response.status < 200 || response.status > 599) return response;
 
+  const formato = site.id === 'chatgpt' && /ndjson|jsonl|application[/]json/i.test(mime) ? 'ndjson'
+    : site.id === 'chatgpt' && /text\/plain/i.test(mime) ? 'auto' : 'sse';
+  // Diagnóstico: el formato elegido y cuánto se leyó. Sirve para saber si un
+  // cierre sin texto viene de haber leído otro formato (`diag-stream-end`).
+  // Sólo tipo/subtipo del MIME: sin parámetros ni otras cabeceras.
+  const diagnostico = {
+    formato,
+    mime: String(mime.split(';')[0] || '').trim().toLowerCase().slice(0, 40),
+    trozos: 0,
+    bytes: 0,
+  };
   const filter = createStreamFilter({
-      format: site.id === 'chatgpt' && /ndjson|jsonl|application[/]json/i.test(mime) ? 'ndjson'
-        : site.id === 'chatgpt' && /text\/plain/i.test(mime) ? 'auto' : 'sse',
+      format: formato,
       settings: state.settings,
       adapter: site.streamAdapter || null,
       deltaPaths: site.deltaPaths,
@@ -697,6 +999,12 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
             chars: text.length, tokens: estimateTokens(text), clipped,
             text: clipped ? text.slice(0, MAX_CAPTURE_CHARS) : text,
             dropped: String(info.dropped || '').slice(0, 600),
+            // Números, no contenido: el proceso principal sólo los publica con
+            // NEXO_DIAG=1. `diag` mantiene su contrato de números y etiquetas;
+            // el resumen de formas —nombres de evento y de clave, tipos de `v`,
+            // cuántos portadores— va al lado, no dentro.
+            diag: { ...diagnostico },
+            ...(info.estructura ? { estructura: info.estructura } : {}),
           });
         };
         const text = String(info.text || '');
@@ -716,9 +1024,23 @@ function wrapResponse(response, capture = {}, generation = null, promptText = ''
         } else if (state.response === generation) state.response = null;
       },
     });
-  response.body.pipeTo(filter.writable).catch((error) => {
+  const contador = new TransformStream({
+    transform(chunk, controller) {
+      diagnostico.trozos += 1;
+      diagnostico.bytes += chunk?.byteLength ?? chunk?.length ?? 0;
+      controller.enqueue(chunk);
+    },
+  });
+  response.body.pipeThrough(contador).pipeTo(filter.writable).catch((error) => {
     filter.finishInterrupted();
-    bridge.event('error', { stage: 'stream-interrupted', message: String(error?.message || error) });
+    // El mensaje exacto del rechazo viaja aparte: `message` mezcla el motivo
+    // con el valor (`String(undefined)`), y el proceso principal necesita
+    // distinguir «cancelación sin motivo» de un error de verdad.
+    const motivo = String(error?.message || '');
+    const tipo = String(error?.name || '');
+    bridge.event('error', { stage: 'stream-interrupted', message: String(error?.message || error),
+      ...(motivo || tipo ? { motivo: motivo.slice(0, 200), errorName: tipo.slice(0, 40) }
+        : { sinMotivo: true }) });
   });
   const filtered = filter.readable;
 
@@ -757,7 +1079,8 @@ if (!window.__NEXO_HOOKED__) {
   window.fetch = async function nexoFetch(input, init) {
     // Si sólo está activa la repetición, leer el DOM no habilita captura de red
     // ni mediación. Se devuelve el fetch original sin inspeccionar el cuerpo.
-    if (site.id === 'chatgpt' && !state.enabled && state.settings.memory?.enabled === false) return nativeFetch(input, init);
+    const egressActivo = normalizeEgress(state.settings?.egress).mode !== 'off';
+    if (site.id === 'chatgpt' && !state.enabled && state.settings.memory?.enabled === false && !egressActivo) return nativeFetch(input, init);
     const url = absoluteUrl(urlOf(input));
     const method = methodOf(input, init);
 
@@ -767,6 +1090,24 @@ if (!window.__NEXO_HOOKED__) {
       prepared = await planRequest(input, init);
     } catch (error) {
       bridge.event('error', { stage: 'prepare', message: String(error?.message || error) });
+      // Última red: si el plan falló con datos críticos dentro, no sale igual.
+      prepared = await planFallido(input, init);
+    }
+
+    // 2) El guardián de salida retuvo el mensaje: no se envía y se simula una
+    //    cancelación de red, que es el camino que la página ya sabe manejar
+    //    («Detener»). Tampoco se anota como envío: no llegó a salir.
+    if (prepared.blocked) {
+      // Si retuvo la puerta, ya lo contó ella con su propio diagnóstico
+      // (`egress-block`, main/egressGate.js:30). Repetirlo acá daba dos entradas
+      // en el panel y la segunda con un título peor («Fallo de la mediación»).
+      if (prepared.red) {
+        bridge.event('error', {
+          stage: 'egress-fail-safe',
+          message: 'planRequest falló con datos críticos; envío retenido',
+        });
+      }
+      throw new DOMException('NEXO retuvo el envío', 'AbortError');
     }
 
     // Un envío se anota siempre: con o sin mediación, y aunque no se pueda leer
@@ -777,6 +1118,14 @@ if (!window.__NEXO_HOOKED__) {
       const gesto = tomarEnvioPendiente(prepared);
       const chars = prepared.promptChars ?? gesto?.chars ?? 0;
       const countedGesture = gesto ? null : yaContadoPorGesto(prepared);
+      // El gesto ya se anunció (venció el temporizador antes de la decisión):
+      // si el guardián retuvo el envío, no hay nada que reanunciar y el turno
+      // hay que cerrarlo, porque el aviso ya salió.
+      if (prepared.blocked && countedGesture) {
+        bridge.event('turn-result', { messageId: countedGesture, host: CONFIG.host || location.hostname,
+          site: site.id, outcome: 'cancelled', stoppedByUser: false, blockedByGuard: true });
+        throw new DOMException('NEXO retuvo el envío', 'AbortError');
+      }
       if (countedGesture) {
         // Ya lo contó el gesto: la respuesta tiene que usar su identificador.
         messageId = countedGesture;

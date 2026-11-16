@@ -102,6 +102,8 @@ function genericAdapter({ deltaPaths = null } = {}) {
 /* ------------------------------------------------------------------ */
 
 const PARTS_PATH = /^\/message\/content\/parts\/(\d+)$/;
+/** Etiquetas publicables: minúsculas y `_`, igual que en el diagnóstico del filtro. */
+const LISTA_BLANCA = /^[a-z_]{1,24}$/;
 const TEXT_CONTENT_TYPES = new Set(['text', 'multimodal_text']);
 /** Estados de `/message/status` que significan «el mensaje terminó». */
 const CHATGPT_TERMINAL_STATUS = new Set([
@@ -180,6 +182,38 @@ function chatgptChannelAdapter() {
   let operation = 'append';
   let model = '';
   let captured = false;
+  // Marca de oculto por mensaje, con el valor VIGENTE: ChatGPT abre el mensaje
+  // con `is_visually_hidden_from_conversation: true` y la quita con un `remove`
+  // en el primer evento de texto. Decidir al abrir descartaba la respuesta.
+  // Sin entrada = no vista; `true` = oculta; `false` = la marca ya no está.
+  const ocultos = new Map();
+  // Veredicto de los demás criterios (rol, tipo, canal, destinatario, fragmento)
+  // por mensaje. Se guarda aparte de la marca para poder reevaluar el mensaje
+  // cuando un `remove` la levanta, sin dejar de aplicar los otros filtros.
+  const aceptables = new Map();
+  /** Ruta exacta que levanta la marca: la misma clave que lee el criterio. */
+  const RUTA_OCULTO = '/message/metadata/is_visually_hidden_from_conversation';
+  // Cierre del protocolo del mensaje ACEPTADO: `status finished_successfully`
+  // y `end_turn: true`. Lo pone el propio proveedor; es más fiable que la
+  // puntuación del texto, que marca «cortada» una respuesta completa.
+  const cierres = new Map();
+  let ocultoLevantado = 0;
+  const removes = [];
+
+  /**
+   * Veredicto de cierre del mensaje vigente, con las dos señales juntas.
+   * `end_turn` puede llegar por parche (`/message/end_turn`) o dentro del
+   * mensaje; el estado terminal, por cualquiera de las dos vías.
+   */
+  function marcarCierre(estado, finDeTurno) {
+    const clave = String(messageId || '');
+    if (!clave) return;
+    const previo = cierres.get(clave) || { estado: false, fin: false };
+    cierres.set(clave, {
+      estado: previo.estado || estado === true,
+      fin: previo.fin || finDeTurno === true,
+    });
+  }
 
   function remember(key, full, path, cumulative = true) {
     const previous = texts.get(key) || '';
@@ -192,8 +226,23 @@ function chatgptChannelAdapter() {
   function read(json) {
     const segments = [];
     let terminal = null;
+    let descartados = 0;
+    let sinTexto = 0;
+    const porEvento = { string: 0, array: 0, object: 0, otro: 0 };
+    let segmentos = 0;
+    /** Textos retenidos por la marca de oculto, a la espera de un `remove`. */
+    const pendientes = [];
+    const levantadoAntes = ocultoLevantado;
+    /** Forma de `v` en las operaciones que apuntan a una parte de texto. */
+    const formaTexto = { string: 0, array: 0, object: 0, otro: 0 };
+    let conSegmentoTexto = false;
     const handled = isPlainObject(json) && Boolean(json.type || json.message || 'v' in json || 'p' in json || 'o' in json);
-    const result = () => ({ segments, terminal, handled, model });
+    const result = () => ({ segments, terminal, handled, model, descartados, sinTexto,
+      porEvento, segmentos,
+      ocultoLevantado: ocultoLevantado - levantadoAntes, removes,
+      // Sólo el mensaje ACEPTADO (assistant, sin marca de oculto) cuenta.
+      cierre: Boolean(aceptables.get(String(messageId || '')) && ocultos.get(String(messageId || '')) === false &&
+        cierres.get(String(messageId || ''))?.estado && cierres.get(String(messageId || ''))?.fin) });
     if (!isPlainObject(json)) return result();
 
     // Canal sin cuenta: no lleva message.content, sino markdown con revisiones.
@@ -219,13 +268,27 @@ function chatgptChannelAdapter() {
       messageId = String(message.id || messageId || 'message');
       const meta = message.metadata || {};
       model = meta.model_slug || meta.resolved_model_slug || model;
-      state.assistantText = (role ? role === 'assistant' : state.assistantText !== false) &&
+      // La marca se guarda por `id`. Si el mensaje la trae, manda ella; si no
+      // la trae y nadie la había levantado, queda oculta (apertura normal).
+      if (meta.is_visually_hidden_from_conversation !== undefined) {
+        ocultos.set(messageId, Boolean(meta.is_visually_hidden_from_conversation));
+      } else if (!ocultos.has(messageId)) {
+        ocultos.set(messageId, false);
+      }
+      // Los filtros de siempre, sin la marca de oculto: eso decide aparte.
+      const cumple = (role ? role === 'assistant' : state.assistantText !== false) &&
         (!type || TEXT_CONTENT_TYPES.has(type)) &&
         (!message.recipient || message.recipient === 'all') &&
         (!message.channel || message.channel === 'final') &&
-        !meta.is_message_fragment && !meta.is_visually_hidden_from_conversation;
+        !meta.is_message_fragment;
+      aceptables.set(messageId, cumple);
+      state.assistantText = cumple && !ocultos.get(messageId);
       state.pathIsText = false;
-      if (!state.assistantText) return;
+      if (!state.assistantText) {
+        descartados += 1;
+        sinTexto += 1;
+        return;
+      }
       const parts = message.content?.parts;
       if (Array.isArray(parts)) parts.forEach((part, i) => {
         if (typeof part !== 'string') return;
@@ -237,6 +300,7 @@ function chatgptChannelAdapter() {
       });
       state.lastMessage = prefix === 'message' ? message : null;
       if (CHATGPT_TERMINAL_STATUS.has(message.status)) terminal = 'message';
+      if (CHATGPT_TERMINAL_STATUS.has(message.status) && message.end_turn === true) marcarCierre(true, true);
     }
 
     if (isPlainObject(json.message)) {
@@ -244,15 +308,41 @@ function chatgptChannelAdapter() {
       return result();
     }
 
-    function readOperation(op, valuePath, inheritedPointer, inheritedOperation) {
+    function readOperation(op, valuePath, inheritedPointer, inheritedOperation, depth = 0) {
       if (!isPlainObject(op)) return;
       const target = typeof op.p === 'string' ? op.p : inheritedPointer;
       const action = typeof op.o === 'string' ? op.o : inheritedOperation;
-      if (Array.isArray(op.v) && (action === 'patch' || op.v.every((item) => isPlainObject(item) && typeof item.p === 'string'))) {
-        op.v.forEach((child, i) => readOperation(child, `${valuePath}.${i}.v`, target, 'append'));
+      // Un array de parches puede mezclar elementos con `p` y elementos que no
+      // encajan (null, números, cadenas, objetos sin `p`). Basta con que **alguno**
+      // sea un parche para recorrerlo: los demás se ignoran sin lanzar. Exigir
+      // que todos encajaran descartaba el array entero y el turno salía con 0
+      // caracteres aunque el texto estuviera ahí.
+      const traeParche = Array.isArray(op.v) &&
+        (action === 'patch' || op.v.some((item) => isPlainObject(item) && typeof item.p === 'string'));
+      // Tope de elementos y profundidad: un `o:'patch'` dentro de un elemento
+      // puede recursar una vez más, nunca sin límite.
+      if (traeParche && depth < 2) {
+        op.v.slice(0, 256).forEach((child, i) => readOperation(child, `${valuePath}.${i}.v`, target, 'append', depth + 1));
         return;
       }
       const value = op.v;
+      // La marca de oculto se levanta SÓLO con la ruta exacta que lee el
+      // criterio. Cualquier otra ruta de `remove` (o un `remove` sin mensaje)
+      // se registra para el diagnóstico y no cambia nada. Va ANTES de los
+      // retornos tempranos: un `remove` no trae texto ni mensaje.
+      if (action === 'remove') {
+        const clave = String(messageId || '');
+        if (target === RUTA_OCULTO && clave) {
+          if (ocultos.get(clave) !== false) ocultoLevantado += 1;
+          ocultos.set(clave, false);
+          // Levantar la marca reabre el mensaje sólo si los demás criterios lo
+          // permitían: `system` y `user` siguen fuera por su rol.
+          if (aceptables.get(clave) !== false) state.assistantText = true;
+        }
+        // Dígitos → `N`: los índices de parche no identifican la ruta.
+        if (removes.length < 6) removes.push(rutaRemove(target));
+        return;
+      }
       // El protocolo delta_encoding usa raíces {p:'',o:'add',v:{message}}
       // y objetos {v:{message}} que heredan la operación anterior.
       if (target === '' && isPlainObject(value?.message)) {
@@ -266,22 +356,103 @@ function chatgptChannelAdapter() {
       state.pathIsText = PARTS_PATH.test(target) && state.assistantText !== false;
       if (target === '/message/author/role') {
         state.assistantText = value === 'assistant';
+        if (!state.assistantText) sinTexto += 1;
         return;
       }
-      if (target === '/message/status' && CHATGPT_TERMINAL_STATUS.has(value)) terminal = 'message';
+      if (target === '/message/status' && CHATGPT_TERMINAL_STATUS.has(value)) {
+        terminal = 'message';
+        marcarCierre(true, false);
+      }
+      if (target === '/message/end_turn' && value === true) marcarCierre(false, true);
+      // El texto de un mensaje que aún está marcado como oculto no se entrega
+      // todavía: la marca puede levantarse más adelante EN ESTE MISMO evento.
+      // Se queda pendiente con su ruta y su operación, y sale al final si la
+      // marca se levantó (`aplicarPendientes`).
+      if (PARTS_PATH.test(target)) {
+        // La ruta de texto puede venir en el `p` del evento o en el de un
+        // elemento del array de parches; el diagnóstico mira las dos.
+        if (typeof value === 'string') formaTexto.string += 1;
+        else if (Array.isArray(value)) formaTexto.array += 1;
+        else if (isPlainObject(value)) formaTexto.object += 1;
+        else formaTexto.otro += 1;
+      }
+      if (typeof value === 'string' && PARTS_PATH.test(target) && ocultos.get(messageId) === true) {
+        pendientes.push({ key: `${messageId || 'message'}:${PARTS_PATH.exec(target)[1]}`,
+          target, value, action, valuePath });
+        return;
+      }
       if (!state.pathIsText || typeof value !== 'string') return;
       const index = PARTS_PATH.exec(target)[1];
-      const key = `${messageId || 'message'}:${index}`;
+      if (emitirTexto(`${messageId || 'message'}:${index}`, target, value, action, valuePath)) conSegmentoTexto = true;
+    }
+
+    /**
+     * Publica un trozo de texto del mensaje vigente. Lo usan el camino normal y
+     * el de los pendientes, para no tener dos versiones de la misma cuenta.
+     */
+    function emitirTexto(key, target, value, action, valuePath) {
       const full = action === 'append' ? (texts.get(key) || '') + value : value;
       const added = remember(key, full, valuePath, action !== 'append');
       state.lastTextPath = target;
       // El cierre sintético de los parches es append, no el mensaje legacy.
       state.lastMessage = null;
       if (added) segments.push(added);
+      return Boolean(added);
+    }
+
+    /**
+     * Aplica los textos que quedaron retenidos por la marca de oculto, y sólo
+     * los de los mensajes cuya marca se levantó. Si el mensaje sigue oculto al
+     * terminar, su texto no se publica nunca.
+     */
+    function aplicarPendientes() {
+      if (!pendientes.length) return;
+      for (const item of pendientes) {
+        const clave = messageIdDe(item.key);
+        // Sale sólo si el mensaje ya no está oculto Y los demás criterios lo
+        // permiten: un `system` con la marca levantada sigue sin publicar.
+        if (ocultos.get(clave) !== false || aceptables.get(clave) === false) continue;
+        // Un `replace` que es la primera escritura de esa parte no tiene nada
+        // que reemplazar: se aplica tal cual.
+        const accion = item.action === 'append' || texts.has(item.key) ? item.action : 'replace';
+        if (emitirTexto(item.key, item.target, item.value, accion, item.valuePath)) conSegmentoTexto = true;
+      }
+      pendientes.length = 0;
+    }
+
+    /** Ruta de `remove` publicable: normalizada, o `s<longitud>` si no encaja. */
+    function rutaRemove(target) {
+      const normal = target.replace(/\d+/g, 'N');
+      return /^\/message\/[A-Za-z_/]{1,56}$/.test(normal) ? normal : `s${target.length}`;
+    }
+
+    /** `m1:0` → `m1`. */
+    function messageIdDe(key) {
+      const corte = key.lastIndexOf(':');
+      return corte < 0 ? key : key.slice(0, corte);
     }
     if (typeof json.p === 'string') pointer = json.p;
     if (typeof json.o === 'string') operation = json.o;
-    if ('v' in json) readOperation(json, 'v', pointer, operation);
+    if ('v' in json) {
+      const antes = segments.length;
+      readOperation(json, 'v', pointer, operation);
+      // El `append` de texto llega ANTES del `remove` que levanta la marca en el
+      // mismo evento: la decisión se toma con el estado al terminar el evento.
+      aplicarPendientes();
+      // Sólo cuando la ruta del evento apunta a una parte de texto: qué forma
+      // traía `v` y si de ahí salió texto. Es el dato que separa «llegó en una
+      // forma que no entiendo» de «llegó bien pero el mensaje estaba oculto».
+      // Vale tanto si la ruta de texto es el `p` del evento como si va dentro
+      // de los elementos del array de parches: es el mismo dato.
+      if (PARTS_PATH.test(String(json.p || '')) || formaTexto.string || formaTexto.array ||
+          formaTexto.object || formaTexto.otro) {
+        if (typeof json.v === 'string') porEvento.string += 1;
+        else if (Array.isArray(json.v)) porEvento.array += 1;
+        else if (isPlainObject(json.v)) porEvento.object += 1;
+        else porEvento.otro += 1;
+        if (conSegmentoTexto || segments.length > antes) segmentos += 1;
+      }
+    }
     return result();
   }
 
