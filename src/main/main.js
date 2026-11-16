@@ -1305,6 +1305,28 @@ function shellOnly(handler, denegado) {
   return (event, payload) => (isShellRequest(event) ? handler(event, payload) : denegado);
 }
 
+/**
+ * Alcance de un pedido que viene de la capa de página: lo decide el emisor.
+ *
+ * `nexo:config` y `nexo:config-sync` entregaban el perfil del host que eligiera
+ * el mensaje, y `nexo:stream-end` contaba y registraba un cierre de turno con el
+ * host del mensaje: una pestaña en cualquier sitio podía leer la configuración
+ * de otro proveedor o mover sus contadores. Acá se devuelve el host del emisor
+ * —el único que esa pestaña puede reclamar— y si el pedido hay que descartarlo.
+ *
+ * @param {unknown} event evento IPC (`event.sender.getURL()`)
+ * @param {unknown} hostPedido host declarado en el payload, si lo hay
+ */
+function alcanceDeLaCapa(event, hostPedido) {
+  const hostEmisor = hostOf(event?.sender?.getURL?.() || '');
+  // El payload trae un host suelto (`chatgpt.com`), no una URL: `hostOf` no
+  // sirve para normalizarlo (devolvería vacío y todo pedido parecería ajeno).
+  const pedido = String(hostPedido || '').trim().toLowerCase().replace(/^www\./, '');
+  if (!hostEmisor || !isAiHost(hostEmisor)) return { host: '', ajeno: true };
+  if (pedido && pedido !== hostEmisor) return { host: '', ajeno: true };
+  return { host: hostEmisor, ajeno: false };
+}
+
 
 function registerIpc() {
   ipcMain.handle('nexo:tokenizer:models', event => isShellRequest(event) ? tokenizerModels() : { ok: false, error: 'No autorizado.' });
@@ -1312,13 +1334,17 @@ function registerIpc() {
   // La configuración que sale de acá la consume una pestaña: se recorta a lo que
   // la capa lee de verdad (`tabConfig.js`). El recorte va en el handler, no en
   // `engine.configFor`: el proceso principal —guardián y motor— la usa entera.
-  ipcMain.handle('nexo:config', (_event, payload = {}) => configForTab(engine.configFor(payload.host || '')));
+  ipcMain.handle('nexo:config', (event, payload = {}) => {
+    // Un emisor sin proveedor —o que declara el host de otra pestaña— recibe la
+    // configuración de su propia pestaña, que es la que ya ve hoy.
+    return configForTab(engine.configFor(alcanceDeLaCapa(event, payload?.host).host));
+  });
 
   // La misma configuración, pero síncrona: el preload de cada pestaña la
   // necesita ANTES de que la página registre su propio `fetch`. Es una llamada
   // de milisegundos y se paga una sola vez por documento.
   ipcMain.on('nexo:config-sync', (event, payload = {}) => {
-    const host = typeof payload?.host === 'string' ? payload.host : '';
+    const host = alcanceDeLaCapa(event, payload?.host).host;
     try {
       event.returnValue = engine ? configForTab(engine.configFor(host)) : null;
     } catch (error) {
@@ -1440,6 +1466,10 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle('nexo:stream-end', (event, payload) => {
+    // Un cierre de turno que dice venir del host de otra pestaña se descarta con
+    // el neutro que el motor ya devuelve para un host sin perfil: sin contar, sin
+    // registro y sin efectos laterales.
+    if (alcanceDeLaCapa(event, payload?.host).ajeno) return { skipped: 'otro-proveedor' };
     payload = { ...payload, documentUrl: event.sender?.getURL?.() || '' };
     // Diagnóstico: si el texto llegó vacío, cualquier «respuesta contada» de acá
     // hacia abajo viene sin una sola palabra. Sin contenido: sólo números.

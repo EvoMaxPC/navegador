@@ -43,7 +43,7 @@ function callIpc(channel, payload, senderId = 1) {
     const sender = journal.windows[0].webContents;
     return handler({ sender, senderFrame: sender.mainFrame }, payload);
   }
-  return handler({ sender: { id: senderId } }, payload);
+  return handler({ sender: { id: senderId, getURL: () => `https://${payload?.host || 'chatgpt.com'}/` } }, payload);
 }
 
 /** Ajustes: el único emisor autorizado es la shell, con marco principal. */

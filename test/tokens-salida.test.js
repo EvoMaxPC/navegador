@@ -36,7 +36,7 @@ const settle = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
-  return handler({ sender: { id: senderId } }, payload);
+  return handler({ sender: { id: senderId, getURL: () => `https://${payload?.host || 'chatgpt.com'}/` } }, payload);
 }
 
 const stats = () => callIpc('nexo:stats');
@@ -45,7 +45,7 @@ function progreso(view, messageId, text) {
   const handler = journal.ipcHandlers.get('nexo:stream-progress');
   assert.ok(handler, 'existe el canal de progreso en vivo');
   return handler({
-    sender: { id: view.id, getType: () => 'webview' },
+    sender: { id: view.id, getType: () => 'webview', getURL: () => 'https://chatgpt.com/' },
   }, {
     messageId,
     site: 'chatgpt',

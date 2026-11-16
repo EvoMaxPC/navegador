@@ -26,7 +26,8 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
-  return handler({ sender: { id: senderId } }, payload);
+  if (senderId && typeof senderId === 'object') return handler({ sender: senderId, senderFrame: senderId.mainFrame }, payload);
+  return handler({ sender: { id: senderId, getURL: () => `https://${payload?.host || 'chatgpt.com'}/` } }, payload);
 }
 
 /** Ajustes: el único emisor autorizado es la shell, con marco principal. */

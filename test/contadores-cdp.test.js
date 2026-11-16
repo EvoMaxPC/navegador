@@ -26,7 +26,7 @@ const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
 function callIpc(channel, payload, senderId = 1) {
   const handler = journal.ipcHandlers.get(channel);
   assert.ok(handler, `no hay handler para ${channel}`);
-  return handler({ sender: { id: senderId } }, payload);
+  return handler({ sender: { id: senderId, getURL: () => `https://${payload?.host || 'chatgpt.com'}/` } }, payload);
 }
 
 const stats = () => callIpc('nexo:stats');

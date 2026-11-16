@@ -266,7 +266,7 @@ test('salida estima texto real cuenta palabras sin invocar BPE ni alterar la ent
     return load.call(this, id, ...args);
   };
   try {
-    journal.ipcHandlers.get('nexo:stream-end')({ sender: { id: view.id } }, { host: 'chatgpt.com', model: 'gpt-6', text, chars: text.length, tokens: 0 });
+    journal.ipcHandlers.get('nexo:stream-end')({ sender: { id: view.id, getURL: () => 'https://chatgpt.com/' } }, { host: 'chatgpt.com', model: 'gpt-6', text, chars: text.length, tokens: 0 });
   } finally { Module._load = load; }
   await pause();
   const after = await stats();
@@ -324,8 +324,8 @@ test('texto parcial y completo con el mismo ID corrigen la estimación sin otra 
   const end = journal.ipcHandlers.get('nexo:stream-end');
   const partial = 'Primera parte de la respuesta.\n';
   const text = partial + '**Markdown completo.**\n\nSegunda parte de la explicación, sin tokens de entrada nuevos.';
-  end({ sender: { id: view.id } }, { host: 'chatgpt.com', messageId: 'same-id', model: 'gpt-4-turbo', text: partial });
-  end({ sender: { id: view.id } }, { host: 'chatgpt.com', messageId: 'same-id', text });
+  end({ sender: { id: view.id, getURL: () => 'https://chatgpt.com/' } }, { host: 'chatgpt.com', messageId: 'same-id', model: 'gpt-4-turbo', text: partial });
+  end({ sender: { id: view.id, getURL: () => 'https://chatgpt.com/' } }, { host: 'chatgpt.com', messageId: 'same-id', text });
   await pause();
   const after = await stats();
   assert.equal(after.responses, before.responses + 1);
@@ -339,8 +339,8 @@ test('una extensión corrige la estimación acumulada sin duplicar respuesta', a
   const before = await stats();
   const end = journal.ipcHandlers.get('nexo:stream-end');
   assert.ok(countOutputTokens('function') >= countOutputTokens('functio'));
-  end({ sender: { id: view.id } }, { host: 'chatgpt.com', messageId: 'bpe-shrink', text: 'functio' });
-  end({ sender: { id: view.id } }, { host: 'chatgpt.com', messageId: 'bpe-shrink', text: 'function' });
+  end({ sender: { id: view.id, getURL: () => 'https://chatgpt.com/' } }, { host: 'chatgpt.com', messageId: 'bpe-shrink', text: 'functio' });
+  end({ sender: { id: view.id, getURL: () => 'https://chatgpt.com/' } }, { host: 'chatgpt.com', messageId: 'bpe-shrink', text: 'function' });
   await pause();
   const after = await stats();
   assert.equal(after.outputTokens, before.outputTokens + countOutputTokens('function'));

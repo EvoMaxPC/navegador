@@ -32,7 +32,7 @@ function callIpc(channel, payload, senderId = 1) {
   // URL del emisor, y sólo una pestaña real la tiene.
   if (senderId && typeof senderId === 'object') { return handler({ sender: senderId, senderFrame: senderId.mainFrame }, payload); }
   if(channel.startsWith('nexo:downloads:') || channel.startsWith('nexo:work:') || channel.startsWith('nexo:advanced:') || channel === 'nexo:profile:clear' || channel === 'nexo:data:clear') {const sender=journal.windows[0].webContents;return handler({sender,senderFrame:sender.mainFrame},payload);}
-  return handler({ sender: { id: senderId } }, payload);
+  return handler({ sender: { id: senderId, getURL: () => `https://${payload?.host || 'chatgpt.com'}/` } }, payload);
 }
 
 test('el arranque crea una ventana con la interfaz y la endurece', async () => {
@@ -413,12 +413,12 @@ test('la configuración avisa si el host tiene perfil', async () => {
   const listener = j.ipcListeners.get('nexo:config-sync');
   assert.ok(listener, 'existe el canal síncrono de configuración');
 
-  const proveedor = { returnValue: undefined };
+  const proveedor = { sender: { getURL: () => 'https://chatgpt.com/' }, returnValue: undefined };
   listener(proveedor, { host: 'chatgpt.com' });
   assert.equal(proveedor.returnValue.profiled, true);
   assert.equal(proveedor.returnValue.enabled, true);
 
-  const tercero = { returnValue: undefined };
+  const tercero = { sender: { getURL: () => 'https://accounts.google.com/' }, returnValue: undefined };
   listener(tercero, { host: 'accounts.google.com' });
   assert.equal(tercero.returnValue.profiled, false, 'sin perfil no se inyecta la capa');
 });

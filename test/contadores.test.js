@@ -33,7 +33,7 @@ function callIpc(channel, payload, senderId = 1) {
   if (senderId && typeof senderId === 'object') {
     return handler({ sender: senderId, senderFrame: senderId.mainFrame }, payload);
   }
-  return handler({ sender: { id: senderId } }, payload);
+  return handler({ sender: { id: senderId, getURL: () => `https://${payload?.host || 'chatgpt.com'}/` } }, payload);
 }
 
 /** Emite un evento de la capa como lo haría el preload de una pestaña. */
