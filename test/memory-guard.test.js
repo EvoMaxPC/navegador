@@ -19,7 +19,7 @@ function makeMemory() {
 
 test('el guard manda el bloque EVO antes del protocolo', () => {
   const memory = makeMemory();
-  const guard = new ConversationGuard({ language: 'es', memory, conversationId: 'c1' });
+  const guard = new ConversationGuard({ settings: { egress: { mode: 'observe' } }, language: 'es', memory, conversationId: 'c1' });
   guard.seedHistory(SEED);
 
   const report = guard.preparePrompt('¿qué decidimos sobre el motor?');
@@ -31,7 +31,7 @@ test('el guard manda el bloque EVO antes del protocolo', () => {
 
 test('el contexto llega al consumidor con estadísticas de tokens', () => {
   const memory = makeMemory();
-  const guard = new ConversationGuard({ language: 'es', memory, conversationId: 'c1' });
+  const guard = new ConversationGuard({ settings: { egress: { mode: 'observe' } }, language: 'es', memory, conversationId: 'c1' });
   guard.seedHistory(SEED);
   const report = guard.preparePrompt('¿qué queda pendiente?');
   assert.equal(report.context.engine, 'evo');
@@ -78,7 +78,7 @@ test('la respuesta del asistente también entra en memoria al cerrar el turno', 
 });
 
 test('sin motor de memoria el guard sigue usando el plegado clásico', () => {
-  const guard = new ConversationGuard({ language: 'es' });
+  const guard = new ConversationGuard({ settings: { egress: { mode: 'observe' } }, language: 'es' });
   guard.seedHistory(SEED);
   const report = guard.preparePrompt('¿qué hacemos ahora?');
   assert.ok(!report.context, 'sin memoria no hay contexto EVO');
@@ -87,7 +87,7 @@ test('sin motor de memoria el guard sigue usando el plegado clásico', () => {
 
 test('el registro de intervenciones explica lo que hizo EVO', () => {
   const memory = makeMemory();
-  const guard = new ConversationGuard({ language: 'es', memory, conversationId: 'c1' });
+  const guard = new ConversationGuard({ settings: { egress: { mode: 'observe' } }, language: 'es', memory, conversationId: 'c1' });
   guard.seedHistory(SEED);
   guard.preparePrompt('¿qué decidimos?');
   const entry = guard.logbook.entries.find((e) => e.code === 'evo-recall');

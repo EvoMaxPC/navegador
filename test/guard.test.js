@@ -12,7 +12,7 @@ function streamAll(guard, text, size = 11) {
 }
 
 test('el turno completo registra intervenciones de envío y de recepción', () => {
-  const guard = new ConversationGuard({});
+  const guard = new ConversationGuard({ settings: { egress: { mode: 'observe' } } });
   guard.preparePrompt('Explica los índices invertidos.');
   const done = streamAll(guard, LOOPING_ANSWER);
 

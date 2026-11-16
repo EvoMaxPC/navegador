@@ -109,7 +109,16 @@ test('el mismo mensaje repetido por la capa no se cuenta dos veces', async () =>
   assert.equal(despues.messages, antes.messages + 1);
 });
 
-test('2. un mensaje mediado cuenta como mensaje y como intervención', async () => {
+test('2. un mensaje mediado cuenta como mensaje y como intervención', async (t) => {
+  // Con `egress` en 'off' el mensaje sale intacto y por tanto no hay intervención
+  // mediada que contar: este caso necesita 'observe'. El ajuste vive en el proceso
+  // principal, así que se fija por el único camino autorizado (la shell) y se
+  // restaura con `t.after` para no alterar los demás casos del archivo.
+  const shell = journal.windows[0].webContents;
+  const setSettings = (patch) => journal.ipcHandlers.get('nexo:settings:set')({ sender: shell, senderFrame: shell.mainFrame }, patch);
+  setSettings({ egress: { mode: 'observe' } });
+  t.after(() => setSettings({ egress: { mode: 'off' } }));
+
   const antes = await stats();
   enviar(203, { messageId: 'a3', mediated: true });
 

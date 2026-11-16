@@ -219,6 +219,27 @@ export function enhancePrompt(input) {
   const findings = [];
   const blocks = [];
 
+  // Mensaje intacto: quien llama decidió que no se interviene (egress 'off').
+  // Se devuelve el prompt TAL CUAL, sin limpiar, recortar ni envolver, y con la
+  // misma forma que el retorno completo. `userText` sigue siendo el texto del
+  // usuario para que el historial y la captura local no cambien.
+  if (input.intact === true) {
+    return {
+      original: rawPrompt,
+      enhanced: rawPrompt,
+      userText: rawPrompt,
+      changed: false,
+      skipped: false,
+      isContinuation: CONTINUATION.test(rawPrompt),
+      blocks,
+      findings,
+      lang,
+      context: null,
+      protocolLevel: '',
+      stats: buildStats(rawPrompt, rawPrompt, 0),
+    };
+  }
+
   if (!settings.enabled || !settings.sending.enabled) {
     return {
       original: rawPrompt,

@@ -10,6 +10,7 @@
  * y qué hacer la próxima vez.
  */
 
+import { normalizeEgress } from './egressConfig.js';
 import { buildContinuationPrompt } from './protocol.js';
 import { enhancePrompt } from './promptEngine.js';
 import { recoverySuggestions, repairResponse } from './responseEngine.js';
@@ -110,6 +111,12 @@ export class ConversationGuard {
 
   /** Prepara el envío: aplica el motor saliente y registra las intervenciones. */
   preparePrompt(prompt) {
+    // Con `egress.mode` en 'off' el mensaje que sale no se toca: ni memoria EVO,
+    // ni protocolo, ni aclaración previa. La decisión se toma aquí, una sola vez,
+    // y se le pasa a `enhancePrompt` como un parámetro (`intact`): así el motor
+    // de prompts no necesita saber nada de egress. Sin configuración legible,
+    // `normalizeEgress` devuelve el modo por defecto, que es 'off'.
+    const intact = normalizeEgress(this.settings.egress).mode === 'off';
     // El contexto se compila ANTES de recordar este turno: recuperar lo que el
     // usuario acaba de escribir sería pagar dos veces por la misma frase.
     const report = enhancePrompt({
@@ -118,6 +125,7 @@ export class ConversationGuard {
       host: this.host,
       settings: this.settings,
       memory: this.memory,
+      intact,
     });
 
     if (this.memory) {
