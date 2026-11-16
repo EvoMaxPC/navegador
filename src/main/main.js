@@ -1288,6 +1288,24 @@ function isShellRequest(event) {
     BrowserWindow.getAllWindows().some(window=>window.webContents===event.sender));
 }
 
+/**
+ * Envuelve un handler de canal para que sólo lo ejecute la shell.
+ *
+ * El registro sigue siendo el mismo `ipcMain.handle(canal, …)`: lo que cambia es
+ * el cuerpo, que primero pregunta por el emisor. Un emisor ajeno —una pestaña
+ * inyectada o cualquier ventana que no sea la shell— recibe el valor vacío del
+ * tipo que ese canal devuelve normalmente (`denegado`), así que quien llama no
+ * distingue un rechazo de una lista sin datos y el proceso principal no ejecuta
+ * ningún efecto.
+ *
+ * @param {(event: unknown, payload?: unknown) => unknown} handler
+ * @param {unknown} denegado valor vacío del tipo de retorno normal del canal
+ */
+function shellOnly(handler, denegado) {
+  return (event, payload) => (isShellRequest(event) ? handler(event, payload) : denegado);
+}
+
+
 function registerIpc() {
   ipcMain.handle('nexo:tokenizer:models', event => isShellRequest(event) ? tokenizerModels() : { ok: false, error: 'No autorizado.' });
   ipcMain.handle('nexo:tokenizer:count', (event, payload) => isShellRequest(event) ? calculateTokenizer(payload) : { ok: false, error: 'No autorizado.' });
@@ -1842,24 +1860,24 @@ function registerIpc() {
   ipcMain.handle('nexo:memory:list', () => engine.memoryList());
   ipcMain.handle('nexo:memory:recall', (_event, payload = {}) =>
     engine.memoryRecall(String(payload.query || ''), { limit: payload.limit || 12 }));
-  ipcMain.handle('nexo:memory:pin', (_event, payload = {}) => engine.memoryPin(payload.id, payload.pinned !== false));
-  ipcMain.handle('nexo:memory:forget', (_event, payload = {}) => engine.memoryForget(payload.id));
-  ipcMain.handle('nexo:memory:handoff', () => engine.memoryHandoff());
+  ipcMain.handle('nexo:memory:pin', shellOnly((_event, payload = {}) => engine.memoryPin(payload.id, payload.pinned !== false), { ok: false }));
+  ipcMain.handle('nexo:memory:forget', shellOnly((_event, payload = {}) => engine.memoryForget(payload.id), { ok: false }));
+  ipcMain.handle('nexo:memory:handoff', shellOnly(() => engine.memoryHandoff(), null));
   ipcMain.handle('nexo:memory:import', (_event, packet) => {
     const result = engine.memoryImport(packet);
     broadcast('nexo:memory-changed', engine.memoryStats());
     return result;
   });
-  ipcMain.handle('nexo:memory:clear', () => {
+  ipcMain.handle('nexo:memory:clear', shellOnly(() => {
     const result = engine.memoryClear();
     broadcast('nexo:memory-changed', engine.memoryStats());
     return result;
-  });
-  ipcMain.handle('nexo:shell:config', () => ({
+  }, { ok: false }));
+  ipcMain.handle('nexo:shell:config', shellOnly(() => ({
     version: app.getVersion(),
     pagePreload: `file://${PAGE_PRELOAD}`,
     platform: process.platform,
-  }));
+  }), null));
 
   // Medidas de la interfaz: sólo las acepta la shell, y sólo números.
   ipcMain.on('nexo:perf', (event, data) => {
@@ -2014,15 +2032,15 @@ function registerIpc() {
       ? profile.history.search(payload.query, { limit })
       : profile.history.recent({ limit, offset: Number(payload.offset) || 0 });
   });
-  ipcMain.handle('nexo:history:top', (_event, payload = {}) => profile?.history.topSites(payload) || []);
-  ipcMain.handle('nexo:history:remove', (_event, id) => ({ ok: Boolean(profile?.history.remove(id)) }));
-  ipcMain.handle('nexo:history:clear', (_event, payload = {}) => {
+  ipcMain.handle('nexo:history:top', shellOnly((_event, payload = {}) => profile?.history.topSites(payload) || [], []));
+  ipcMain.handle('nexo:history:remove', shellOnly((_event, id) => ({ ok: Boolean(profile?.history.remove(id)) }), { ok: false }));
+  ipcMain.handle('nexo:history:clear', shellOnly((_event, payload = {}) => {
     const since = payload.range === 'all' ? null : Date.now() - rangeMs(payload.range);
     const result = profile?.history.clear({ since }) || { removed: 0 };
     profile?.history.save({ force: true });
     broadcast('nexo:profile-changed', profile?.stats() || null);
     return result;
-  });
+  }, { removed: 0 }));
   ipcMain.handle('nexo:suggest', async (_event, payload = {}) => {
     if (!profile) return [];
     const query = String(payload.query || '');
@@ -2038,7 +2056,7 @@ function registerIpc() {
 
   /* ---------------- marcadores ---------------- */
   ipcMain.handle('nexo:bookmarks:list', (_event, payload = {}) => profile?.bookmarks.list(payload) || []);
-  ipcMain.handle('nexo:bookmarks:folders', () => profile?.bookmarks.folders() || []);
+  ipcMain.handle('nexo:bookmarks:folders', shellOnly(() => profile?.bookmarks.folders() || [], []));
   ipcMain.handle('nexo:bookmarks:is', (_event, url) => Boolean(profile?.bookmarks.isBookmarked(url)));
   ipcMain.handle('nexo:bookmarks:toggle', (_event, payload = {}) => {
     const result = profile?.bookmarks.toggle(payload) || { added: false, bookmark: null };
@@ -2046,18 +2064,18 @@ function registerIpc() {
     broadcast('nexo:bookmarks-changed', { url: payload.url, added: result.added });
     return result;
   });
-  ipcMain.handle('nexo:bookmarks:clear', () => {
+  ipcMain.handle('nexo:bookmarks:clear', shellOnly(() => {
     const result = profile?.bookmarks.clear() || { removed: 0 };
     profile?.bookmarks.save({ force: true });
     broadcast('nexo:bookmarks-changed', {});
     return result;
-  });
-  ipcMain.handle('nexo:bookmarks:remove', (_event, id) => {
+  }, { removed: 0 }));
+  ipcMain.handle('nexo:bookmarks:remove', shellOnly((_event, id) => {
     const ok = Boolean(profile?.bookmarks.remove(id));
     profile?.bookmarks.save({ force: true });
     broadcast('nexo:bookmarks-changed', {});
     return { ok };
-  });
+  }, { ok: false }));
 
   /* ---------------- descargas ---------------- */
   ipcMain.handle('nexo:downloads:list', (event) => isShellRequest(event) ? (profile?.downloads.list({ limit: 100 }) || []).map(entry=>{const live=downloadItems.get(entry.id)?.item;return {...entry,paused:Boolean(live?.isPaused?.()),canResume:Boolean(live?.canResume?.()||live?.isPaused?.())};}) : []);
@@ -2091,27 +2109,27 @@ function registerIpc() {
   });
 
   /* ---------------- permisos y zoom ---------------- */
-  ipcMain.handle('nexo:permissions:for', (_event, host) => profile?.permissions.rulesFor(host) || []);
-  ipcMain.handle('nexo:permissions:set', (_event, payload = {}) => {
+  ipcMain.handle('nexo:permissions:for', shellOnly((_event, host) => profile?.permissions.rulesFor(host) || [], []));
+  ipcMain.handle('nexo:permissions:set', shellOnly((_event, payload = {}) => {
     const permission = permissionName(payload.permission, PERMISSION_CATALOG);
     if (!permission) return { ok: false, error: 'permiso desconocido' };
     const ok = Boolean(profile?.permissions.set(payload.host, permission, payload.value));
     profile?.permissions.save({ force: true });
     return { ok };
-  });
-  ipcMain.handle('nexo:permissions:sites', () => profile?.permissions.list() || []);
-  ipcMain.handle('nexo:permissions:clear', (_event, host) => {
+  }, { ok: false }));
+  ipcMain.handle('nexo:permissions:sites', shellOnly(() => profile?.permissions.list() || [], []));
+  ipcMain.handle('nexo:permissions:clear', shellOnly((_event, host) => {
     const result = profile?.permissions.clear(host);
     profile?.permissions.save({ force: true });
     return { ok: Boolean(result) };
-  });
+  }, { ok: false }));
   ipcMain.handle('nexo:zoom:get', (_event, target) => profile?.zoom.get(target) ?? 1);
   ipcMain.handle('nexo:zoom:set', (_event, payload = {}) => {
     const level = profile?.zoom.set(payload.target, payload.level) ?? 1;
     profile?.zoom.save();
     return { level };
   });
-  ipcMain.handle('nexo:zoom:list', () => profile?.zoom.list() || []);
+  ipcMain.handle('nexo:zoom:list', shellOnly(() => profile?.zoom.list() || [], []));
 
   /* ---------------- datos del sitio ---------------- */
   ipcMain.handle('nexo:data:clear', async (event, scope = {}) => {
@@ -2152,10 +2170,10 @@ function registerIpc() {
       console.error('[nexo] no se pudo guardar la sesión:', error.message);
     }
   });
-  ipcMain.handle('nexo:session:clear', () => {
+  ipcMain.handle('nexo:session:clear', shellOnly(() => {
     profile?.session.clear();
     return { ok: true };
-  });
+  }, { ok: false }));
 }
 
 /** La observación UUE nunca acepta autoridad desde una página ajena o un subframe. */
