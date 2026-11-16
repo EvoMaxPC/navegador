@@ -138,6 +138,14 @@ jobs:
             $texto = $texto + "`n===== conversación Electron =====`n" + (Get-Content ci-repetition.json -Raw)
           }
           if ($texto.Length -gt 60000) { $texto = $texto.Substring($texto.Length - 60000) }
+          # El recorte de arriba se queda con la cola del TAP, que es el resumen:
+          # los nombres de los tests que fallan están al principio y se pierden.
+          # Esta sección los repone al final, una línea por test, para que el
+          # detalle se lea sin bajar el log del flujo.
+          $fallan = Select-String -Path ci-fallo.txt -Pattern '^\s*not ok' -AllMatches |
+            Select-Object -First 200 |
+            ForEach-Object { $_.Line.TrimEnd() }
+          $texto = $texto + "`n`n===== tests que fallan =====`n" + ($fallan -join "`n")
           $cuerpo = @{
             name      = 'diagnostico'
             head_sha  = '${{ github.sha }}'
