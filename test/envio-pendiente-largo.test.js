@@ -23,8 +23,9 @@ import { spawnSync } from 'node:child_process';
 import { register } from 'node:module';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-const RAIZ = new URL('..', import.meta.url).pathname;
+const RAIZ = fileURLToPath(new URL('..', import.meta.url));
 const ORIGINAL = 'Hola, ¿me ayudas con esta receta de pan?';
 const MEDIADO = `Protocolo de continuidad (equilibrado)\n\n${ORIGINAL}`;
 

@@ -27,6 +27,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { register } from 'node:module';
 import vm from 'node:vm';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { createStreamFilter } from '../src/core/streamFilter.js';
 
@@ -324,7 +325,7 @@ const log = await journal.ipcHandlers.get('nexo:log')({ sender: shell, senderFra
 console.log('DIAG=' + JSON.stringify(log.filter((e) => String(e.code).startsWith('diag-'))));
 `;
   const salida = spawnSync(process.execPath, ['--import', preludio, '--input-type=module', '-e', guion],
-    { encoding: 'utf8', cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, NEXO_DIAG: '0' } });
+    { encoding: 'utf8', cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...process.env, NEXO_DIAG: '0' } });
   assert.equal(salida.status, 0, `el hijo termina bien: ${salida.stderr}`);
   const linea = (salida.stdout || '').split('\n').find((l) => l.startsWith('DIAG='));
   assert.ok(linea, `el hijo informa: ${salida.stdout}`);
