@@ -1331,6 +1331,24 @@ function shellOnly(handler, denegado) {
 }
 
 /**
+ * ¿El pedido llegó desde un marco que no es el principal de su emisor?
+ *
+ * La capa se inyecta sólo en el marco principal (`nodeIntegrationInSubFrames`
+ * es `false`, main.js:795), así que un `senderFrame` distinto del principal es
+ * un subframe hablando por un canal que no le corresponde. Un `senderFrame`
+ * ausente o nulo no se puede comparar: `electron.d.ts:9508-9512` dice que puede
+ * ser `null` después de navegar o destruirse, y ahí se mantiene el
+ * comportamiento de siempre (decidir sólo por `sender`).
+ *
+ * @param {unknown} event evento IPC (`event.senderFrame`, `event.sender.mainFrame`)
+ */
+const esOtroMarco = (event) => {
+  if (!event?.senderFrame) return false;
+  const mainFrame = event?.sender?.mainFrame;
+  return Boolean(mainFrame) && event.senderFrame !== mainFrame;
+};
+
+/**
  * Alcance de un pedido que viene de la capa de página: lo decide el emisor.
  *
  * `nexo:config` y `nexo:config-sync` entregaban el perfil del host que eligiera
@@ -1339,10 +1357,15 @@ function shellOnly(handler, denegado) {
  * de otro proveedor o mover sus contadores. Acá se devuelve el host del emisor
  * —el único que esa pestaña puede reclamar— y si el pedido hay que descartarlo.
  *
+ * Un subframe de la pestaña queda fuera de alcance igual que un emisor ajeno:
+ * no hay ninguna razón para que un marco incrustado pida mediación, cuente un
+ * cierre o lea la configuración de la pestaña que lo contiene.
+ *
  * @param {unknown} event evento IPC (`event.sender.getURL()`)
  * @param {unknown} hostPedido host declarado en el payload, si lo hay
  */
 function alcanceDeLaCapa(event, hostPedido) {
+  if (esOtroMarco(event)) return { host: '', ajeno: true };
   const hostEmisor = hostOf(event?.sender?.getURL?.() || '');
   // El payload trae un host suelto (`chatgpt.com`), no una URL: `hostOf` no
   // sirve para normalizarlo (devolvería vacío y todo pedido parecería ajeno).
@@ -1389,12 +1412,14 @@ function registerIpc() {
     // `payload.url` y `payload.site`, dos campos que elige la página: una pestaña
     // en cualquier sitio podía pedir mediación para `chatgpt.com` y recibir de
     // vuelta el texto con la memoria del proyecto dentro. Acá se exige que lo
-    // que pide coincida con la pestaña que lo pide.
+    // que pide coincida con la pestaña que lo pide, y que lo pida el marco
+    // principal de esa pestaña: la capa no se inyecta en los subframes.
     const hostEmisor = hostOf(event?.sender?.getURL?.() || '');
     const hostPedido = hostOf(String(payload?.url || ''));
     const perfilEmisor = hostEmisor ? detectSite(hostEmisor).id : '';
     const sitePedido = isProfileId(payload?.site) ? String(payload.site) : '';
     const alcanceAjeno =
+      esOtroMarco(event) ||
       !hostEmisor ||
       !isAiHost(hostEmisor) ||
       Boolean(hostPedido && hostPedido !== hostEmisor) ||
