@@ -110,14 +110,66 @@ export function handoffToMarkdown(packet, language = 'es') {
 }
 
 /**
+ * Prefijos que un paquete pegado a mano puede traer como `kind`, ya sin
+ * minúsculas ni acentos, en el orden en que se prueban.
+ *
+ * El panel arma `{ markdown, items }` (`src/ui/shell/app.js:1209`) y su parser
+ * copia el `kind` del encabezado (`:1231`): un paquete de la interfaz llega con
+ * `items`, no con `sections`, y con encabezados que no siempre son los de este
+ * archivo. Sin este puente, importar desde el panel no añadía nada.
+ */
+const PREFIJOS_DE_KIND = [
+  ['decision', 'decision'], ['tarea', 'task'], ['pendiente', 'task'],
+  ['restriccion', 'constraint'], ['preferencia', 'preference'],
+  ['objetivo', 'goal'], ['meta', 'goal'], ['problema', 'issue'],
+  ['issue', 'issue'], ['pregunta', 'question'], ['artefacto', 'artifact'],
+];
+
+/** `kind` normalizado: minúsculas, sin acentos y sin los espacios de los bordes. */
+function kindNormalizado(valor) {
+  return String(valor || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * Un `kind` válido pasa tal cual; si no, se busca por prefijo. Lo desconocido y
+ * lo que no trae encabezado se guarda como `fact`.
+ * @param {unknown} valor `kind` declarado en el item
+ */
+export function kindDeItem(valor) {
+  const kind = kindNormalizado(valor);
+  if (KIND_META[kind]) return kind;
+  const encontrado = PREFIJOS_DE_KIND.find(([prefijo]) => kind.startsWith(prefijo));
+  return encontrado ? encontrado[1] : 'fact';
+}
+
+/**
+ * Agrupa `items` por kind. Los items sin texto se ignoran: no son una memoria.
+ * @param {unknown} items
+ */
+function sectionsDesdeItems(items) {
+  const sections = {};
+  for (const item of Array.isArray(items) ? items : []) {
+    const text = typeof item?.text === 'string' ? item.text.trim() : '';
+    if (!text) continue;
+    const kind = kindDeItem(item?.kind);
+    (sections[kind] ||= []).push({ text, pinned: Boolean(item?.pinned) });
+  }
+  return sections;
+}
+
+/**
  * Reimporta un paquete (por ejemplo el que pegaste desde otro equipo o modelo).
  * @returns {{added: number, merged: number, superseded: number}}
  */
 export function importHandoff(store, packet, { projectId = null } = {}) {
   const result = { added: 0, merged: 0, superseded: 0, ignored: 0 };
-  if (!packet || !packet.sections) return result;
+  if (!packet) return result;
+  // La UI manda `{ markdown, items }`. Un paquete con `sections` sigue el camino
+  // de siempre, sin tocarse.
+  const sections = packet.sections || sectionsDesdeItems(packet.items);
+  if (!sections) return result;
 
-  for (const [kind, list] of Object.entries(packet.sections)) {
+  for (const [kind, list] of Object.entries(sections)) {
     if (!KIND_META[kind]) continue;
     for (const entry of list) {
       if (!entry?.text) continue;
