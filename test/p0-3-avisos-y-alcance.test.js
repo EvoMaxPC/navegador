@@ -157,3 +157,76 @@ test('nexo:stream-progress: un emisor ajeno no suma tokens de salida', async () 
   assert.deepEqual(resultado, { ok: true, skipped: 'otro-proveedor' }, 'mismo objeto que el descarte por texto vacío');
   assert.deepEqual(contadores(), antes, 'sin sumar tokens');
 });
+
+/* ---------------- 3. P0-3e · el aviso de nexo:prepare, en detalle ---------------- */
+
+test('nexo:prepare: el aviso ajeno no lleva host, URL ni texto del chat', async (t) => {
+  Date.now = () => ahoraReal() + desplazamiento;
+  t.after(() => relojReal());
+  avanzar(600_000); // ventana holgada: el aviso de este canal tiene que verse
+
+  const antes = delCanal('nexo:prepare').length;
+  const prompt = 'texto-del-chat-que-no-debe-salir';
+  await journal.ipcHandlers.get('nexo:prepare')(
+    { sender: { id: 1 } },
+    { prompt, url: 'https://chatgpt.com/backend-api/conversation', host: 'chatgpt.com' },
+  );
+
+  const emitidos = delCanal('nexo:prepare');
+  assert.equal(emitidos.length, antes + 1, 'un aviso');
+  const { entrada } = emitidos.at(-1);
+  assert.equal(entrada.title, `${PREFIJO}nexo:prepare`, 'sólo el nombre del canal');
+  assert.equal(entrada.detail, 'El emisor no es una IA reconocida.');
+  assert.deepEqual(entrada.meta, {}, 'sin metadatos');
+  const serializada = JSON.stringify(entrada);
+  assert.equal(/texto-del-chat|chatgpt|claude|ejemplo|https?:|www\.|backend-api/i.test(serializada), false,
+    'el aviso no lleva texto, host ni URL');
+});
+
+test('nexo:prepare: el freno deja un solo aviso cada 60 s', async (t) => {
+  Date.now = () => ahoraReal() + desplazamiento;
+  t.after(() => relojReal());
+  // Cada prueba nueva arranca más adelante que la anterior: el reloj se devuelve,
+  // pero las marcas del freno quedan en el proceso.
+  avanzar(700_000);
+
+  const antes = delCanal('nexo:prepare').length;
+  const pedir = () => journal.ipcHandlers.get('nexo:prepare')(
+    { sender: { id: 1 } },
+    { prompt: 'cuerpo de prueba', url: 'https://chatgpt.com/backend-api/conversation' },
+  );
+  await pedir();
+  avanzar(45_000); // dentro de los 60 s, fuera de los 30 s del registro general
+  await pedir();
+  assert.equal(delCanal('nexo:prepare').length, antes + 1, 'sólo el freno propio explica una sola entrada');
+});
+
+test('nexo:prepare: el emisor propio no deja aviso', async (t) => {
+  const emisor = pestana(PROPIA);
+  Date.now = () => ahoraReal() + desplazamiento;
+  t.after(() => relojReal());
+  avanzar(900_000);
+
+  const antes = delCanal('nexo:prepare').length;
+  const dentro = await journal.ipcHandlers.get('nexo:prepare')(emisor, {
+    prompt: 'hola, ¿me ayudás?',
+    url: 'https://chatgpt.com/backend-api/conversation',
+    site: 'chatgpt',
+  });
+  assert.equal(dentro.skipped, undefined, 'un emisor propio sí se media');
+  assert.equal(delCanal('nexo:prepare').length, antes, 'un emisor reconocido no se avisa');
+});
+
+test('nexo:prepare: el emisor ajeno no mueve ningún contador', async (t) => {
+  Date.now = () => ahoraReal() + desplazamiento;
+  t.after(() => relojReal());
+  avanzar(1_100_000);
+
+  const antes = contadores();
+  const fuera = await journal.ipcHandlers.get('nexo:prepare')(
+    { sender: { id: 1 } },
+    { prompt: 'cuerpo de prueba', url: 'https://chatgpt.com/backend-api/conversation' },
+  );
+  assert.deepEqual(fuera, { text: 'cuerpo de prueba', skipped: 'fuera-de-alcance' }, 'respuesta sin cambio');
+  assert.deepEqual(contadores(), antes, 'sin contar ni intervenir');
+});
