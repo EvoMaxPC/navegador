@@ -45,7 +45,15 @@ export function installAdvancedBrowser({
     busy = new Set(),
     recording = new Set();
   let saving = Promise.resolve();
+  /**
+   * ¿El pedido viene de la shell y de su marco principal?
+   *
+   * Un evento sin `sender` —o con un `sender` ya destruido— no tiene dueño al
+   * que comparar: antes se desreferenciaba `event.sender.mainFrame` y la
+   * excepción salía del handler. Ahora se rechaza con el mismo `false`.
+   */
   function trusted(event) {
+    if (!event?.sender || event.sender.isDestroyed?.()) return false;
     return (
       event.senderFrame === event.sender.mainFrame &&
       event.sender.getURL() === SHELL_URL &&
