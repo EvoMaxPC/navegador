@@ -358,6 +358,31 @@ function noteDiagnostic({ code, title, detail, severity = 'warn', meta = {}, key
   return entry;
 }
 
+/**
+ * Un pedido de la capa llegó desde un emisor que no es una IA reconocida.
+ *
+ * Sólo el nombre del canal y el hecho: ni host, ni URL, ni payload, ni texto.
+ * Como máximo un aviso por canal cada 60 s, para que una página que reintenta en
+ * bucle no llene el registro de Actividad.
+ *
+ * @param {string} canal canal IPC que descartó el pedido
+ */
+const avisosAlcance = new Map();
+const AVISO_ALCANCE_MS = 60_000;
+function avisarEmisorAjeno(canal) {
+  const ahora = Date.now();
+  if (ahora - (avisosAlcance.get(canal) || 0) < AVISO_ALCANCE_MS) return null;
+  avisosAlcance.set(canal, ahora);
+  return noteDiagnostic({
+    code: 'diag-emisor-ajeno',
+    key: `diag-emisor-ajeno|${canal}`,
+    severity: 'info',
+    title: `diag-emisor-ajeno: ${canal}`,
+    detail: 'El emisor no es una IA reconocida.',
+    meta: {},
+  });
+}
+
 function broadcast(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
@@ -1337,14 +1362,18 @@ function registerIpc() {
   ipcMain.handle('nexo:config', (event, payload = {}) => {
     // Un emisor sin proveedor —o que declara el host de otra pestaña— recibe la
     // configuración de su propia pestaña, que es la que ya ve hoy.
-    return configForTab(engine.configFor(alcanceDeLaCapa(event, payload?.host).host));
+    const alcance = alcanceDeLaCapa(event, payload?.host);
+    if (alcance.ajeno) avisarEmisorAjeno('nexo:config');
+    return configForTab(engine.configFor(alcance.host));
   });
 
   // La misma configuración, pero síncrona: el preload de cada pestaña la
   // necesita ANTES de que la página registre su propio `fetch`. Es una llamada
   // de milisegundos y se paga una sola vez por documento.
   ipcMain.on('nexo:config-sync', (event, payload = {}) => {
-    const host = alcanceDeLaCapa(event, payload?.host).host;
+    const alcance = alcanceDeLaCapa(event, payload?.host);
+    if (alcance.ajeno) avisarEmisorAjeno('nexo:config-sync');
+    const host = alcance.host;
     try {
       event.returnValue = engine ? configForTab(engine.configFor(host)) : null;
     } catch (error) {
@@ -1370,6 +1399,7 @@ function registerIpc() {
       !isAiHost(hostEmisor) ||
       Boolean(hostPedido && hostPedido !== hostEmisor) ||
       Boolean(sitePedido && sitePedido !== perfilEmisor);
+    if (alcanceAjeno) avisarEmisorAjeno('nexo:prepare');
     const result = alcanceAjeno
       ? { text: payload?.prompt, skipped: 'fuera-de-alcance' }
       : engine.prepare(event.sender.id, payload);
@@ -1452,6 +1482,8 @@ function registerIpc() {
     if (event.sender?.getType?.() !== 'webview' || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return { skipped: 'resultado-invalido' };
     }
+    // Mismo alcance que el cierre del turno: un emisor ajeno no mueve contadores.
+    if (alcanceDeLaCapa(event, payload?.host).ajeno) return { skipped: 'otro-proveedor' };
     if (payload.phase === 'started') return engine.onTurnStarted(event.sender.id, payload);
     const result = engine.onTurnResult(event.sender.id, payload);
     broadcast('nexo:stats-changed', statsSnapshot());
@@ -1461,6 +1493,8 @@ function registerIpc() {
     if (event.sender?.getType?.() !== 'webview' || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return { skipped: 'progreso-invalido' };
     }
+    // El progreso suma tokens de salida: un emisor ajeno no los mueve.
+    if (alcanceDeLaCapa(event, payload?.host).ajeno) return { ok: true, skipped: 'otro-proveedor' };
     const result = engine.onStreamProgress(event.sender.id, payload);
     broadcast('nexo:stats-changed', statsSnapshot());
     return result;
@@ -1469,7 +1503,9 @@ function registerIpc() {
     // Un cierre de turno que dice venir del host de otra pestaña se descarta con
     // el neutro que el motor ya devuelve para un host sin perfil: sin contar, sin
     // registro y sin efectos laterales.
-    if (alcanceDeLaCapa(event, payload?.host).ajeno) return { skipped: 'otro-proveedor' };
+    const alcance = alcanceDeLaCapa(event, payload?.host);
+    if (alcance.ajeno) avisarEmisorAjeno('nexo:stream-end');
+    if (alcance.ajeno) return { skipped: 'otro-proveedor' };
     payload = { ...payload, documentUrl: event.sender?.getURL?.() || '' };
     // Diagnóstico: si el texto llegó vacío, cualquier «respuesta contada» de acá
     // hacia abajo viene sin una sola palabra. Sin contenido: sólo números.

@@ -38,6 +38,10 @@ function configSync(event, host) {
 
 const streamEnd = (event, payload) => journal.ipcHandlers.get('nexo:stream-end')(event, payload);
 const stats = () => journal.ipcHandlers.get('nexo:stats')({ sender: { id: 1 } });
+// `stats.log` es la longitud del registro de Actividad (`main.js:1035`), no un
+// contador de la conversación: P0-3 escribe ahí un aviso por canal. Los
+// contadores son el resto del objeto y ésos son los que no pueden moverse.
+const contadores = () => { const { log, ...resto } = stats(); return resto; };
 
 const cierre = (host, text = 'Respuesta con texto suficiente.') => ({
   host, site: host === 'chatgpt.com' ? 'chatgpt' : 'claude',
@@ -54,12 +58,12 @@ test('nexo:config: un emisor del proveedor recibe la configuración de su host',
 
 test('nexo:config: una pestaña ajena que pide un proveedor recibe el neutro', async () => {
   const emisor = pestana('https://ejemplo.com/pagina');
-  const antes = stats();
+  const antes = contadores();
   const configuracion = await config(emisor, 'chatgpt.com');
   assert.equal(configuracion.site, NEUTRO.site, 'no se entrega el perfil pedido');
   assert.equal(configuracion.profiled, NEUTRO.profiled);
   assert.equal(configuracion.enabled, NEUTRO.enabled, 'la mediación global no cambia');
-  assert.deepEqual(stats(), antes, 'leer la configuración no mueve ningún contador');
+  assert.deepEqual(contadores(), antes, 'leer la configuración no mueve ningún contador');
 });
 
 test('nexo:config: el host del payload distinto del emisor da el neutro', async () => {
@@ -133,10 +137,10 @@ test('nexo:stream-end: un emisor del proveedor cierra el turno como siempre', as
 
 test('nexo:stream-end: una pestaña ajena no cuenta ni registra el cierre', async () => {
   const emisor = pestana('https://ejemplo.com/pagina');
-  const antes = stats();
+  const antes = contadores();
   const resultado = await streamEnd(emisor, cierre('chatgpt.com'));
   assert.deepEqual(resultado, { skipped: 'otro-proveedor' }, 'mismo neutro que un host sin perfil');
-  assert.deepEqual(stats(), antes, 'sin contar, sin tokens y sin registro');
+  assert.deepEqual(contadores(), antes, 'sin contar y sin tokens');
 });
 
 test('nexo:stream-end: el host del payload distinto del emisor no cuenta', async () => {
