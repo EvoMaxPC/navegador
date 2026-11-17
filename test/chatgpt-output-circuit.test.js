@@ -405,7 +405,7 @@ function assertOutcomeUi() {
 test('el panel muestra los tres contadores actuales y elimina el contador duplicado', () => {
   assert.match(shellHtml, /id="statTurnsCancelled">0<\/b><span>turnos cancelados<\/span>/);
   assert.match(shellHtml, /id="statTurnsFailed">0<\/b><span>turnos fallidos<\/span>/);
-  assert.match(shellHtml, /id="statTurnsPerformed">0<\/b><span>turnos realizados<\/span>/);
+  assert.match(shellHtml, /id="statTurnsPerformed">0<\/b><span>turnos sin resultado claro<\/span>/);
   assert.doesNotMatch(shellHtml, /id="statTurnsCompleted"/);
   assert.doesNotMatch(shellHtml, /<span>turnos completos<\/span>/);
 });

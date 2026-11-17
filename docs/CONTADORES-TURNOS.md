@@ -10,7 +10,7 @@ exclusivos, todos inicializados en **0** al crear Engine:
 | --- | --- | --- |
 | `turnsCancelled` | turnos cancelados | Stop real del usuario o cancelación explícita del proveedor |
 | `turnsFailed` | turnos fallidos | error de generación o fallo de la petición de conversación |
-| `turnsPerformed` | turnos realizados | interrupción sin confirmar el resultado |
+| `turnsPerformed` | turnos sin resultado claro | interrupción sin confirmar el resultado |
 
 Un `AbortError` o `net::ERR_ABORTED` **no prueba** por sí solo una cancelación del
 usuario: también puede proceder de navegación, recarga o del propio sitio.
@@ -111,7 +111,14 @@ de las **6 pruebas DPU recibidas del remoto**. No constituyen validación en viv
 
 El cuarto campo público se renombró a `turnsPerformed`, con etiqueta
 **turnos realizados** e ID `statTurnsPerformed`, en motor, IPC de estadísticas,
-shell y pruebas. Es el cambio de nombre solicitado; no se ha convertido en
+shell y pruebas.
+
+> P0-3g (etapa P0-4): el rótulo visible pasó de «turnos realizados» a «turnos
+> sin resultado claro» (`src/ui/shell/index.html:142`). El campo
+> `turnsPerformed`, su ID `statTurnsPerformed` y la lógica no cambian: sigue
+> contando sólo el desenlace `unknown` (`src/core/turnOutcome.js:4-7`), porque un
+> turno `completed` no tiene contador. El texto anterior de esta sección se
+> conserva tal cual, como registro de lo que decía en 0.1.17. Es el cambio de nombre solicitado; no se ha convertido en
 un total que duplique los otros tres resultados. La clasificación interna
 `unknown` se conserva para no cambiar las reglas de resultado ni los tokens.
 

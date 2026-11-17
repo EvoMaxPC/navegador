@@ -185,7 +185,7 @@ Métricas de sesión, con tres contadores de resultado de turno, expuestas por
 | `responses` | respuestas de la IA | cierre de stream (`nexo:stream-end`) o captura CDP |
 | `turnsCancelled` | turnos cancelados de ChatGPT | Stop confirmado por un gesto real o señal explícita del proveedor |
 | `turnsFailed` | turnos fallidos de ChatGPT | error de generación o petición correlacionada fallida |
-| `turnsPerformed` | turnos realizados de ChatGPT | interrupción sin confirmación; red sin cuerpo |
+| `turnsPerformed` | turnos sin resultado claro de ChatGPT (antes «turnos realizados») | interrupción sin confirmación; red sin cuerpo |
 | `inputTokens` | tokens del mensaje | `countTokensForProvider` sobre el texto localizado (BPE local para GPT) |
 | `outputTokens` | tokens de la respuesta | `countOutputTokens` sobre el texto **real** leído (BPE local para GPT): lo entrega la capa al cerrar el stream o CDP al leer el cuerpo. Si la respuesta se contó por la red —sin texto— y el texto aparece después, sus tokens se suman a **esa** respuesta (no se cuenta otra). |
 | `interventions` | actividad de la conversación | +1 al contar un mensaje y +1 al contar una respuesta |
